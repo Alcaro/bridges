@@ -324,11 +324,6 @@ SOURCES_DEFAULT := $(SOURCES)
 OBJS += $(foreach domain,$(sort $(DOMAINS)),$(call OBJMANGLE,$(domain),$(wildcard $(SOURCES_$(domain)))))
 OBJS += $(OBJS_LATE)
 
-obj/build.o: .force | obj
-	$(ECHOQ) CC arlib/build.c
-	$(Q)$(CC) $(TRUE_CFLAGS) -c arlib/build.c -o $@
-OBJS += obj/build.o
-
 all: $(OUTNAME)
 arlib-default2: $(OUTNAME)
 $(OUTNAME): $(OBJS)
