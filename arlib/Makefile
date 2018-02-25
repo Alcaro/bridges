@@ -134,16 +134,17 @@ ifneq ($(DEBUG),1)
   endif
 endif
 
+ifeq ($(DEBUG),1)
+  CFLAGS += -g -DDEBUG
+endif
 ifneq ($(OPT),0)
-  CONF_CFLAGS += $(OPTFLAGS)
+  #OPT=1 DEBUG=1 should prioritize optimization over debugging; OPT=1 DEBUG=1 then 'strip' should be identical to OPT=1 DEBUG=0
+  CONF_CFLAGS += $(OPTFLAGS) -UDEBUG
   CONF_LFLAGS += $(OPTLFLAGS)
   ifeq ($(OPT),spd)
     CONF_CFLAGS += -O3
   endif
   OBJNAME := $(OBJNAME)-opt
-endif
-ifeq ($(DEBUG),1)
-  CFLAGS += -g -DDEBUG
 endif
 
 ifeq ($(PROFILE),gen)

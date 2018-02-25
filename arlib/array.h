@@ -821,10 +821,6 @@ public:
 	T& operator[](size_t n)
 	{
 		if (n >= items.size()) debug_or_print();
-		while (n >= items.size())
-		{
-			items.append(new T());
-		}
 		return *items[n];
 	}
 	T& append()
