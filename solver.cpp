@@ -20,6 +20,7 @@ class solver {
 	                       // ocean tiles have this set too; for them, left and right are always equal, as are up/down
 	
 	array<int> towalk;
+	array<uint8_t> towalk_bits;
 	int n_towalk;
 	
 	//Sets state[ix] to newbits, and updates the corresponding bits for the connecting islands.
@@ -130,17 +131,20 @@ class solver {
 		return true;
 	}
 	
-	//Returns whether the map is disjoint, i.e. some islands aren't connected to each other.
+	//Returns whether the given two tiles are disjoint, i.e. you cannot reach one from the other by following possible existing bridges.
 	bool is_disjoint(int bank)
 	{
+//#error stop upon reaching a specific tile
+//#error then start at both simultaneously (setting 0x1000/0x2000 depending on source), stop when reaching anything reachable from the other
+//#error then keep count of how many in towalk from each one, running until one empties (unless they reach each other first)
+//#error use a separate buffer, memset it (only one, rather than one per bank)
 		int banksize = bank*size;
 		
-		n_towalk = 1;
-		state[banksize + not_ocean] |= 0x1000;
-		towalk[0] = not_ocean;
+		memset(towalk_bits.ptr(), 0, sizeof(uint8_t)*towalk_bits.size());
 		
-		//TODO: tracking from which direction a tile was entered, and not following that path
-		// backwards just to find an already-visited tile, could improve performance a fair bit
+		n_towalk = 1;
+		towalk_bits[not_ocean] = 9;
+		towalk[0] = not_ocean;
 		
 		int visited = 0;
 		while (n_towalk)
@@ -149,79 +153,74 @@ class solver {
 			visited++;
 			
 			int flags = state[banksize + ix];
+			int sourcedir = towalk_bits[ix]; // 1 - don't go right; 2 - don't go up; 3 - don't go left; 4 - don't go down; 9 - go anywhere
+			
+			flags &= ~(0x0110>>1 << sourcedir);
 			
 			//unrolled for performance
 			
 			//right
-			if (flags & 0x0110)
+			if ((flags & 0x0110))
 			{
 				int ix2 = ix;
 				do {
 					ix2 += 1;
 				} while (map[ix2] == -1);
 				
-				if ((state[banksize + ix2] & 0x1000) == 0)
+				if (towalk_bits[ix2] == 0)
 				{
-					state[banksize + ix2] |= 0x1000;
+					towalk_bits[ix2] = 3;
 					towalk[n_towalk++] = ix2;
 				}
 			}
 			
 			//up
-			if (flags & 0x0220)
+			if ((flags & 0x0220))
 			{
 				int ix2 = ix;
 				do {
 					ix2 += -width;
 				} while (map[ix2] == -1);
 				
-				if ((state[banksize + ix2] & 0x1000) == 0)
+				if (towalk_bits[ix2] == 0)
 				{
-					state[banksize + ix2] |= 0x1000;
+					towalk_bits[ix2] = 4;
 					towalk[n_towalk++] = ix2;
 				}
 			}
 			
 			//left
-			if (flags & 0x0440)
+			if ((flags & 0x0440))
 			{
 				int ix2 = ix;
 				do {
 					ix2 += -1;
 				} while (map[ix2] == -1);
 				
-				if ((state[banksize + ix2] & 0x1000) == 0)
+				if (towalk_bits[ix2] == 0)
 				{
-					state[banksize + ix2] |= 0x1000;
+					towalk_bits[ix2] = 1;
 					towalk[n_towalk++] = ix2;
 				}
 			}
 			
 			//down
-			if (flags & 0x0880)
+			if ((flags & 0x0880))
 			{
 				int ix2 = ix;
 				do {
 					ix2 += width;
 				} while (map[ix2] == -1);
 				
-				if ((state[banksize + ix2] & 0x1000) == 0)
+				if (towalk_bits[ix2] == 0)
 				{
-					state[banksize + ix2] |= 0x1000;
+					towalk_bits[ix2] = 2;
 					towalk[n_towalk++] = ix2;
 				}
 			}
 		}
 		
 		if (visited != n_islands) return true;
-		
-		int ix = size;
-		do
-		{
-			ix--;
-			int ix2 = banksize + ix;
-			state[ix2] &= 0x0FFF;
-		} while (ix);
 		
 		return false;
 	}
@@ -249,7 +248,6 @@ class solver {
 	
 	int solve_rec(int depthat, int maxdepth)
 	{
-		if (is_disjoint(depthat)) return 0;
 		if (finished(depthat)) return 1;
 		
 		if (depthat == maxdepth) return -1;
@@ -280,9 +278,19 @@ class solver {
 						if (flags & dirbit)
 						{
 							copy_bank(depthat+1, depthat);
-							int ret;
-							if (!set_state(ix_next, flags & (set_mask | dirbit))) ret = 0;
-							else ret = solve_rec(depthat+1, maxdepth);
+							int ret = 1;
+							//assuming a bridge exists can ban a crossing bridge and make it disjoint
+							//assuming a bridge exists can require others to exist or not exist, making it disjoint
+							//for example (* being ocean):
+							// 1*2
+							//1  3
+							//1  3
+							// 2 3
+							//assume there is no bridge at the *. then it must be vertical, which isolates the 1s at the left.
+							if (ret == 1 && !set_state(ix_next, flags & (set_mask | dirbit))) ret = 0;
+							if (ret == 1 && is_disjoint(depthat+1)) ret = 0;
+							if (ret == 1) ret = solve_rec(depthat+1, maxdepth);
+							
 							if (ret == -1) n_solvable = -99;
 							if (ret == 0)
 							{
@@ -292,11 +300,14 @@ class solver {
 								if (is_disjoint(depthat)) return 0;
 								if (finished(depthat)) return 1;
 							}
-							if (ret == 1) n_solvable++;
+							if (ret == 1)
+							{
+								n_solvable++;
+								if (n_solvable > 1) return 2;
+							}
 							if (ret == 2) return 2;
 						}
 					}
-					if (n_solvable > 1) return 2;
 					
 					if (!(state[ix] & (0x0111<<dir))) return 0; // if all options are impossible, drop it
 				}
@@ -325,6 +336,7 @@ public:
 		map.resize(size);
 		state.resize(size);
 		towalk.resize(size);
+		towalk_bits.resize(size);
 		
 		for (int y=0;y<height;y++)
 		for (int x=0;x<width;x++)
@@ -522,14 +534,14 @@ test("solver", "", "solver")
 		"22\n" /* */ "10\n"
 		"22\n" /* */ "10\n"
 	));
-	testcall(test_one(0, // try to confuse the island tracker (not sure if it gets past the fill-mandatory-bridges function)
+	testcall(test_one(0, // not sure if this enters the fill-mandatory-bridges function, but it has caught a few bugs
 		"1 2  \n" /* */ "1 0  \n"
 		" 1 1 \n" /* */ " 0 0 \n"
 		"14441\n" /* */ "11110\n"
 		" 1 1 \n" /* */ " 0 0 \n"
 		"  2 1\n" /* */ "  1 0\n"
 	));
-	testcall(test_one(0, // a few cycles too, must confuse the island tracker
+	testcall(test_one(0, // make islands trickier
 		"4    4 \n" /* */ "2    0 \n"
 		"  4 4  \n" /* */ "  2 0  \n"
 		"    682\n" /* */ "    220\n"
@@ -588,14 +600,19 @@ test("solver", "", "solver")
 		"33\n"
 		"22\n"
 	));
-	testcall(test_error(1, -1, // this too
+	testcall(test_error(2, 2, // this too
 		" 31\n"
 		"272\n"
 		"131\n"
 	));
-	testcall(test_error(2, 2,
-		" 31\n"
-		"272\n"
-		"131\n"
+	testcall(test_error(3, 2, // requires high depth
+		"232\n"
+		"343\n"
+		"232\n"
+	));
+	testcall(test_error(3, 2, // takes forever
+		"2332\n"
+		"3443\n"
+		"2332\n"
 	));
 }

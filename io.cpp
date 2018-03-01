@@ -65,11 +65,11 @@ int main(int argc, char** argv)
 		int nsolv = 0;
 		int nunsolv = 0;
 		int nmultisolv = 0;
-		for (int side=3;side<10;side++)
+		for (int side=3;side<9;side++)
 		{
 			for (int i=0;i<(vg ? 1000 : 10000);i++)
 			{
-				if (i%(vg ? 100 : 1000) == 0) { printf("%i %i     \r", side, i); fflush(stdout); }
+				if (i%(vg ? 1 : 1000) == 0) { printf("%i %i     \r", side, i); fflush(stdout); }
 				int minislands = side*2;
 				int maxislands = side*side/2;
 				int islands = minislands + rand()%(maxislands+1-minislands);
@@ -77,9 +77,9 @@ int main(int argc, char** argv)
 				
 				int result;
 				int steps;
-				map_solve(map, &result, 5, &steps);
+				map_solve(map, &result, 4, &steps);
 				
-				if (steps >= 3 && result == 1)
+				if (result == 1 && steps >= 3)
 				//if (steps >= 5)
 				{
 					puts("MULTISTEP "+tostring(steps)+" "+tostring(result));
@@ -98,7 +98,7 @@ int main(int argc, char** argv)
 			}
 		}
 		uint64_t end = time_ms_ne();
-		printf("%i solvable, %i unsolvable, %i multiple solutions, took %u ms",
+		printf("%i solvable, %i unsolvable, %i multiple solutions, took %u ms\n",
 		       nsolv, nunsolv, nmultisolv, (unsigned)(end-start));
 		
 		return 0;
@@ -108,7 +108,6 @@ int main(int argc, char** argv)
 	window* wnd = window_create(
 		view = widget_create_viewport(640, 480)
 		);
-	//wnd->set_onclose(&window::exit_runloop);
 	wnd->show();
 	
 	aropengl gl;
@@ -143,7 +142,7 @@ int main(int argc, char** argv)
 	pressed_keys_init();
 	
 	game* g = game::create();
-	static uint32_t pixels[640*480]; // static to keep stack frames small
+	static uint32_t pixels[640*480]; // static to keep the stack frame small
 	
 	int lastkeys = 0;
 	while (wnd->is_visible())
@@ -159,6 +158,7 @@ int main(int argc, char** argv)
 		}
 		lastkeys = keys;
 		g->run(pixels);
+		
 		gl.ClearColor(1,0,1,0);
 		gl.Clear(GL_COLOR_BUFFER_BIT);
 		
@@ -172,9 +172,9 @@ int main(int argc, char** argv)
 		gl.End();
 		
 		gl.swapBuffers();
-		usleep(10*1000); // my computer seems unable to vsync, add a delay so it doesn't waste cpu on running at 600fps
-		// though it still wastes uncomfortably much cpu.
 		
 		runloop::global()->step();
 	}
+	
+	return 0;
 }
