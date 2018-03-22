@@ -1,6 +1,6 @@
 #object filename structure:
 #obj/RULE___OBJNAME___PATH.o
-#RULE is the set of build flags for this file, nearly always DEFAULT
+#RULE is the set of build flags for this file, probably DEFAULT
 #OBJNAME is the OBJNAME= make parameter, or a default value
 #PATH is the source filename, including extension, relative to project root, with slashes replaced with double underscore
 #example: obj/DEFAULT___linux___arlib__file-posix.cpp.o
@@ -39,7 +39,7 @@ Q = @
 ECHOQ = @echo
 else
 Q =
-#TODO: windows version
+#TODO: windows version - echo works on both, but true doesn't
 ECHOQ = @true
 endif
 
@@ -50,10 +50,10 @@ ifneq (,$(findstring check,$(MAKECMDGOALS)))
   SELFTEST = 1
 endif
 
+ARTYPE ?= exe
 ARGUI ?= 0
 AROPENGL ?= 0
 AROPENGL_D3DSYNC ?= 1
-ARIMAGE ?= 0
 ARTHREAD ?= 0
 ARSANDBOX ?= 0
 ARWUTF ?= 0
@@ -98,7 +98,12 @@ EXESUFFIX =
 CONF_CXXFLAGS += $(CONF_CFLAGS)
 
 ifeq ($(OS),linux)
-  CONF_LFLAGS += -ldl
+  CONF_LFLAGS += -ldl -Wl,-z,relro,-z,now,--no-undefined
+  ifeq ($(ARTYPE),dll)
+    CONF_CFLAGS += -fPIC
+    CONF_LFLAGS += -shared
+    EXESUFFIX = .so
+  endif
   ifeq ($(ARTHREADS),1)
     CONF_CFLAGS += -pthread
     CONF_LFLAGS += -pthread
@@ -206,7 +211,7 @@ ifeq ($(ARGUI),1)
     CONF_CFLAGS += $(shell pkg-config --cflags gtk+-3.0)
     CONF_LFLAGS += -ldl -lX11 $(shell pkg-config --libs gtk+-3.0)
     ifneq ($(OPT),0)
-      # don't know if this has ever caught anything except NULLs, but they do no harm on debug
+      # don't know if this has ever caught anything except NULLs, but they're harmless on debug
       # but they do waste space on release builds.
       CONF_CFLAGS += -DG_DISABLE_CAST_CHECKS
     endif
@@ -260,6 +265,7 @@ ifeq ($(ARSOCKET),1)
     endif
   endif
   
+  #TODO: allow using multiple at once, the tests could use that
   ifeq ($(ARSOCKET_SSL),no)
     #no SSL
     #socketssl will still be available at compile time, but fails linking
@@ -300,8 +306,6 @@ ifeq ($(OS),windows)
   TRUE_LFLAGS += -static-libgcc 
 endif
 
-.force:
-
 #On Windows, cleaning up the object directory is expected to be done with 'del /q obj\*' in a batch script.
 clean:
 	rm -f obj/*
@@ -322,8 +326,10 @@ obj:
 DOMAINS += DEFAULT ARLIB NOWARN
 
 SOURCES_DEFAULT := $(SOURCES)
-OBJS += $(foreach domain,$(sort $(DOMAINS)),$(call OBJMANGLE,$(domain),$(wildcard $(SOURCES_$(domain)))))
-OBJS += $(OBJS_LATE)
+wild2 = $(or $(wildcard $(word)),$(word))
+OBJS += $(foreach domain,$(sort $(DOMAINS)),$(call OBJMANGLE,$(domain),$(foreach word,$(SOURCES_$(domain)),$(wild2))))
+OBJS := $(sort $(OBJS))
+OBJS += $(sort $(OBJS_LATE))
 
 all: $(OUTNAME)
 arlib-default2: $(OUTNAME)
@@ -342,9 +348,9 @@ test: obj/arlibtest$(EXESUFFIX)
 	$(TESTRUNNER) obj/arlibtest$(EXESUFFIX)
 check: test
 test-all: obj/arlibtest$(EXESUFFIX)
-	$(TESTRUNNER) obj/arlibtest$(EXESUFFIX) +
+	$(TESTRUNNER) obj/arlibtest$(EXESUFFIX) --all
 test-all-twice: obj/arlibtest$(EXESUFFIX)
-	$(TESTRUNNER) obj/arlibtest$(EXESUFFIX) + +
+	$(TESTRUNNER) obj/arlibtest$(EXESUFFIX) --all --twice
 endif
 
 

@@ -1,5 +1,5 @@
 #include "game.h"
-#include <valgrind/valgrind.h>
+#include "arlib/deps/valgrind/valgrind.h"
 
 #include <X11/Xlib.h>
 #include <X11/keysym.h>
@@ -9,16 +9,14 @@ static int scans[6];
 
 static void pressed_keys_init()
 {
-	Display* display = window_x11.display;
-	
 	int minkc;
 	int maxkc;
-	XDisplayKeycodes(display, &minkc, &maxkc);
+	XDisplayKeycodes(window_x11.display, &minkc, &maxkc);
 	
 	int sym_per_code;
-	KeySym* sym = XGetKeyboardMapping(display, minkc, maxkc-minkc+1, &sym_per_code);
+	KeySym* sym = XGetKeyboardMapping(window_x11.display, minkc, maxkc-minkc+1, &sym_per_code);
 	
-	//We want to process this backwards, so the unshifted state is the one that stays in the array.
+	// process this backwards, so the unshifted state is the one that stays in the array
 	unsigned i = sym_per_code*(maxkc-minkc);
 	while (i--)
 	{
@@ -65,7 +63,7 @@ int main(int argc, char** argv)
 		int nsolv = 0;
 		int nunsolv = 0;
 		int nmultisolv = 0;
-		for (int side=3;side<9;side++)
+		for (int side=3;side<10;side++)
 		{
 			for (int i=0;i<(vg ? 1000 : 10000);i++)
 			{
@@ -77,7 +75,7 @@ int main(int argc, char** argv)
 				
 				int result;
 				int steps;
-				map_solve(map, &result, 4, &steps);
+				map_solve(map, &result, 3, &steps);
 				
 				if (result == 1 && steps >= 3)
 				//if (steps >= 5)
@@ -144,26 +142,49 @@ int main(int argc, char** argv)
 	game* g = game::create();
 	static uint32_t pixels[640*480]; // static to keep the stack frame small
 	
-	int lastkeys = 0;
+	time_t lastfps = time(NULL);
+	int fps = 0;
+	
 	while (wnd->is_visible())
 	{
 //static int l=0;l++;if(l==120)break;
-		int keys = pressed_keys();
-		for (int i=0;i<6;i++)
+		if (wnd->is_active())
 		{
-			if (keys & ~lastkeys & (1<<i))
+			game::input in;
+			in.keys = pressed_keys();
+			
+			Window ignorew;
+			int ignorei;
+			unsigned flags;
+			XQueryPointer(window_x11.display, view->get_parent(),
+			              &ignorew, &ignorew, &ignorei, &ignorei,
+			              &in.mousex, &in.mousey, &flags);
+			if (in.mousex >= 0 && in.mousey >= 0 && in.mousex < 640 && in.mousey < 480)
 			{
-				g->key((game::key_t)i);
+				in.mouseclick = (flags & Button1Mask);
 			}
+			else
+			{
+				in.mousex = -1;
+				in.mousey = -1;
+			}
+			
+			g->run(in, pixels);
+			gl.TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 640, 480, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, pixels);
+			
+			time_t newtime = time(NULL);
+			if (newtime != lastfps)
+			{
+				//printf("%ifps\n", fps);
+				lastfps = newtime;
+				fps = 0;
+			}
+			fps++;
 		}
-		lastkeys = keys;
-		g->run(pixels);
 		
-		gl.ClearColor(1,0,1,0);
-		gl.Clear(GL_COLOR_BUFFER_BIT);
-		
-		gl.TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 640, 480, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, pixels);
-		
+		//redraw the texture, to avoid glitches if we're sent an Expose event
+		//no point reuploading, though
+		//and no point caring about whether the event was Expose or not, just redraw
 		gl.Begin(GL_TRIANGLE_STRIP);
 		gl.TexCoord2f(0,            0          ); gl.Vertex3i(0,   480, 0);
 		gl.TexCoord2f(640.0/1024.0, 0          ); gl.Vertex3i(640, 480, 0);
@@ -173,7 +194,7 @@ int main(int argc, char** argv)
 		
 		gl.swapBuffers();
 		
-		runloop::global()->step();
+		runloop::global()->step(!wnd->is_active());
 	}
 	
 	return 0;

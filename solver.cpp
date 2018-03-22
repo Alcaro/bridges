@@ -1,6 +1,34 @@
-#define MARCH2018
 #include "game.h"
 
+//#error
+//  after finding a solution, save it somewhere, then make only contradictory assumptions
+//  if that yields any other solution, return 2
+//#error
+//  after implementing the above, switch to depth-first search
+//#error
+//  find a suitable data structure for representing a graph, supporting the operations
+//    - init; creates all vertices and edges (maximum 4 edges per vertex)
+//    - join; combines two vertices into one
+//    - query; returns all edges from a vertex
+//    - lookback; tells which two nodes an edge originally connected to
+//#error
+//  start with combining all vertices with known-existing bridges
+//  from an arbitrary starting point, follow arbitrary edges without repetition, until dead end or reaching the original vertex
+//  if original vertex, combine all visited vertices into one
+//  if dead end, either our end vertex has exactly one edge, or we visited it twice
+//  if former, mark the bridge corresponding to that edge known to exist
+//  if latter, we walked in a loop; follow the same path until reaching that vertex the first time, then union all remaining visitables
+//  after combining vertices, if that group now has exactly one edge, mark that bridge known to exist
+//  terminate the algorithm once there's only one vertex left
+//  or if any vertex has zero edges, in which case the map is impossible
+//#error
+//  make sure that [1]s, which can only be leaves, don't waste time - remove them all, along with their edges
+//#error
+//  hardcode that if there are three or more islands, two 2s can't be connected with two bridges, and two 1s can't have any
+//  probably makes it faster
+//  only needs to be done once
+
+namespace {
 class solver {
 	int width;
 	int height;
@@ -18,6 +46,8 @@ class solver {
 	                       // 1<<12 is used to check whether all islands are connected; outside that function, always false
 	                       // 1<<(13..15) are completely unused
 	                       // ocean tiles have this set too; for them, left and right are always equal, as are up/down
+	
+	array<uint16_t> idx_next; // idx_next[idx*4 + dir] is the index to the next island in that direction, or -1 if nonexistent
 	
 	array<int> towalk;
 	array<uint8_t> towalk_bits;
@@ -71,7 +101,7 @@ class solver {
 		return true;
 	}
 	
-	//Returns popcount of the middle nybble, ignoring the other bits.
+	//Returns popcount of the middle eight bits, ignoring the other eight.
 	__attribute__((always_inline)) int popcount_mid(uint16_t in)
 	{
 		uint64_t pack = 0x4332322132212110ULL;
@@ -131,13 +161,11 @@ class solver {
 		return true;
 	}
 	
-	//Returns whether the given two tiles are disjoint, i.e. you cannot reach one from the other by following possible existing bridges.
+	//Returns whether the given map is disjoint, i.e. there is at least one pair of tiles that can't be reached from the other.
+	//Unfortunately, due to assuming anything leading to a few more tiles being known, simplifying to 'check if these two points are connected'
+	// is impossible.
 	bool is_disjoint(int bank)
 	{
-//#error stop upon reaching a specific tile
-//#error then start at both simultaneously (setting 0x1000/0x2000 depending on source), stop when reaching anything reachable from the other
-//#error then keep count of how many in towalk from each one, running until one empties (unless they reach each other first)
-//#error use a separate buffer, memset it (only one, rather than one per bank)
 		int banksize = bank*size;
 		
 		memset(towalk_bits.ptr(), 0, sizeof(uint8_t)*towalk_bits.size());
@@ -162,10 +190,7 @@ class solver {
 			//right
 			if ((flags & 0x0110))
 			{
-				int ix2 = ix;
-				do {
-					ix2 += 1;
-				} while (map[ix2] == -1);
+				int ix2 = idx_next[ix*4 + 0];
 				
 				if (towalk_bits[ix2] == 0)
 				{
@@ -177,10 +202,7 @@ class solver {
 			//up
 			if ((flags & 0x0220))
 			{
-				int ix2 = ix;
-				do {
-					ix2 += -width;
-				} while (map[ix2] == -1);
+				int ix2 = idx_next[ix*4 + 1];
 				
 				if (towalk_bits[ix2] == 0)
 				{
@@ -192,10 +214,7 @@ class solver {
 			//left
 			if ((flags & 0x0440))
 			{
-				int ix2 = ix;
-				do {
-					ix2 += -1;
-				} while (map[ix2] == -1);
+				int ix2 = idx_next[ix*4 + 2];
 				
 				if (towalk_bits[ix2] == 0)
 				{
@@ -207,10 +226,7 @@ class solver {
 			//down
 			if ((flags & 0x0880))
 			{
-				int ix2 = ix;
-				do {
-					ix2 += width;
-				} while (map[ix2] == -1);
+				int ix2 = idx_next[ix*4 + 3];
 				
 				if (towalk_bits[ix2] == 0)
 				{
@@ -319,8 +335,6 @@ class solver {
 		return -1;
 	}
 	
-public:
-	
 	//Takes a string of the form " 2 \n271\n 2 \n". Calculates width and height automatically.
 	//Must be rectangular; trailing spaces must exist on all lines, and a trailing linebreak must exist. Non-square inputs are fine.
 	void init(cstring inmap)
@@ -334,6 +348,7 @@ public:
 		n_islands = 0;
 		
 		map.resize(size);
+		idx_next.resize(size*4);
 		state.resize(size);
 		towalk.resize(size);
 		towalk_bits.resize(size);
@@ -341,24 +356,33 @@ public:
 		for (int y=0;y<height;y++)
 		for (int x=0;x<width;x++)
 		{
+			int idx = y*width + x;
+			
 			char mapchar = inmap[y*(width+1) + x];
 			int8_t neighbors;
 			if (mapchar == ' ') neighbors = -1;
 			else neighbors = mapchar-'0';
-			map[y*width + x] = neighbors;
+			map[idx] = neighbors;
 			
-			state[y*width + x] = 0x000F; // all tiles can have 0 bridges towards anywhere, including oceans and things pointing outside the map
+			state[idx] = 0x000F; // all tiles can have 0 bridges towards anywhere, including oceans and things pointing outside the map
+			idx_next[idx*4 + 0] = -1;
+			idx_next[idx*4 + 1] = -1;
+			idx_next[idx*4 + 2] = -1;
+			idx_next[idx*4 + 3] = -1;
+			
 			if (neighbors != -1)
 			{
 				n_islands++;
 				
-				not_ocean = y*width + x;
+				not_ocean = idx;
 				for (int x2=x-1;x2>=0;x2--)
 				{
 					if (map[y*width + x2] != -1)
 					{
 						state[y*width + x2] |= 0x0111; // right
 						state[y*width + x ] |= 0x0444; // left
+						idx_next[(y*width + x2)*4 + 0] = y*width + x; // right
+						idx_next[(y*width + x )*4 + 2] = y*width + x2; // left
 						x2++;
 						while (x2 != x)
 						{
@@ -374,6 +398,8 @@ public:
 					{
 						state[y2*width + x] |= 0x0888; // down
 						state[y *width + x] |= 0x0222; // up
+						idx_next[(y2*width + x)*4 + 3] = y *width + x; // down
+						idx_next[(y *width + x)*4 + 1] = y2*width + x; // up
 						y2++;
 						while (y2 != y)
 						{
@@ -456,6 +482,8 @@ public:
 		puts(finished(bank) ? "finished" : "unfinished");
 	}
 	
+public:
+	
 	solver(cstring map, int* perror, int maxdepth, int* neededdepth, string* psolution)
 	{
 		init(map);
@@ -464,6 +492,7 @@ public:
 		*psolution = solution();
 	}
 };
+}
 
 string map_solve(cstring map, int* error, int maxdepth, int* neededdepth)
 {
@@ -526,6 +555,18 @@ test("solver", "", "solver")
 		"2 2\n" /* */ "0 0\n"
 		" 2 \n" /* */ " 0 \n"
 	));
+	testcall(test_one(0, // the fabled zero
+		"    \n" /* */ "    \n"
+		"  0 \n" /* */ "  0 \n"
+		"    \n" /* */ "    \n"
+		"    \n" /* */ "    \n"
+	));
+	testcall(test_one(0, // make sure the smallest possible maps remain functional
+		"11\n" /* */ "10\n"
+	));
+	testcall(test_one(0,
+		"22\n" /* */ "20\n"
+	));
 	testcall(test_one(1, // requires guessing
 		"2 2\n" /* */ "1 0\n"
 		"222\n" /* */ "110\n"
@@ -541,7 +582,7 @@ test("solver", "", "solver")
 		" 1 1 \n" /* */ " 0 0 \n"
 		"  2 1\n" /* */ "  1 0\n"
 	));
-	testcall(test_one(0, // make islands trickier
+	testcall(test_one(0, // bigger and nastier
 		"4    4 \n" /* */ "2    0 \n"
 		"  4 4  \n" /* */ "  2 0  \n"
 		"    682\n" /* */ "    220\n"
@@ -571,6 +612,7 @@ test("solver", "", "solver")
 		"2     3    2\n" /* */ "1     1    0\n"
 	));
 	// these require nested guesses (created by the game generator)
+	// (humans can solve them all without nested guesses, by knowing that 1s can't combine two islands)
 	testcall(test_one(2,
 		"2  1\n" /* */ "0  0\n"
 		"3233\n" /* */ "1110\n"
@@ -594,6 +636,9 @@ test("solver", "", "solver")
 		" 112\n" /* */ " 000\n"
 		"32 3\n" /* */ "11 0\n"
 		"2  1\n" /* */ "1  0\n"
+	));
+	testcall(test_one(0, // this is technically solved immediately
+		"\n" /* */ "\n"
 	));
 	
 	testcall(test_error(1, 2, // has multiple solutions

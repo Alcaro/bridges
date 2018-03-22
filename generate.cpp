@@ -72,7 +72,7 @@ static bool add_island(string& ret, int width, int y, int x)
 		do {
 			for (int dir=0;dir<4;dir++)
 			{
-				if ((allowed & (1<<dir)) && rand()%4 == 0)
+				if ((allowed & (1<<dir)) && rand()%100 < 50)
 				{
 					int nbridge = (rand()%2 ? 2 : 1);
 					fill_until(ret, width, y, x, dir, '#', nbridge);
@@ -100,7 +100,7 @@ string map_generate(int width, int height, int islands)
 	//space - empty
 	//0-8 - number of bridges
 	//# - the intended solution has a bridge here
-	//. - can place island here; possible bridges may exist in all four directions
+	//. - can place island here, unless the path to the island is blocked by a #
 	//\n - line separator
 	
 	add_island(ret, width, rand()%height, rand()%width);
