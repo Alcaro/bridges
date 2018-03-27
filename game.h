@@ -15,11 +15,6 @@
 //Runtime: O(s^4d), where s is width*height and d is maxdepth. (Probably less, but I can't prove it.)
 //Higher depth can solve more maps, but maps needing high depth are also hard to solve for humans.
 //Memory use: O(s*d)
-
-//TODO: create more tile types:
-//- islands accepting an arbitrary number of bridges
-//- castles; every island must be connected to a castle, but they may not be connected to each other
-//- reef; can't build bridges across that
 string map_solve(cstring map, int* error = NULL, int maxdepth = 2, int* neededdepth = NULL);
 
 //May return fewer islands than requested if all tiles are taken by islands or bridges.
@@ -27,7 +22,8 @@ string map_solve(cstring map, int* error = NULL, int maxdepth = 2, int* neededde
 string map_generate(int width, int height, int islands);
 
 
-extern const char * const game_maps[30];
+extern const char * const game_maps[];
+
 class game : nocopy {
 public:
 	

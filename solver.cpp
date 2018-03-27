@@ -18,7 +18,8 @@
 //  if dead end, either our end vertex has exactly one edge, or we visited it twice
 //  if former, mark the bridge corresponding to that edge known to exist
 //  if latter, we walked in a loop; follow the same path until reaching that vertex the first time, then union all remaining visitables
-//  after combining vertices, if that group now has exactly one edge, mark that bridge known to exist
+//  after combining vertices, if that group now has exactly one edge, mark that bridge known to exist,
+//    then combine the islands and check if the new one has one edge; if yes, repeat
 //  terminate the algorithm once there's only one vertex left
 //  or if any vertex has zero edges, in which case the map is impossible
 //#error
@@ -424,6 +425,7 @@ class solver {
 	//If 1, you may call solution().
 	int solve(int maxdepth, int* neededdepth)
 	{
+		if (neededdepth) *neededdepth = 0;
 		state.reserve(size*(maxdepth+1));
 		
 		for (int ix=0;ix<size;ix++)
@@ -486,7 +488,16 @@ public:
 	
 	solver(cstring map, int* perror, int maxdepth, int* neededdepth, string* psolution)
 	{
-		init(map);
+		if (map) init(map);
+		else n_islands = 0;
+		
+		if (n_islands == 0)
+		{
+			if (perror) *perror = 1;
+			if (neededdepth) *neededdepth = 0;
+			*psolution = map;
+			return;
+		}
 		int error = solve(maxdepth, neededdepth);
 		if (perror) *perror = error;
 		*psolution = solution();
@@ -539,21 +550,22 @@ static void test_error(int maxdepth, int exp, cstring map)
 
 test("solver", "", "solver")
 {
-	testcall(test_one(0, // just something simple
+	testcall(test_one(0, // the outer islands only connect to one island each, so the map is trivial
 		" 2 \n" /* */ " 0 \n"
 		"271\n" /* */ "210\n"
 		" 2 \n" /* */ " 0 \n"
 	));
-	testcall(test_one(0, // requires multiple passes
+	testcall(test_one(0, // a few islands are immediately obvious, the others show up once x
 		" 1  3\n" /* */ " 1  0\n"
 		"2 1  \n" /* */ "1 0  \n"
 		"2  23\n" /* */ "1  10\n"
 	));
-	testcall(test_one(0, // bridges may not cross
-		"464\n" /* */ "220\n"
-		"4 4\n" /* */ "0 0\n"
-		"2 2\n" /* */ "0 0\n"
-		" 2 \n" /* */ " 0 \n"
+	testcall(test_one(0, // make sure the smallest possible maps remain functional
+		"11\n" /* */ "10\n"
+	));
+	testcall(test_one(0,
+		"2\n" /* */ "0\n"
+		"2\n" /* */ "0\n"
 	));
 	testcall(test_one(0, // the fabled zero
 		"    \n" /* */ "    \n"
@@ -561,11 +573,18 @@ test("solver", "", "solver")
 		"    \n" /* */ "    \n"
 		"    \n" /* */ "    \n"
 	));
-	testcall(test_one(0, // make sure the smallest possible maps remain functional
-		"11\n" /* */ "10\n"
+	testcall(test_one(0, // a map without islands, while unusual, is valid
+		"   \n" /* */ "   \n"
+		"   \n" /* */ "   \n"
 	));
-	testcall(test_one(0,
-		"22\n" /* */ "20\n"
+	testcall(test_one(0, // a 0x0 map is even more unusual, but equally valid
+		"" /* */ ""
+	));
+	testcall(test_one(0, // bridges may not cross
+		"464\n" /* */ "220\n"
+		"4 4\n" /* */ "0 0\n"
+		"2 2\n" /* */ "0 0\n"
+		" 2 \n" /* */ " 0 \n"
 	));
 	testcall(test_one(1, // requires guessing
 		"2 2\n" /* */ "1 0\n"
@@ -613,6 +632,7 @@ test("solver", "", "solver")
 	));
 	// these require nested guesses (created by the game generator)
 	// (humans can solve them all without nested guesses, by knowing that 1s can't combine two islands)
+	// (TODO: make smarter solver, then generate new nasty maps)
 	testcall(test_one(2,
 		"2  1\n" /* */ "0  0\n"
 		"3233\n" /* */ "1110\n"
@@ -637,10 +657,22 @@ test("solver", "", "solver")
 		"32 3\n" /* */ "11 0\n"
 		"2  1\n" /* */ "1  0\n"
 	));
-	testcall(test_one(0, // this is technically solved immediately
-		"\n" /* */ "\n"
-	));
 	
+	testcall(test_error(1, 0, // obviously impossible
+		"11\n"
+		"11\n"
+	));
+	testcall(test_error(0, 0, // even more obviously impossible
+		"12\n"
+	));
+	testcall(test_error(0, 0, // stupidly obviously impossible
+		"2 \n"
+		" 3\n"
+	));
+	testcall(test_error(0, 0, // filling in everything yields a disjoint map
+		"2 2 \n"
+		" 2 2\n"
+	));
 	testcall(test_error(1, 2, // has multiple solutions
 		"33\n"
 		"22\n"
@@ -655,7 +687,7 @@ test("solver", "", "solver")
 		"343\n"
 		"232\n"
 	));
-	testcall(test_error(3, 2, // takes forever
+	testcall(test_error(3, 2, // takes forever to try all two-assumption options (3 finishes instantly)
 		"2332\n"
 		"3443\n"
 		"2332\n"

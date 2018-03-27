@@ -4,7 +4,7 @@
 #include <X11/Xlib.h>
 #include <X11/keysym.h>
 
-static const KeySym keys[6] = { XK_Right, XK_Up, XK_Left, XK_Down, XK_Return, XK_BackSpace };
+static const KeySym keys[6] = { XK_Right, XK_Up, XK_Left, XK_Down, XK_Return, XK_Escape };
 static int scans[6];
 
 static void pressed_keys_init()
@@ -145,11 +145,13 @@ int main(int argc, char** argv)
 	time_t lastfps = time(NULL);
 	int fps = 0;
 	
+	goto enter; // force render the first frame, to avoid drawing an uninitialized texture
 	while (wnd->is_visible())
 	{
 //static int l=0;l++;if(l==120)break;
 		if (wnd->is_active())
 		{
+	enter: ;
 			game::input in;
 			in.keys = pressed_keys();
 			
@@ -167,6 +169,7 @@ int main(int argc, char** argv)
 			{
 				in.mousex = -1;
 				in.mousey = -1;
+				in.mouseclick = false;
 			}
 			
 			g->run(in, pixels);
