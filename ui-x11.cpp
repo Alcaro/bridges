@@ -4,8 +4,8 @@
 #include <X11/Xlib.h>
 #include <X11/keysym.h>
 
-static const KeySym keys[6] = { XK_Right, XK_Up, XK_Left, XK_Down, XK_Return, XK_Escape };
-static int scans[6];
+static const KeySym keys[6*2] = { XK_Right,XK_d, XK_Up,XK_w, XK_Left,XK_a, XK_Down,XK_s, XK_Return,XK_space, XK_Escape,XK_BackSpace };
+static int scans[6*2];
 
 static void pressed_keys_init()
 {
@@ -16,11 +16,13 @@ static void pressed_keys_init()
 	int sym_per_code;
 	KeySym* sym = XGetKeyboardMapping(window_x11.display, minkc, maxkc-minkc+1, &sym_per_code);
 	
+	for (int i=0;i<6*2;i++) scans[i] = -1;
+	
 	// process this backwards, so the unshifted state is the one that stays in the array
 	unsigned i = sym_per_code*(maxkc-minkc);
 	while (i--)
 	{
-		for (int j=0;j<6;j++)
+		for (int j=0;j<6*2;j++)
 		{
 			if (sym[i] == keys[j]) scans[j] = minkc + i/sym_per_code;
 		}
@@ -35,12 +37,12 @@ static int pressed_keys()
 	if (!XQueryKeymap(window_x11.display, (char*)state)) return 0;
 	
 	int ret = 0;
-	for (int i=0;i<6;i++)
+	for (int i=0;i<6*2;i++)
 	{
 		int scan = scans[i];
-		if (state[scan>>3]&(1<<(scan&7)))
+		if (scan >= 0 && state[scan>>3]&(1<<(scan&7)))
 		{
-			ret |= 1<<i;
+			ret |= 1<<(i/2);
 		}
 	}
 	return ret;
@@ -186,8 +188,7 @@ int main(int argc, char** argv)
 		}
 		
 		//redraw the texture, to avoid glitches if we're sent an Expose event
-		//no point reuploading, though
-		//and no point caring about whether the event was Expose or not, just redraw
+		//no point reuploading, and no point caring about whether the event was Expose or not, just redraw
 		gl.Begin(GL_TRIANGLE_STRIP);
 		gl.TexCoord2f(0,            0          ); gl.Vertex3i(0,   480, 0);
 		gl.TexCoord2f(640.0/1024.0, 0          ); gl.Vertex3i(640, 480, 0);

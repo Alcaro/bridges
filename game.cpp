@@ -1,28 +1,20 @@
 #include "game.h"
 #include "resources.h"
+#include <math.h>
 
 //TODO:
-//- build bridges via keyboard
-//    option 1: one island/ocean is highlighted
-//      k_confirm selects it, so you can choose a direction to build
-//    option 2: one possible bridge (right or down from an island or ocean) is highlighted
-//      k_confirm builds, k_up goes up/left if focus is horizontal, up/right if vertical
-//    option 3: one pixel is highlighted; holding the keys moves it, k_confirm acts like mouse click there
-//    option 4: like option 3, but if no key, slowly moves towards any legal position per option 2
 //- end game screen
-//- the decorative birds
 //- compressed UI, where islands are half size so maps can be up to 26x20
 //- more objects:
 //  - islands accepting an arbitrary number of bridges
 //  - larger islands, 40x88px, can build 2 bridges from each of the 6 possible exits
-//      cycle checker treats them as 2 separate islands, with mandatory interior bridges
+//      cycle checker treats them as 2 separate islands with a mandatory bridge in between
 //  - even bigger islands, 88x88
 //  - maybe even huge non-rectangular islands, some of which extend off the edge of the map
 //      if yes, they cannot bridge themselves
 //  - castles; every island must be connected to a castle, but castles may not be connected to each other
 //      actually, combine some of the above
-//      castles must be large (only available in 2x2-tile islands) and arbitrary-populated
-//      preferably demand both, anything else would be cluttered
+//      castles must be on large (minimum 2x2) islands, and are arbitrary-populated (violating either rule would be cluttered)
 //      multiple castles of the same color must be connected; multiple castles of different colors must be disjoint
 //      all four castles have different designs (mostly grayscale, but colorful roofs), and 16x12 flags
 //  - reef; can't build bridges across a reef
@@ -41,7 +33,7 @@
 //          similarly,
 //            R22G
 //             R
-//          has the sole solution 'left 2 connects the reds, right 2 does all to green', but how does the solver prove that?
+//          has the sole solution 'left 2 connects the reds, right 2 does both to green', but how does the solver prove that?
 //          limiting to one castle per color would be silly
 //          run the algorithm once for every combination of one castle of each color?
 //        to bypass the four-connections-per-initial-tile limit,
@@ -50,7 +42,7 @@
 //    at any point, how many bridges can be proven to exist or not exist? are they close to the edge?
 //    does it involve the must-be-connected rule?
 //    does it require guessing? how many tiles need to be considered to prove which is the case?
-//    the solver can represent seven possible states for each possible bridge (plus game-over), humans can't; does this make it harder?
+//    the solver can represent seven possible states for each possible bridge (plus unsolvable), humans can't; does this make it harder?
 //- integrate game generator (requires solver)
 
 //map structure for the new objects:
@@ -278,10 +270,71 @@ public:
 	}
 };
 
+class birds {
+	static const int spd = 4;
+	static const constexpr float flock_angle_rad = 155 * M_PI*2/360;
+	static const int flock_dist = 12;
+	
+	float xmid;
+	float ymid;
+	
+	float angle;
+	int frame = 0; // if 0, birds are exactly at the middle; if <0, birds are moving towards the middle; if >0, moving away
+	
+public:
+	//if birds are on-screen, moves them away
+	//if 'force', they'll appear nearby; if not, 
+	void reset(bool force)
+	{
+		if (frame < -800/spd) return; // far off = leave there, so they appear earlier
+		
+		//first, pick a center for the birds, anywhere in the screen that's at least 100px from the edge
+		xmid = 100 + rand()%(640-200);
+		ymid = 100 + rand()%(480-200);
+		
+		//then pick a direction, any direction
+		angle = (float)rand()/RAND_MAX * M_PI*2;
+		
+		frame = -800/spd;
+		if (!force)
+		{
+			frame -= 60*60 + rand()%(60*60);
+		}
+	}
+	
+	void draw(image& out, const image& birdsmap, int tileset)
+	{
+		if (tileset != 2) // no birds in the rock region
+		{
+			image bird;
+			int animframe = frame/10 & 1;
+			bird.init_ref_sub(birdsmap, animframe*8, tileset*6, 8, 6);
+			
+			int x = xmid + cos(angle)*spd*frame;
+			int y = ymid + sin(angle)*spd*frame;
+			
+			for (int n=0;n<5;n++)
+			{
+				out.insert(x + cos(angle + flock_angle_rad)*n*flock_dist, y + sin(angle + flock_angle_rad)*n*flock_dist, bird);
+				out.insert(x + cos(angle - flock_angle_rad)*n*flock_dist, y + sin(angle - flock_angle_rad)*n*flock_dist, bird);
+			}
+			
+			frame++;
+			
+			//if outside the screen and distance increasing, reset them
+			if (frame > 800/spd)
+			{
+				reset(false);
+			}
+		}
+	}
+};
+
 class game_impl : public game {
 public:
 	resources res;
 	image res_bg0b;
+	image res_titlebig;
 	image res_menuclose;
 	
 	struct input in;
@@ -302,6 +355,8 @@ public:
 	int bgpos = 0;
 	int tileset = 0;
 	
+	birds birdfg;
+	
 	int menu_focus;
 	
 	gamemap map;
@@ -310,41 +365,45 @@ public:
 	int game_menu_pos;
 	int game_menu_focus;
 	
+	int game_kb_x;
+	int game_kb_y;
+	uint8_t game_kb_state; // 0 - keyboard inactive, focus box invisible; 1 - not focused, moving around; 2 - held down
+	
 	enum {
 		pop_none,
 		pop_welldone,
 		
-		pop_tutor1p1,
-		pop_tutor1p2,
-		pop_tutor1p3,
-		pop_tutor1p4,
+		pop_tutor1,
+		pop_tutor2,
+		pop_tutor3a,
+		pop_tutor4,
+		pop_lv6p1,
+		pop_lv6p2,
+		pop_lv11,
+		pop_tutor3b,
+		pop_tutor3c,
 		
 		//TODO: tutorials for the new objects
-		
-		//TODO: 'maximum 2 bridges per island per direction' in level 3
-		//TODO: 'bridges may not cross' goes in level 6
-		//TODO: 'islands must be connected' goes in level 11
-		
-		pop_tutor2p1,
-		pop_tutor2bp1,
-		pop_tutor2bp2,
-		
-		pop_tutor3p1,
-		pop_tutor3p2,
-		
-		pop_tutor4p1,
-		pop_tutor4p2,
-		
-		pop_tutor5p1,
 	};
 	int popup_id;
 	int popup_frame;
+	bool popup_closed_with_kb;
 	
 	
 	void init()
 	{
 		res_bg0b.init_clone(res.bg0, -1, 1);
 		res_menuclose.init_clone(res.menuopen, 1, -1);
+		
+		res_titlebig.init_clone(res.title, 4, 4);
+		res_titlebig.fmt = ifmt_bargb8888;
+		for (size_t i=0;i<res_titlebig.height*res_titlebig.width;i++)
+		{
+			if (res_titlebig.view<uint32_t>()[i] == 0xFFFF8040)
+			{
+				res_titlebig.view<uint32_t>()[i] = 0;
+			}
+		}
 		
 		res.smallfont.scale = 2;
 		res.smallfont.height = 9;
@@ -368,16 +427,14 @@ public:
 		
 		bgpos++;
 		bgpos %= 1200;
-		
-		//draw black birds in the fire region
-		//no birds seem to exist in rock region
 	}
 	
 	
 	void to_title()
 	{
 		state = st_title;
-to_game(0);
+		birdfg.reset(true);
+//to_game(0);
 	}
 	
 	void title()
@@ -385,24 +442,36 @@ to_game(0);
 		background();
 		
 		out.insert_tile_with_border(150, 65, 340, 150, res.fg0, 3, 37, 4, 36);
-		out.insert(200, 280, res.fg0);
-		out.insert(400, 280, res.fg0);
-		out.insert(200, 380, res.fg0);
-		out.insert(400, 380, res.fg0);
-		out.insert_tile(238, 293, 164, 11, res.bridgeh);
-		out.insert_tile(238, 393, 164, 11, res.bridgeh);
-		out.insert_tile(206, 318, 11, 64, res.bridgev);
-		out.insert_tile(224, 318, 11, 64, res.bridgev);
-		out.insert_tile(406, 318, 11, 64, res.bridgev);
-		out.insert_tile(424, 318, 11, 64, res.bridgev);
+		out.insert(200, 285, res.fg0);
+		out.insert(400, 285, res.fg0);
+		out.insert(200, 375, res.fg0);
+		out.insert(400, 375, res.fg0);
+		out.insert_tile(238, 298, 164, 11, res.bridgeh);
+		out.insert_tile(238, 388, 164, 11, res.bridgeh);
+		out.insert_tile(206, 323, 11, 54, res.bridgev);
+		out.insert_tile(224, 323, 11, 54, res.bridgev);
+		out.insert_tile(406, 323, 11, 54, res.bridgev);
+		out.insert_tile(424, 323, 11, 54, res.bridgev);
+		
+		out.insert(193, 88, res_titlebig);
+		
+		res.smallfont.color = 0x000000;
+		out.insert_text_wrap(270, 341, 520, res.smallfont, "Play Game");
+		out.insert_text_wrap(271, 340,   520, res.smallfont, "Play Game");
+		
+		res.smallfont.color = 0xFFFFFF;
+		out.insert_text_wrap(270, 340, 520, res.smallfont, "Play Game");
 		
 		if (in_press & 1<<k_confirm) to_menu(true);
 		if (in_press & 1<<k_click) to_menu(false);
+		
+		birdfg.draw(out, res.bird, 0);
 	}
 	
 	
 	void to_menu(bool use_keyboard)
 	{
+		tileset = 0;
 		state = st_menu;
 		menu_focus = (use_keyboard ? 0 : -1);
 	}
@@ -435,7 +504,7 @@ int unlocked = 6;
 		}
 		if (in_press & 1<<k_confirm)
 		{
-			if (menu_focus != -1) to_game(menu_focus);
+			if (menu_focus != -1) to_game(menu_focus, true);
 		}
 		if (in_press & 1<<k_cancel)
 		{
@@ -478,7 +547,7 @@ int unlocked = 6;
 					highlight = true;
 					if (in_press & 1<<k_click)
 					{
-						to_game(y*5 + x);
+						to_game(y*5 + x, false);
 					}
 				}
 				if (menu_focus == y*5 + x)
@@ -494,23 +563,25 @@ int unlocked = 6;
 			if (unlocked < y+1)
 			{
 				out.insert_tile_with_border(150, 30+y*75, 340, 50,
-				                            (y<2 ? res.fg0mask : y<4 ? res.fg1mask : res.fg2mask),
+				                            (y<2 ? res.fg0mask : y<4 ? res.fg1mask : res.fg0mask),
 				                            3+b, 37-b, 4+b, 36-b);
 			}
 		}
+		
+		//no birds on the menu
 	}
 	
 	
-	void to_game(int id)
+	void to_game(int id, bool use_kb)
 	{
 		state = st_ingame;
 		
-		game_load(id);
+		game_load(id, use_kb);
 		game_menu = false;
 		game_menu_pos = 480;
 	}
 	
-	void game_load(int id)
+	void game_load(int id, bool use_kb)
 	{
 		map_id = id;
 		map.init(game_maps[id]);
@@ -518,12 +589,16 @@ int unlocked = 6;
 		
 		popup_id = pop_none;
 		popup_frame = 0;
-		if (id == 0) popup_id = pop_tutor1p1;
-		if (id == 1) popup_id = pop_tutor2p1;
-		if (id == 2) popup_id = pop_tutor3p1;
-		if (id == 3) popup_id = pop_tutor4p1;
-		if (id == 4) popup_id = pop_tutor5p1;
+		if (id == 0) popup_id = pop_tutor1;
+		if (id == 5) popup_id = pop_lv6p1;
+		if (id == 10) popup_id = pop_lv11;
 //popup_id = pop_welldone;
+		
+		birdfg.reset(false);
+		
+		game_kb_state = use_kb ? 1 : 0;
+		game_kb_x = 0;
+		game_kb_y = 0;
 	}
 	
 	void ingame()
@@ -535,7 +610,8 @@ int unlocked = 6;
 			if (in_press & (1<<k_confirm | 1<<k_click))
 			{
 				if (popup_frame < 18) popup_frame = 18;
-				else popup_frame = 33;
+				else popup_frame = 30;
+				popup_closed_with_kb = (in_press & 1<<k_confirm);
 			}
 			in.mousex = -1;
 			in.mousey = -1;
@@ -607,7 +683,7 @@ int unlocked = 6;
 			}
 		}
 		
-		int tx = (in.mousex - sx + 48)/48 - 1; // +48-1 to avoid -1/48=0
+		int tx = (in.mousex - sx + 48)/48 - 1; // +48-1 to avoid -1/48=0 (-49/48=-2 is fine, all negative values are equal)
 		int ty = (in.mousey - sy + 48)/48 - 1;
 		
 		//put this before bridge builder, to make sure menu wins if there's a possible bridge down there
@@ -669,7 +745,7 @@ int unlocked = 6;
 			}
 			
 			//if that bridge is up or left, move to the other island so I won't have to implement it multiple times
-			//if it's ocean, force move, only islands have the bridge flags
+			//if it's ocean, force move
 			if (here.population == -1)
 			{
 				if (dir == 3) dir = 1;
@@ -713,6 +789,82 @@ int unlocked = 6;
 			}
 		}
 	no_phantom: ;
+		
+		if (in_press&~(1<<k_cancel | 1<<k_click) && game_kb_state==0)
+		{
+			game_kb_state = 1;
+			game_kb_x = 0;
+			game_kb_y = 0;
+			
+			in_press &= k_cancel;
+		}
+		if (game_kb_state != 0)
+		{
+			if (in_press & 1<<k_confirm)
+			{
+				gamemap::island& here = map.map[game_kb_y][game_kb_x];
+				if (here.bridgelen[0] != -1 || here.bridgelen[1] != -1 || here.bridgelen[2] != -1 || here.bridgelen[3] != -1)
+				{
+					game_kb_state = 3-game_kb_state; // toggle
+				}
+			}
+			
+			if (in.keys & 1<<k_confirm || game_kb_state == 2)
+			{
+				auto build = [this](int dir) {
+					int x = game_kb_x;
+					int y = game_kb_y;
+					
+					gamemap::island& here = map.map[y][x];
+					
+					if (here.population == -1)
+					{
+						if (dir == 3) dir = 1;
+						if (dir == 0) dir = 2;
+					}
+					
+					if (here.bridgelen[dir] != -1)
+					{
+						if (dir == 1)
+						{
+							y -= here.bridgelen[1];
+							dir = 3;
+						}
+						
+						if (dir == 2)
+						{
+							x -= here.bridgelen[2];
+							dir = 0;
+						}
+						
+						map.toggle(x, y, dir);
+						if (map.finished())
+						{
+							popup_id = pop_welldone;
+							popup_frame = 0;
+						}
+					}
+					
+					game_kb_state = 1;
+				};
+				
+				if (in_press & 1<<k_right) build(0);
+				if (in_press & 1<<k_up) build(1);
+				if (in_press & 1<<k_left) build(2);
+				if (in_press & 1<<k_down) build(3);
+			}
+			else
+			{
+				if ((in_press & 1<<k_right) && game_kb_x < map.width-1) game_kb_x++;
+				if ((in_press & 1<<k_up   ) && game_kb_y > 0) game_kb_y--;
+				if ((in_press & 1<<k_left ) && game_kb_x > 0) game_kb_x--;
+				if ((in_press & 1<<k_down ) && game_kb_y < map.height-1) game_kb_y++;
+			}
+			
+			out.insert(sx + game_kb_x*48 + game_kb_state*10, sy + game_kb_y*48, res.kbfocus);
+		}
+		
+		birdfg.draw(out, res.bird, tileset);
 		
 		out.insert(600, 460, res.menuopen);
 		
@@ -776,7 +928,7 @@ int unlocked = 6;
 			item(0, 15, "Level "+tostring(map_id+1));
 			if (item(1, 120, "How to Play"))
 			{
-				popup_id = pop_tutor1p1;
+				popup_id = pop_tutor1;
 				popup_frame = 0;
 				game_menu = false;
 			}
@@ -801,25 +953,34 @@ game_menu_pos = 480; // TODO
 		{
 			switch (popup_frame++ / 3)
 			{
-			case 11:
+			case 10:
 				switch (popup_id)
 				{
 				case pop_welldone:
 					if (map_id == 29)
 					{
+tileset = 0;
 to_title(); //TODO
 						break;
 					}
-					game_load(map_id+1);
+					game_load(map_id+1, popup_closed_with_kb);
 					//TODO
 					break;
-				case pop_tutor1p4:
-				case pop_tutor2p1:
-				case pop_tutor2bp2:
-				case pop_tutor3p2:
-				case pop_tutor4p2:
-				case pop_tutor5p1:
-					popup_id = 0;
+				case pop_tutor2:
+					if (map_id < 5) popup_id = pop_tutor3a;
+					else if (map_id < 10) popup_id = pop_tutor3b;
+					else popup_id = pop_tutor3c;
+					
+					break;
+					
+				case pop_tutor3b:
+				case pop_tutor3c:
+					popup_id = pop_tutor4;
+					break;
+				case pop_tutor4:
+				case pop_lv6p2:
+				case pop_lv11:
+					popup_id = pop_none;
 					break;
 				default:
 					popup_id++;
@@ -829,7 +990,6 @@ to_title(); //TODO
 				if (popup_id == 0) break;
 				//else fallthrough
 			case 0:
-			case 10:
 				out.insert_tile_with_border(290, 80, 60, 20, res.popup, 10,30, 0,110);
 				break;
 			case 1:
@@ -857,60 +1017,113 @@ to_title(); //TODO
 					
 					"\7            Click anywhere to continue...", // pop_welldone
 					
-					"\1King of Bridges is played on a square grid with " // pop_tutor1p1
+					"\1Lord of Bridges is played on a square grid with " // pop_tutor1
 					"squares that represent islands. The yellow "
 					"number represents the population of that "
 					"island.",
 					
-					"\1The white number represents the number of " // pop_tutor1p2
+					"\1The white number represents the number of " // pop_tutor2
 					"bridges connecting to the island. You can "
 					"create up to two (2) bridges by clicking beside "
 					"the islands.",
 					
-					"\0Each island must have as many bridges from it " // pop_tutor1p3
+					"\0The first rule of the game is simple: Each island " // pop_tutor3a
+					"must have as many bridges from it as the "
+					"number in yellow in the island. There are two "
+					"more rules, but this rule is enough to solve "
+					"some simpler puzzles.",
+					
+					"\1Click on Arrow Icon (\3) on the bottom right to " // pop_tutor4
+					"bring up menu items. Reset to remove all "
+					"bridges, Hint if you're stuck and How to Play to "
+					"see these instructions once again. Good luck!",
+					
+					
+					"\2Good job! For this puzzle, you need to use the " // pop_lv6
+					"second rule of the game: \1a bridge MUST NOT "
+					"CROSS another bridge.\2",
+					
+					"\1For example, the Pop. 3 island at the top left " // pop_lv6b
+					"must have a bridge to the right; therefore, the "
+					"nearby Pop. 1 island cannot have a bridge "
+					"downwards.",
+					
+					
+					"\0Well done! This puzzle needs the third rule of " // pop_lv11
+					"the game: \1All islands must be connected.\2 No "
+					"isolated islands are allowed. The bottom left "
+					"Pop. 1 islands cannot be connected to each "
+					"other; their bridges must go rightwards.\2",
+					
+					
+					"\2Each island must have as many bridges from it " // pop_tutor3b
+					"as the number in yellow in the island. Also, \1a "
+					"bridge MUST NOT CROSS another bridge.\2",
+					
+					
+					"\0Each island must have as many bridges from it " // pop_tutor3c
 					"as the number in yellow in the island. \1All islands "
 					"must be connected.\2 No isolated islands are "
 					"allowed. Also, \1a bridge MUST NOT CROSS another "
 					"bridge.\2",
 					
-					"\1Click on Arrow Icon (\3) on the bottom right to " // pop_tutor1p4
-					"bring up menu items. Reset to remove all "
-					"bridges, Hint if you're stuck and How to Play to "
-					"see these instructions once again. Good luck!",
 					
-					"\3Here is one starting technique to prep you. " // pop_tutor2p1
-					"Start on this lonely island with Pop. 1",
 					
-					"\5Now, the neighboring island must have 2 bridges to be connected on the other side.", // pop_tutor2bp1
 					
-					"\5The next steps to solve this area becomes easy as pie.", // pop_tutor2bp2
-					
-					"\1Corner islands with Pop. 4 must have 2 bridges " // pop_tutor3p1
-					"connected to each of its sides. The same goes "
-					"for islands with Pop. 6 and 3 neighbors and "
-					"islands with Pop. 8 and 4 neighbors.",
-					
-					"\1For islands with Pop. 5 and 3 neighbors, it is " // pop_tutor3p2
-					"not easy to tell where the 5 bridges will go. But "
-					"we're sure that at least 1 bridge will connect it "
-					"to each of the islands.",
-					
-					"\0Notice the 2 islands with Pop. 2 on the left. " // pop_tutor4p1
-					"Since the rules state that all islands must be "
-					"connected, we cannot therefore join these two "
-					"islands with 2 bridges as it will isolate them "
-					"from the rest.",
-					
-					"\1Try to place one (1) bridge on the opposite side " // pop_tutor4p2
-					"of these islands, since they must not have two "
-					"bridges in between them. Thereby, lowering our "
-					"choices by deduction method.",
-					
-					"\0With the knowledge you have, you can do a " // pop_tutor5p1
-					"combination of those techniques and solve any "
-					"puzzle easily. Of course, the fun part is the "
-					"discovery of new methods to solve the game and "
-					"sharing them! Good luck!",
+					//"\1King of Bridges is played on a square grid with " // pop_tutor1p1
+					//"squares that represent islands. The yellow "
+					//"number represents the population of that "
+					//"island.",
+					//
+					//"\1The white number represents the number of " // pop_tutor1p2
+					//"bridges connecting to the island. You can "
+					//"create up to two (2) bridges by clicking beside "
+					//"the islands.",
+					//
+					//"\0Each island must have as many bridges from it " // pop_tutor1p3
+					//"as the number in yellow in the island. \1All islands "
+					//"must be connected.\2 No isolated islands are "
+					//"allowed. Also, \1a bridge MUST NOT CROSS another "
+					//"bridge.\2",
+					//
+					//"\1Click on Arrow Icon (\3) on the bottom right to " // pop_tutor1p4
+					//"bring up menu items. Reset to remove all "
+					//"bridges, Hint if you're stuck and How to Play to "
+					//"see these instructions once again. Good luck!",
+					//
+					//"\3Here is one starting technique to prep you. " // pop_tutor2p1
+					//"Start on this lonely island with Pop. 1",
+					//
+					//"\5Now, the neighboring island must have 2 bridges to be connected on the other side.", // pop_tutor2bp1
+					//
+					//"\5The next steps to solve this area becomes easy as pie.", // pop_tutor2bp2
+					//
+					//"\1Corner islands with Pop. 4 must have 2 bridges " // pop_tutor3p1
+					//"connected to each of its sides. The same goes "
+					//"for islands with Pop. 6 and 3 neighbors and "
+					//"islands with Pop. 8 and 4 neighbors.",
+					//
+					//"\1For islands with Pop. 5 and 3 neighbors, it is " // pop_tutor3p2
+					//"not easy to tell where the 5 bridges will go. But "
+					//"we're sure that at least 1 bridge will connect it "
+					//"to each of the islands.",
+					//
+					//"\0Notice the 2 islands with Pop. 2 on the left. " // pop_tutor4p1
+					//"Since the rules state that all islands must be "
+					//"connected, we cannot therefore join these two "
+					//"islands with 2 bridges as it will isolate them "
+					//"from the rest.",
+					//
+					//"\1Try to place one (1) bridge on the opposite side " // pop_tutor4p2
+					//"of these islands, since they must not have two "
+					//"bridges in between them. Thereby, lowering our "
+					//"choices by deduction method.",
+					//
+					//"\0With the knowledge you have, you can do a " // pop_tutor5p1
+					//"combination of those techniques and solve any "
+					//"puzzle easily. Of course, the fun part is the "
+					//"discovery of new methods to solve the game and "
+					//"sharing them! Good luck!",
 				};
 				
 				if (popup_id == pop_welldone)
@@ -946,7 +1159,7 @@ to_title(); //TODO
 				res.smallfont.height = 9;
 				res.smallfont.fallback = NULL;
 				
-				popup_frame--; // keep it here
+				popup_frame--; // make sure it stays on the 'full popup visible' frame
 			}
 		}
 	}

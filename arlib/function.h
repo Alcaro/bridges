@@ -22,6 +22,11 @@
 
 #define UTIL_CALLBACK_HPP_INSIDE
 
+//with C++17, these macros can be replaced with template<auto fn> function<decltype(fn)> bind_free()
+//C++11 would be enough to replace bind_free(func) with GetFreeCallback<decltype(func), func>,
+// but that doesn't really improve anything over the current setup
+//and removing the macro doesn't really improve anything either
+
 #define bind_free(func) (GetFreeCallbackFactory(func).Bind<func>())
 #define bind_ptr(func, ptr) (GetCallbackFactory(func).Bind<func>(ptr))
 #define bind_this(func) bind_ptr(func, this) // reminder: bind_this(&classname::function), not bind_this(function)

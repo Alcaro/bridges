@@ -18,7 +18,7 @@
 		else cu = au op bu; \
 		if (!cu_overflow && (t)cu != cu) cu_overflow = true; \
 		\
-		t out; \
+		t out = -1; /* gcc throws uninitialized warnings without this */ \
 		assert_msg(safeint<t>::opname##ov_nobuiltin(au, bu, &out) == cu_overflow, assertstr(t, op, cu_overflow, !cu_overflow)); \
 		if (!cu_overflow) assert_msg(out == cu, assertstr(t, op, out, cu)); \
 		\
@@ -36,7 +36,7 @@
 
 test("safeint", "", "")
 {
-	//test_skip("kinda slow");
+	test_skip("kinda slow");
 	
 	TEST(uint8_t, +,  add)
 	TEST(uint8_t, -,  sub)

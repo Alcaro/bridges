@@ -35,6 +35,7 @@ uint32_t image::insert_text(int32_t x, int32_t y, const font& fnt, cstring text,
 		{
 			y += fnt.height * fnt.scale;
 			xoff = 0;
+			continue;
 		}
 		else if (ch <= 0x1F)
 		{

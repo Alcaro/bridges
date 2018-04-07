@@ -143,6 +143,7 @@ struct image : nocopy {
 	
 	//Always emits valid argb8888. May (but is not required to) report bargb or xrgb instead,
 	// if inspecting the image header proves it to be degenerate.
+	//Always emits a packed image, where stride = width*byteperpix.
 	bool init_decode_png(arrayview<byte> pngdata);
 };
 
@@ -154,10 +155,11 @@ struct font {
 	uint8_t width[128];
 	uint8_t height;
 	
-	uint32_t color = 0x000000;
+	uint32_t color = 0x000000; // High byte is ignored.
 	uint8_t scale = 1;
 	
-	//Called if told to render characters 00-1F, except 0A (LF). Can draw whatever it wants, or change font properties.
+	//Called if told to render characters 00-1F, except 0A (LF). Can draw whatever it wants, or change the font color.
+	//If it draws, and the drawn item should have a width, width[ch] should be nonzero after this callback returns.
 	function<void(image& out, const font& fnt, int32_t x, int32_t y, uint8_t ch)> fallback;
 	
 	//The image must be pure black and white, containing 16x8 tiles of equal size.
