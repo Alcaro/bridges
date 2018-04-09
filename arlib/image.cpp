@@ -1,4 +1,5 @@
 #include "image.h"
+#include "simd.h"
 
 static inline void image_insert_noov(image& target, int32_t x, int32_t y, const image& source);
 //checks if the source fits in the target, and if not, crops it; then calls the above
@@ -41,13 +42,12 @@ void image::insert(int32_t x, int32_t y, const image& other)
 }
 
 //newalpha can be 0 to set alpha to 0, 0xFF000000 to set alpha to 255, or -1 to not change alpha
-//alpha in the target must be known equal to the value implied by newalpha
+//alpha in the target must be known equal to the value implied by newalpha;
+//  the functions are allowed to copy alpha from target instead
+template<bool checksrcalpha, uint32_t newalpha>
+static inline void image_insert_noov_8888_to_8888(image& target, int32_t x, int32_t y, const image& source);
 template<uint32_t newalpha>
 static inline void image_insert_noov_8888_to_8888_alphasrc(image& target, int32_t x, int32_t y, const image& source);
-template<uint32_t newalpha>
-static inline void image_insert_noov_8888_to_8888_boolalphasrc(image& target, int32_t x, int32_t y, const image& source);
-template<uint32_t newalpha>
-static inline void image_insert_noov_8888_to_8888_solidsrc(image& target, int32_t x, int32_t y, const image& source);
 
 static inline void image_insert_noov(image& target, int32_t x, int32_t y, const image& source)
 {
@@ -67,19 +67,19 @@ static inline void image_insert_noov(image& target, int32_t x, int32_t y, const 
 	//  but there is no possible answer so the only real solution is banning it in the API.
 	
 	if (source.fmt == ifmt_bargb8888 && target.fmt == ifmt_0rgb8888)
-		return image_insert_noov_8888_to_8888_boolalphasrc<0x00000000>(target, x, y, source);
+		return image_insert_noov_8888_to_8888<true, 0x00000000>(target, x, y, source);
 	if (source.fmt == ifmt_bargb8888)
-		return image_insert_noov_8888_to_8888_boolalphasrc<-1>(target, x, y, source);
+		return image_insert_noov_8888_to_8888<true, -1>(target, x, y, source);
 	if (source.fmt == ifmt_argb8888 && target.fmt == ifmt_0rgb8888)
 		return image_insert_noov_8888_to_8888_alphasrc<0x00000000>(target, x, y, source);
 	if (source.fmt == ifmt_argb8888)
 		return image_insert_noov_8888_to_8888_alphasrc<-1>(target, x, y, source);
 	if (target.fmt == ifmt_argb8888 || target.fmt == ifmt_bargb8888)
-		return image_insert_noov_8888_to_8888_solidsrc<0xFF000000>(target, x, y, source);
+		return image_insert_noov_8888_to_8888<false, 0xFF000000>(target, x, y, source);
 	if (target.fmt == ifmt_0rgb8888 && source.fmt == ifmt_xrgb8888)
-		return image_insert_noov_8888_to_8888_solidsrc<0x00000000>(target, x, y, source);
+		return image_insert_noov_8888_to_8888<false, 0x00000000>(target, x, y, source);
 	else
-		return image_insert_noov_8888_to_8888_solidsrc<-1>(target, x, y, source);
+		return image_insert_noov_8888_to_8888<false, -1>(target, x, y, source);
 }
 
 template<uint32_t newalpha>
@@ -98,6 +98,35 @@ static inline void image_insert_noov_8888_to_8888_alphasrc(image& target, int32_
 			{
 				if (alpha != 0)
 				{
+#ifdef HAVE_SIMD128
+					//hardcoded to 128bit SIMD, it's complex enough without having to consider multiple pixels at once
+					
+					uint32_t spx = sourcepx[xx];
+					uint32_t tpx = targetpx[xx];
+					
+					// contains u16: spx.a, spx.b, spx.g, spx.r, tpx.{a,b,g,r}
+					simd128 vals = simd128::create32(0, 0, spx, tpx).extend8uto16();
+					
+					//contains {sa}*4, {255-sa}*4
+					simd128 alphas = simd128::repeat16(spx>>24).xor16(simd128::create16(0,0,0,0, 255,255,255,255));
+					simd128 newcols255 = vals.mul16(alphas); // contains pixel contributions times 255
+					
+					//ugly magic constants: (u16)*8081>>23 = (u16)/255
+					simd128 newcols = newcols255.mulhiu16(simd128::repeat16(0x8081)).rshiftu16(7);
+					
+					// contains u8: {0}*8, sac (source alpha contribution), sbc, sgc, src, tac, tbc, tgc, trc
+					// doesn't matter what the second one is; _mm_undefined_si128() would make more sense, but my gcc doesn't support that
+					// and that one just maps to 'whatever is in xmm0 right now' which isn't faster than picking the same reg twice
+					simd128 newpack = newcols.compress16to8u(newcols);
+					//_mm_packus_epi16(newcols, newcols);
+					// contains u8: {don't care}*12, sac+tac, sbc+tbc, sgc+tgc, src+trc
+					simd128 newpacksum = newpack.add32(newpack.shuffle32(1));
+					
+					uint32_t newpx = newpacksum.low32();
+					if (newalpha == 0x00000000) newpx &= 0x00FFFFFF;
+					if (newalpha == 0xFF000000) newpx |= 0xFF000000;
+					targetpx[xx] = newpx;
+#else
 					uint8_t sr = sourcepx[xx]>>0;
 					uint8_t sg = sourcepx[xx]>>8;
 					uint8_t sb = sourcepx[xx]>>16;
@@ -117,6 +146,7 @@ static inline void image_insert_noov_8888_to_8888_alphasrc(image& target, int32_
 						ta = newalpha>>24;
 					
 					targetpx[xx] = ta<<24 | tb<<16 | tg<<8 | tr<<0;
+#endif
 				}
 				//else a=0 -> do nothing
 			}
@@ -131,84 +161,59 @@ static inline void image_insert_noov_8888_to_8888_alphasrc(image& target, int32_
 	}
 }
 
-#include <emmintrin.h>
-
-template<uint32_t newalpha>
-static inline void image_insert_noov_8888_to_8888_boolalphasrc(image& target, int32_t x, int32_t y, const image& source)
+template<bool checksrcalpha, uint32_t newalpha>
+static inline void image_insert_noov_8888_to_8888(image& target, int32_t x, int32_t y, const image& source)
 {
 	for (uint32_t yy=0;yy<source.height;yy++)
 	{
 		uint32_t* targetpx = target.pixels32 + (y+yy)*target.stride/sizeof(uint32_t) + x;
 		uint32_t* sourcepx = source.pixels32 + yy*source.stride/sizeof(uint32_t);
 		
-		__m128i* targetpx4 = (__m128i*)targetpx;
-		__m128i* sourcepx4 = (__m128i*)sourcepx;
-		uint32_t xxe4 = source.width/4;
+#ifdef HAVE_SIMD
+		//SIMD translation of the below
+		size_t nsimd = simdmax::count32();
 		
-		//one of both of those is useless, and will be optimized out
-		__m128i mask_or = (newalpha == 0xFF000000 ? _mm_set1_epi32(0xFF000000) : _mm_set1_epi32(0));
-		__m128i mask_and = (newalpha == 0x00000000 ? _mm_set1_epi32(0x00FFFFFF) : _mm_set1_epi32(0xFFFFFFFF));
+		simdmax* targetpxw = (simdmax*)targetpx;
+		simdmax* sourcepxw = (simdmax*)sourcepx;
+		uint32_t xxew = source.width/nsimd;
 		
-		for (uint32_t xx=0;xx<xxe4;xx++)
+		simdmax mask_or = (newalpha == 0xFF000000 ? simdmax::repeat32(0xFF000000) : simdmax::repeat32(0));
+		simdmax mask_and = (newalpha == 0x00000000 ? simdmax::repeat32(0x00FFFFFF) : simdmax::repeat32(0xFFFFFFFF));
+		
+		for (uint32_t xx=0;xx<xxew;xx++)
 		{
-			__m128i sp = _mm_loadu_si128(&sourcepx4[xx]);
-			__m128i mask_local = _mm_cmplt_epi32(sp, _mm_setzero_si128());
+			simdmax px = simdmax::loadu(&sourcepxw[xx]);
 			
-			sp = _mm_and_si128(sp, mask_and);
-			sp = _mm_or_si128(sp, mask_or);
+			//there's no 'mirror every 32nd bit 32 times' instruction, but 'less than zero' does the same thing
+			simdmax mask_local = px.cmplts32(simdmax::zero());
 			
-			__m128i tp = _mm_loadu_si128(&targetpx4[xx]);
-			//if mask_local bit is set, copy from sp, otherwise from tp
-			//there's no specific instruction for that, but easy to bithack
-			tp = _mm_xor_si128(_mm_and_si128(_mm_xor_si128(sp, tp), mask_local), tp);
+			px = px.and32(mask_and);
+			px = px.or32(mask_or);
 			
-			_mm_storeu_si128(&targetpx4[xx], tp);
+			if (checksrcalpha)
+			{
+				simdmax tpx = simdmax::loadu(&targetpxw[xx]);
+				//if mask_local bit is set, copy from sp, otherwise from tp
+				//there's no specific instruction for that, but it's easy to bithack
+				//(there is SSE4.1 _mm_blend_epi8, but it's annoying to extract the mask from that one)
+				px = tpx.xor32(mask_local.and32(px.xor32(tpx)));
+			}
+			px.storeu(&targetpxw[xx]);
 		}
+#else
+		size_t xxew = 0;
+		size_t nsimd = 0;
+#endif
 		
-		//for (uint32_t xx=0;xx<source.width;xx++)
-		for (uint32_t xx=xxe4*4;xx<source.width;xx++)
+		for (uint32_t xx=xxew*nsimd;xx<source.width;xx++)
 		{
-			if (sourcepx[xx]&0x80000000) // for bargb, check sign only, it's the cheapest
+			if (!checksrcalpha || (sourcepx[xx]&0x80000000)) // for bargb, check sign only, it's the cheapest
 			{
 				if (newalpha != (uint32_t)-1)
 					targetpx[xx] = newalpha | (sourcepx[xx]&0x00FFFFFF);
 				else
 					targetpx[xx] = sourcepx[xx];
 			}
-		}
-	}
-}
-
-template<uint32_t newalpha>
-static inline void image_insert_noov_8888_to_8888_solidsrc(image& target, int32_t x, int32_t y, const image& source)
-{
-	for (uint32_t yy=0;yy<source.height;yy++)
-	{
-		uint32_t* targetpx = target.pixels32 + (y+yy)*target.stride/sizeof(uint32_t) + x;
-		uint32_t* sourcepx = source.pixels32 + yy*source.stride/sizeof(uint32_t);
-		
-		__m128i* targetpx4 = (__m128i*)targetpx;
-		__m128i* sourcepx4 = (__m128i*)sourcepx;
-		uint32_t xxe4 = source.width/4;
-		
-		__m128i mask_or = (newalpha == 0xFF000000 ? _mm_set1_epi32(0xFF000000) : _mm_set1_epi32(0));
-		__m128i mask_and = (newalpha == 0x00000000 ? _mm_set1_epi32(0x00FFFFFF) : _mm_set1_epi32(0xFFFFFFFF));
-		
-		for (uint32_t xx=0;xx<xxe4;xx++)
-		{
-			__m128i sp = _mm_loadu_si128(&sourcepx4[xx]);
-			__m128i tp = sp;
-			tp = _mm_and_si128(tp, mask_and);
-			tp = _mm_or_si128(tp, mask_or);
-			_mm_storeu_si128(&targetpx4[xx], tp);
-		}
-		
-		for (uint32_t xx=xxe4*4;xx<source.width;xx++)
-		{
-			if (newalpha != (uint32_t)-1)
-				targetpx[xx] = newalpha | (sourcepx[xx]&0x00FFFFFF);
-			else
-				targetpx[xx] = sourcepx[xx];
 		}
 	}
 }

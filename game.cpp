@@ -354,6 +354,7 @@ public:
 	
 	int bgpos = 0;
 	int tileset = 0;
+	int unlocked = 1;
 	
 	birds birdfg;
 	
@@ -480,6 +481,8 @@ draw_island_fragment(x*40, y*40, z[y][x+1], z[y-1][x], z[y][x-1], z[y+1][x]);
 }
 }
 out.insert_tile_with_border(400, 20, 230, 440, res.fg0, 3, 37, 4, 36);
+out.insert_tile(100, 20, 440, 440, res.levelboxgold);
+//out.insert_tile(100, 20, 440, 440, res.fg0mask);
 	}
 	
 	
@@ -493,8 +496,6 @@ out.insert_tile_with_border(400, 20, 230, 440, res.fg0, 3, 37, 4, 36);
 	void menu()
 	{
 		background();
-		
-int unlocked = 3;
 		
 		if (in_press & 1<<k_left)
 		{
@@ -1056,8 +1057,8 @@ tileset = 0;
 to_title(); //TODO
 						break;
 					}
+					if (map_id+1 >= unlocked*5) unlocked++;
 					game_load(map_id+1, popup_closed_with_kb);
-					//TODO
 					break;
 				case pop_tutor2:
 					if (map_id < 5) popup_id = pop_tutor3a;
@@ -1257,6 +1258,16 @@ to_title(); //TODO
 		}
 	}
 	
+	void load(const savedat& dat)
+	{
+		unlocked = dat.unlocked;
+	}
+	
+	void save(savedat& dat)
+	{
+		dat.unlocked = unlocked;
+	}
+	
 	
 	
 	
@@ -1292,3 +1303,4 @@ to_title(); //TODO
 }
 
 game* game::create() { return new game_impl(); }
+game* game::create(const savedat& dat) { game_impl* ret = new game_impl(); ret->load(dat); return ret; }

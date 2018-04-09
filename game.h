@@ -37,11 +37,20 @@ public:
 		uint8_t keys; // format: 1<<k_up | 1<<k_confirm
 	};
 	
+	struct savedat {
+		uint8_t unlocked = 0;
+	};
+	
 	//'out' should be a 640x480 image. 0rgb8888 or xrgb8888 is recommended, xrgb is slightly faster.
 	//All 640*480 pixels will be overwritten. They will be written non-sequentially, multiple times, and may be read.
 	virtual void run(const input& in, image& out) = 0;
 	
+	//Call this before exiting the game, and save the result to disk. Next session, pass that struct to create().
+	//For the first run, call create() without a savedat.
+	virtual void save(savedat& dat) = 0;
+	
 	virtual ~game() {}
 	
 	static game* create();
+	static game* create(const savedat& dat);
 };
