@@ -394,16 +394,7 @@ public:
 	{
 		res_bg0b.init_clone(res.bg0, -1, 1);
 		res_menuclose.init_clone(res.menuopen, 1, -1);
-		
 		res_titlebig.init_clone(res.title, 4, 4);
-		res_titlebig.fmt = ifmt_bargb8888;
-		for (size_t i=0;i<res_titlebig.height*res_titlebig.width;i++)
-		{
-			if (res_titlebig.view<uint32_t>()[i] == 0xFFFF8040)
-			{
-				res_titlebig.view<uint32_t>()[i] = 0;
-			}
-		}
 		
 		res.smallfont.scale = 2;
 		res.smallfont.height = 9;
@@ -457,7 +448,7 @@ public:
 		
 		res.smallfont.color = 0x000000;
 		out.insert_text_wrap(270, 341, 520, res.smallfont, "Play Game");
-		out.insert_text_wrap(271, 340,   520, res.smallfont, "Play Game");
+		out.insert_text_wrap(271, 340, 520, res.smallfont, "Play Game");
 		
 		res.smallfont.color = 0xFFFFFF;
 		out.insert_text_wrap(270, 340, 520, res.smallfont, "Play Game");
@@ -466,6 +457,29 @@ public:
 		if (in_press & 1<<k_click) to_menu(false);
 		
 		birdfg.draw(out, res.bird, 0);
+		
+static const bool z[10][10] = {
+{0,0,0,0,0,0,0,0,0,0},
+{0,1,1,0,1,0,0,1,0,0},
+{0,0,0,0,1,0,1,0,1,0},
+{0,1,1,0,0,0,0,1,0,0},
+{0,1,1,0,0,0,0,0,0,0},
+{0,0,0,0,0,1,1,1,1,0},
+{0,0,1,0,0,1,1,1,1,0},
+{0,1,1,1,0,1,1,0,1,0},
+{0,0,1,0,0,1,1,1,1,0},
+{0,0,0,0,0,0,0,0,0,0},
+};
+background();
+for (int y=0;y<10;y++)
+for (int x=0;x<10;x++)
+{
+if (z[y][x])
+{
+draw_island_fragment(x*40, y*40, z[y][x+1], z[y-1][x], z[y][x-1], z[y+1][x]);
+}
+}
+out.insert_tile_with_border(400, 20, 230, 440, res.fg0, 3, 37, 4, 36);
 	}
 	
 	
@@ -480,7 +494,7 @@ public:
 	{
 		background();
 		
-int unlocked = 6;
+int unlocked = 3;
 		
 		if (in_press & 1<<k_left)
 		{
@@ -512,17 +526,28 @@ int unlocked = 6;
 		}
 		
 		res.smallfont.color = 0xFFFFFF;
+		
+		static const char * const names[6] = {
+			"Kimera - 7x7 Map (Tutorial)",
+			"Remnant - 7x7 Map (Normal)",
+			"Alchemia - 7x7 Map (Hard)",
+			"Firestorm - 7x7 Map (Hardcore)",
+			"Constantine - 9x9 Map (Normal)",
+			"Silverstone - 9x9 Map (Hard)",
+		};
+		
 		for (int y=0;y<6;y++)
 		{
-			int b = (y>=4 ? 2 : 0); // the rock tile contains a repeating pattern, better follow its size
-			out.insert_tile_with_border(150, 30+y*75, 340, 50,
+			int oy = 38+y*75;
+			
+			bool b = (y>=4); // the rock tile contains a repeating pattern, better follow its size
+			out.insert_tile_with_border(150, oy-8, 340, 50,
 			                            (y<2 ? res.fg0 : y<4 ? res.fg1menu : res.fg2),
-			                            3+b, 37-b, 4+b, 36-b);
+			                            3+b, 37-b-b, 4+b, 36-b-b);
 			
 			for (int x=0;x<5;x++)
 			{
 				int ox = 182+60*x;
-				int oy = 38+y*75;
 				
 				int n = y*5 + x + 1;
 				int d1 = n/10;
@@ -554,7 +579,7 @@ int unlocked = 6;
 				{
 					highlight = true;
 				}
-				if (highlight)
+				if (highlight) // as a variable to make sure the box isn't drawn twice, that'd be ugly
 				{
 					out.insert(ox-10, oy-10, res.levelboxactive);
 				}
@@ -566,7 +591,15 @@ int unlocked = 6;
 				                            (y<2 ? res.fg0mask : y<4 ? res.fg1mask : res.fg0mask),
 				                            3+b, 37-b, 4+b, 36-b);
 			}
+			
+			uint32_t textwidth = res.smallfont.measure(names[y]);
+			out.insert_text(320-textwidth/2, oy-22, res.smallfont, names[y]);
 		}
+		
+		res.smallfont.scale = 1;
+		uint32_t textwidth = res.smallfont.measure("Solve the golden puzzles to unlock the next set of puzzles!");
+		out.insert_text(320-textwidth/2, 460, res.smallfont, "Solve the golden puzzles to unlock the next set of puzzles!");
+		res.smallfont.scale = 2;
 		
 		//no birds on the menu
 	}
@@ -599,6 +632,64 @@ int unlocked = 6;
 		game_kb_state = use_kb ? 1 : 0;
 		game_kb_x = 0;
 		game_kb_y = 0;
+	}
+	
+	void draw_island_fragment(int x, int y, bool right, bool up, bool left, bool down)
+	{
+//int tileset=1;
+		image& im = (tileset==0 ? res.fg0 : tileset==1 ? res.fg1 : res.fg2);
+		
+		int bx = (tileset==2 ? 5 : 3); // border x
+		int by = (tileset==2 ? 6 : 4);
+		
+		image im_tile;
+		im_tile.init_ref_sub(im, bx, by, im.width-bx*2, im.height-by*2);
+		
+		if (left)
+		{
+			out.insert_tile(x, y+(up?0:by), 20, 20-(up?0:by), im_tile, x, y+(up?0:by));
+			if (!up)
+				out.insert_sub(x, y, im, 10, 0, 20, by);
+			
+			out.insert_tile(x, y+20, 20, (down?20:16), im_tile, x, y+20);
+			if (!down)
+				out.insert_sub(x, y+40-by, im, 10, 40-by, 20, by);
+		}
+		else
+		{
+			out.insert_tile(x+bx, y+(up?0:by), 20-bx, 20-(up?0:by), im_tile, x+bx, y+(up?0:by));
+			out.insert_sub(x, y, im, 0, (up?10:0), bx, 20);
+			if (!up)
+				out.insert_sub(x+bx, y, im, bx, 0, 20-bx, by);
+			
+			out.insert_tile(x+bx, y+20, 20-bx, 20-(down?0:by), im_tile, x+bx, y+20);
+			out.insert_sub(x, y+20, im, 0, (down?10:20), bx, 20-(down?0:by));
+			if (!down)
+				out.insert_sub(x, y+40-by, im, 0, 40-by, 20, by);
+		}
+		
+		if (right)
+		{
+			out.insert_tile(x+20, y+(up?0:by), 20, 20-(up?0:by), im_tile, x+20, y+(up?0:by));
+			if (!up)
+				out.insert_sub(x+20, y, im, 10, 0, 20, by);
+			
+			out.insert_tile(x+20, y+20, 20, 20-(down?0:by), im_tile, x+20, y+20);
+			if (!down)
+				out.insert_sub(x+20, y+40-by, im, 10, 40-by, 20, by);
+		}
+		else
+		{
+			out.insert_tile(x+20, y+(up?0:by), 20-bx, 20-(up?0:by), im_tile, x+20, y+(up?0:by));
+			out.insert_sub(x+40-bx, y, im, 40-bx, (up?10:0), bx, 20);
+			if (!up)
+				out.insert_sub(x+20, y, im, 20, 0, 20-bx, by);
+			
+			out.insert_tile(x+20, y+20, 20-bx, 20-(down?0:by), im_tile, x+20, y+20);
+			out.insert_sub(x+40-bx, y+20, im, 40-bx, (down?10:20), bx, 20);
+			if (!down)
+				out.insert_sub(x+20, y+40-by, im, 20, 40-by, 20-bx, by);
+		}
 	}
 	
 	void ingame()
@@ -658,9 +749,9 @@ int unlocked = 6;
 				out.insert_text(bx, by, res.smallfont, tostring(here.totbridges));
 				
 				if (here.totbridges == here.population)
-				{
 					out.insert(x, y, res.islanddone);
-				}
+				if (here.totbridges > here.population)
+					out.insert(x, y, res.islandoverdone);
 				
 				if (here.bridges[1] == 1)
 				{
@@ -798,7 +889,7 @@ int unlocked = 6;
 			
 			in_press &= k_cancel;
 		}
-		if (game_kb_state != 0)
+		if (game_kb_state != 0 && !game_menu)
 		{
 			if (in_press & 1<<k_confirm)
 			{
@@ -860,7 +951,9 @@ int unlocked = 6;
 				if ((in_press & 1<<k_left ) && game_kb_x > 0) game_kb_x--;
 				if ((in_press & 1<<k_down ) && game_kb_y < map.height-1) game_kb_y++;
 			}
-			
+		}
+		if (game_kb_state != 0)
+		{
 			out.insert(sx + game_kb_x*48 + game_kb_state*10, sy + game_kb_y*48, res.kbfocus);
 		}
 		
@@ -913,7 +1006,7 @@ int unlocked = 6;
 					active = true;
 					if (in_press & 1<<k_click) clicked = true;
 				}
-				if (game_menu_focus == id)
+				if (game_menu_focus == id && game_menu)
 				{
 					active = true;
 					if (in_press & 1<<k_confirm) clicked = true;
@@ -1170,13 +1263,13 @@ to_title(); //TODO
 	
 	
 	
-	void run(const input& in, uint32_t* pixels, size_t stride)
+	void run(const input& in, image& out)
 	{
 		this->in_press = (in.keys & ~this->in.keys);
 		if (in.mouseclick && !this->in.mouseclick) this->in_press |= 1<<k_click;
 		this->in = in;
 		
-		out.init_ptr((uint8_t*)pixels, 640, 480, stride, ifmt_0rgb8888);
+		this->out.init_ref(out);
 		
 		switch (state)
 		{

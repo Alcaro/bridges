@@ -37,10 +37,9 @@ public:
 		uint8_t keys; // format: 1<<k_up | 1<<k_confirm
 	};
 	
-	//'pixels' should be a 640x480 array. Pixels will be 0RGB8888, native endian.
-	//It's allowed to stick random stuff between the rows. If so, increase the stride.
-	//All 640*480 pixels will be overwritten. They will be written non-sequentially, and may be read.
-	virtual void run(const input& in, uint32_t* pixels, size_t stride = sizeof(uint32_t)*640) = 0;
+	//'out' should be a 640x480 image. 0rgb8888 or xrgb8888 is recommended, xrgb is slightly faster.
+	//All 640*480 pixels will be overwritten. They will be written non-sequentially, multiple times, and may be read.
+	virtual void run(const input& in, image& out) = 0;
 	
 	virtual ~game() {}
 	

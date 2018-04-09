@@ -254,8 +254,7 @@ bool image::init_decode_png(arrayview<byte> pngdata)
 	size_t nbytes = max(this->stride, bytes_per_line_raw+4) * (height+2) + sizeof(uint32_t)*7;
 	this->storage = malloc(nbytes);
 	
-	this->pixels = (uint8_t*)this->storage;
-	//xrgb8888 is probably faster than rgb888, and a lot easier
+	this->pixels8 = (uint8_t*)this->storage;
 	this->fmt = (has_alpha ? (has_bool_alpha ? ifmt_bargb8888 : ifmt_argb8888) : ifmt_xrgb8888);
 	
 	uint8_t* inflate_end = (uint8_t*)this->storage + nbytes;
@@ -584,8 +583,8 @@ test("png", "array,imagebase,file", "png")
 			assert_eq(im.width, ref.width);
 			assert_eq(im.height, ref.height);
 			
-			arrayview<uint32_t> imp = im.view<uint32_t>();
-			arrayview<uint32_t> refp = ref.view<uint32_t>();
+			uint32_t* imp = im.pixels32;
+			uint32_t* refp = ref.pixels32;
 			
 //if(tests[i].contains("unknown"))
 //{

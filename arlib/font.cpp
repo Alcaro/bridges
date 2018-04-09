@@ -53,7 +53,7 @@ uint32_t image::insert_text(int32_t x, int32_t y, const font& fnt, cstring text,
 					uint32_t yt = y + yp*fnt.scale + yps;
 					if (yt < 0 || yt >= this->height) continue;
 					
-					uint32_t* targetpx = (uint32_t*)this->pixels + yt*this->stride/sizeof(uint32_t);
+					uint32_t* targetpx = this->pixels32 + yt*this->stride/sizeof(uint32_t);
 					
 					for (size_t xp=0;xp<8;xp++)
 					{
@@ -168,7 +168,7 @@ void font::init_from_image(const image& img)
 		for (int y=0;y<ch;y++)
 		{
 			int ty = cy*ch + y;
-			uint32_t* pixels = (uint32_t*)(img.pixels + img.stride*ty);
+			uint32_t* pixels = img.pixels32 + img.stride/sizeof(uint32_t)*ty;
 			
 			uint8_t bits = 0;
 			for (int x=0;x<cw;x++)
@@ -185,6 +185,17 @@ void font::init_from_image(const image& img)
 	
 	height = ch;
 	scale = 1;
+}
+
+uint32_t font::measure(cstring text, float spacesize)
+{
+	float ret = 0;
+	for (size_t i=0;i<=text.length();i++)
+	{
+		if (text[i] == ' ') ret += spacesize;
+		ret += width[(uint8_t)text[i]] * scale;
+	}
+	return ret;
 }
 
 #include "test.h"

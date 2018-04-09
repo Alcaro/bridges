@@ -35,6 +35,8 @@ static const uint8_t fg2_raw[1879];
 image fg2;
 static const uint8_t islanddone_raw[115];
 image islanddone;
+static const uint8_t islandoverdone_raw[169];
+image islandoverdone;
 static const uint8_t kbfocus_raw[151];
 image kbfocus;
 static const uint8_t levelbox_raw[112];

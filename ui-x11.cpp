@@ -52,11 +52,22 @@ static int pressed_keys()
 int main(int argc, char** argv)
 {
 	argparse args;
-	bool do_bench = false;
-	args.add("perf", &do_bench);
+	bool do_bench_solv = false;
+	args.add("perf-solv", &do_bench_solv);
+	bool do_bench_ui = false;
+	args.add("perf-ui", &do_bench_ui);
 	arlib_init(args, argv);
 	
-	if (do_bench)
+	static uint32_t pixels[640*480]; // static to keep the stack frame small
+	image out; // initialized up here so perf-ui can use it too
+	out.init_ptr(pixels, 640, 480, sizeof(uint32_t)*640, ifmt_xrgb8888);
+	
+	if (do_bench_solv && do_bench_ui)
+	{
+		puts("can't benchmark both solver and UI");
+		return 1;
+	}
+	if (do_bench_solv)
 	{
 		srand(0);
 		bool vg = RUNNING_ON_VALGRIND;
@@ -103,6 +114,29 @@ int main(int argc, char** argv)
 		
 		return 0;
 	}
+	if (do_bench_ui)
+	{
+		game* g = game::create();
+		game::input in = {};
+		
+		int frames = 0;
+		
+		uint64_t start = time_ms_ne();
+		
+		uint64_t end = start;
+		while (end < start+5000)
+		{
+			for (int i=0;i<100;i++) // only checking timer every 100 frames boosts framerate from 1220 to 1418
+			{
+				g->run(in, out);
+				frames++;
+			}
+			end = time_ms_ne();
+		}
+		
+		printf("rendered %i frames in %u ms = %ffps\n", frames, (unsigned)(end-start), frames/(float)(end-start)*1000);
+		return 0;
+	}
 	
 	widget_viewport* view;
 	window* wnd = window_create(
@@ -142,7 +176,6 @@ int main(int argc, char** argv)
 	pressed_keys_init();
 	
 	game* g = game::create();
-	static uint32_t pixels[640*480]; // static to keep the stack frame small
 	
 	time_t lastfps = time(NULL);
 	int fps = 0;
@@ -174,7 +207,7 @@ int main(int argc, char** argv)
 				in.mouseclick = false;
 			}
 			
-			g->run(in, pixels);
+			g->run(in, out);
 			gl.TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 640, 480, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, pixels);
 			
 			time_t newtime = time(NULL);
