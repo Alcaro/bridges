@@ -120,7 +120,7 @@ static inline void image_insert_noov_8888_to_8888_alphasrc(image& target, int32_
 					simd128 newpack = newcols.compress16to8u(newcols);
 					//_mm_packus_epi16(newcols, newcols);
 					// contains u8: {don't care}*12, sac+tac, sbc+tbc, sgc+tgc, src+trc
-					simd128 newpacksum = newpack.add32(newpack.shuffle32(1));
+					simd128 newpacksum = newpack.add32(newpack.shuffle32<1>());
 					
 					uint32_t newpx = newpacksum.low32();
 					if (newalpha == 0x00000000) newpx &= 0x00FFFFFF;

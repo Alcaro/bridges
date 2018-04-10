@@ -175,7 +175,9 @@ int main(int argc, char** argv)
 	
 	pressed_keys_init();
 	
-	game* g = game::create();
+	game::savedat fakesave;
+	fakesave.unlocked = 6;
+	game* g = game::create(fakesave);
 	
 	time_t lastfps = time(NULL);
 	int fps = 0;

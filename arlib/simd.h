@@ -6,7 +6,7 @@
 #define HAVE_SIMD
 #define HAVE_SIMD128
 
-//dereferencing a pointer to SIMD objects is forbidden, use loada/loadu instead
+//dereferencing pointers to SIMD objects is forbidden, use loada/loadu instead
 class simd128 {
 	__m128i val;
 	
@@ -115,8 +115,11 @@ public:
 	simd128 compress16to8u(simd128 next = zero()) { return _mm_packus_epi16(val, next.val); }
 	//Compresses the i16s of the input to i8s. If out of range, returns the closest representable value.
 	simd128 compress16to8s(simd128 next = zero()) { return _mm_packs_epi16(val, next.val); }
-	simd128 shuffle32(uint8_t a, uint8_t b, uint8_t c, uint8_t d) { return _mm_shuffle_epi32(val, a | b<<2 | c<<4 | d<<6); }
-	simd128 shuffle32(uint8_t words) { return _mm_shuffle_epi32(val, words); }
+	
+	template<uint8_t words> // has to be a template, or gcc gets whiny if optimizations are disabled
+	simd128 shuffle32() { return _mm_shuffle_epi32(val, words); }
+	template<uint8_t a, uint8_t b, uint8_t c, uint8_t d>
+	simd128 shuffle32() { return shuffle32<a | b<<2 | c<<4 | d<<6>(); }
 	uint32_t low32() { return _mm_cvtsi128_si32(val); }
 	uint64_t low64() { return _mm_cvtsi128_si64(val); }
 };
@@ -125,7 +128,7 @@ public:
 #endif
 
 //this doesn't yield any measurable speedup over the 128bit SIMD, and requires an extra compile flag
-//as such, it's considered unsupported and is disabled
+//not worth the effort
 #ifdef __AVX2__ggg
 #include <immintrin.h>
 #define HAVE_SIMD

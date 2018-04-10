@@ -81,6 +81,7 @@ public:
 	struct island {
 		int8_t population; // -1 for ocean
 		int8_t totbridges;
+		int16_t rootnode; // -1 for ocean, y*100+x for most islands, something else for large islands
 		
 		//1 if the next tile in that direction is an island, 2 if there's one ocean tile before the next island
 		//-1 if a bridge there would run into the edge of the map
@@ -90,6 +91,7 @@ public:
 		
 		//number of bridges exiting this tile in the given direction, 0-2
 		//set for ocean tiles too; [0]=[2] and [1]=[3] for oceans
+		//if that island is part of the current one (rootnode equal), 3 bridges
 		uint8_t bridges[4];
 	};
 	
@@ -98,6 +100,8 @@ public:
 	//these two are used only inside finished(), to check if the map is connected
 	bool visited[100*100];
 	int16_t towalk[100*100];
+	
+	island& get(int key) { return map[key/100][key%100]; }
 	
 	void init(const char * inmap)
 	{
@@ -114,9 +118,24 @@ public:
 		{
 			island& here = map[y][x];
 			
+			int rootpos = y*100+x;
 			char mapchar = inmap[y*(width+1) + x];
+			
+			while (mapchar == '<' || mapchar == '>' || mapchar == 'v' || mapchar == '^')
+			{
+				if (mapchar == '>') rootpos += 1;
+				if (mapchar == '^') rootpos -= 100;
+				if (mapchar == '<') rootpos -= 1;
+				if (mapchar == 'v') rootpos += 100;
+				
+				int y2 = rootpos/100;
+				int x2 = rootpos%100;
+				mapchar = inmap[y2*(width+1) + x2];
+			}
+			
 			if (mapchar == ' ') here.population = -1;
-			else here.population = mapchar-'0';
+			else if (mapchar >= '0' && mapchar <= '9') here.population = mapchar-'0';
+			else here.population = mapchar-'A'+10;
 			
 			here.totbridges = 0;
 			here.bridges[0] = 0;
@@ -128,6 +147,8 @@ public:
 			here.bridgelen[1] = -1;
 			here.bridgelen[2] = -1;
 			here.bridgelen[3] = -1;
+			
+			here.rootnode = rootpos;
 			
 			if (here.population != -1)
 			{
@@ -144,6 +165,13 @@ public:
 							map[y][x3].bridgelen[0] = x-x3;
 							map[y][x3].bridgelen[2] = x3-x2;
 						}
+						
+						if (map[y][x2].rootnode == here.rootnode && x-x2==1)
+						{
+							here.bridges[2] = 3;
+							map[y][x2].bridges[0] = 3;
+						}
+						
 						break;
 					}
 				}
@@ -158,6 +186,13 @@ public:
 							map[y3][x].bridgelen[1] = y3-y2;
 							map[y3][x].bridgelen[3] = y-y3;
 						}
+						
+						if (map[y2][x].rootnode == here.rootnode && y-y2==1)
+						{
+							here.bridges[1] = 3;
+							map[y2][x].bridges[3] = 3;
+						}
+						
 						break;
 					}
 				}
@@ -171,27 +206,31 @@ public:
 		if (dir == 0)
 		{
 			island& here = map[y][x];
+			if (here.bridges[0] == 3) return;
+			
 			int newbridges = (here.bridges[0]+1)%3;
 			int diff = newbridges - here.bridges[0];
 			for (int xx=0;xx<here.bridgelen[0];xx++)
 			{
 				map[y][x+xx  ].bridges[0] = newbridges;
 				map[y][x+xx+1].bridges[2] = newbridges;
-				map[y][x+xx  ].totbridges += diff;
-				map[y][x+xx+1].totbridges += diff;
+				get(map[y][x+xx  ].rootnode).totbridges += diff;
+				get(map[y][x+xx+1].rootnode).totbridges += diff;
 			}
 		}
 		else
 		{
 			island& here = map[y][x];
+			if (here.bridges[3] == 3) return;
+			
 			int newbridges = (here.bridges[3]+1)%3;
 			int diff = newbridges - here.bridges[3];
 			for (int yy=0;yy<here.bridgelen[3];yy++)
 			{
 				map[y+yy  ][x].bridges[3] = newbridges;
 				map[y+yy+1][x].bridges[1] = newbridges;
-				map[y+yy  ][x].totbridges += diff;
-				map[y+yy+1][x].totbridges += diff;
+				get(map[y+yy  ][x].rootnode).totbridges += diff;
+				get(map[y+yy+1][x].rootnode).totbridges += diff;
 			}
 		}
 	}
@@ -227,7 +266,7 @@ public:
 			if (here.population != -1) ixstart = y*100+x; // keep track of one arbitrary island
 			
 			//if not ocean and wrong number of bridges,
-			if (here.population != -1 && here.totbridges != here.population)
+			if (here.population != -1 && here.rootnode == y*100+x && here.totbridges != here.population)
 			{
 				return false; // then map isn't solved
 			}
@@ -459,6 +498,7 @@ public:
 		
 		birdfg.draw(out, res.bird, 0);
 		
+/*
 static const bool z[10][10] = {
 {0,0,0,0,0,0,0,0,0,0},
 {0,1,1,0,1,0,0,1,0,0},
@@ -483,6 +523,7 @@ draw_island_fragment(x*40, y*40, z[y][x+1], z[y-1][x], z[y][x-1], z[y+1][x]);
 out.insert_tile_with_border(400, 20, 230, 440, res.fg0, 3, 37, 4, 36);
 out.insert_tile(100, 20, 440, 440, res.levelboxgold);
 //out.insert_tile(100, 20, 440, 440, res.fg0mask);
+*/
 	}
 	
 	
@@ -635,7 +676,7 @@ out.insert_tile(100, 20, 440, 440, res.levelboxgold);
 		game_kb_y = 0;
 	}
 	
-	void draw_island_fragment(int x, int y, bool right, bool up, bool left, bool down)
+	void draw_island_fragment(int x, int y, bool right, bool up, bool left, bool down, bool downright)
 	{
 //int tileset=1;
 		image& im = (tileset==0 ? res.fg0 : tileset==1 ? res.fg1 : res.fg2);
@@ -644,50 +685,64 @@ out.insert_tile(100, 20, 440, 440, res.levelboxgold);
 		int by = (tileset==2 ? 6 : 4);
 		
 		image im_tile;
-		im_tile.init_ref_sub(im, bx, by, im.width-bx*2, im.height-by*2);
+		im_tile.init_ref_sub(im, bx, by, 40-bx*2, 40-by*2);
 		
 		if (left)
 		{
+			//top left
 			out.insert_tile(x, y+(up?0:by), 20, 20-(up?0:by), im_tile, x, y+(up?0:by));
 			if (!up)
-				out.insert_sub(x, y, im, 10, 0, 20, by);
+				out.insert_sub(x-8, y, im, 6, 0, 28, by);
 			
-			out.insert_tile(x, y+20, 20, (down?20:16), im_tile, x, y+20);
+			//bottom left
+			out.insert_tile(x, y+20, 20, 20-(down?-8:by), im_tile, x, y+20);
 			if (!down)
-				out.insert_sub(x, y+40-by, im, 10, 40-by, 20, by);
+				out.insert_sub(x-8, y+40-by, im, 6, 40-by, 28, by);
 		}
 		else
 		{
+			//top left
 			out.insert_tile(x+bx, y+(up?0:by), 20-bx, 20-(up?0:by), im_tile, x+bx, y+(up?0:by));
-			out.insert_sub(x, y, im, 0, (up?10:0), bx, 20);
+			out.insert_sub(x, y-(up?8:0), im, 0, (up?6:0), bx, (up?28:20));
 			if (!up)
 				out.insert_sub(x+bx, y, im, bx, 0, 20-bx, by);
 			
-			out.insert_tile(x+bx, y+20, 20-bx, 20-(down?0:by), im_tile, x+bx, y+20);
-			out.insert_sub(x, y+20, im, 0, (down?10:20), bx, 20-(down?0:by));
+			//bottom left
+			out.insert_tile(x+bx, y+20, 20-bx, 20-(down?-8:by), im_tile, x+bx, y+20);
+			out.insert_sub(x, y+20, im, 0, (down?10:20), bx, 20-(down?-8:by));
 			if (!down)
 				out.insert_sub(x, y+40-by, im, 0, 40-by, 20, by);
 		}
 		
 		if (right)
 		{
-			out.insert_tile(x+20, y+(up?0:by), 20, 20-(up?0:by), im_tile, x+20, y+(up?0:by));
+			//top right
+			out.insert_tile(x+20, y+(up?0:by), 28, 20-(up?0:by), im_tile, x+20, y+(up?0:by));
 			if (!up)
-				out.insert_sub(x+20, y, im, 10, 0, 20, by);
+				out.insert_sub(x+20, y, im, 6, 0, 28, by);
 			
-			out.insert_tile(x+20, y+20, 20, 20-(down?0:by), im_tile, x+20, y+20);
+			//bottom right
+			if (downright)
+				out.insert_tile(x+20, y+20, 28, 20-(down?-8:by), im_tile, x+20, y+20);
+			else
+			{
+				if (down) out.insert_tile(x+20, y+40, 20, 8, im_tile, x+20, y+40);
+				out.insert_tile(x+20, y+20, 28, 20-(down?0:by), im_tile, x+20, y+20);
+			}
 			if (!down)
-				out.insert_sub(x+20, y+40-by, im, 10, 40-by, 20, by);
+				out.insert_sub(x+20, y+40-by, im, 6, 40-by, 28, by);
 		}
 		else
 		{
-			out.insert_tile(x+20, y+(up?0:by), 20-bx, 20-(up?0:by), im_tile, x+20, y+(up?0:by));
-			out.insert_sub(x+40-bx, y, im, 40-bx, (up?10:0), bx, 20);
+			//top right
+			out.insert_tile(x+20, y+(up?0:by), 20-bx, 20-(up?-8:by), im_tile, x+20, y+(up?0:by));
+			out.insert_sub(x+40-bx, y-(up?8:0), im, 40-bx, (up?6:0), bx, (up?28:20));
 			if (!up)
 				out.insert_sub(x+20, y, im, 20, 0, 20-bx, by);
 			
-			out.insert_tile(x+20, y+20, 20-bx, 20-(down?0:by), im_tile, x+20, y+20);
-			out.insert_sub(x+40-bx, y+20, im, 40-bx, (down?10:20), bx, 20);
+			//bottom right
+			out.insert_tile(x+20, y+20, 20-bx, 20-(down?-8:by), im_tile, x+20, y+20);
+			out.insert_sub(x+40-bx, y+20, im, 40-bx, (down?10:20), bx, (down?28:20));
 			if (!down)
 				out.insert_sub(x+20, y+40-by, im, 20, 40-by, 20-bx, by);
 		}
@@ -725,34 +780,49 @@ out.insert_tile(100, 20, 440, 440, res.levelboxgold);
 			
 			if (here.population != -1)
 			{
-				out.insert(x, y, fg);
+				bool joinr = (tx < map.width-1  && map.map[ty][tx+1].rootnode == here.rootnode);
+				bool joinu = (ty > 0            && map.map[ty-1][tx].rootnode == here.rootnode);
+				bool joinl = (tx > 0            && map.map[ty][tx-1].rootnode == here.rootnode);
+				bool joind = (ty < map.height-1 && map.map[ty+1][tx].rootnode == here.rootnode);
+				if (joinr || joinu || joinl || joind)
+				{
+					bool joindr = (joinr && joind && map.map[ty+1][tx+1].rootnode == here.rootnode);
+					draw_island_fragment(x, y, joinr, joinu, joinl, joind, joindr);
+				}
+				else
+				{
+					out.insert(x, y, fg);
+				}
 				
-				res.smallfont.scale = 1;
-				res.smallfont.color = 0xFFFF00;
-				out.insert_text(x+4, y+5, res.smallfont, "Pop.");
-				res.smallfont.color = 0xFFFFFF;
-				out.insert_text(x+18, y+26, res.smallfont, "Bri.");
-				res.smallfont.scale = 2;
-				
-				int px = x+25 + (here.population==1)*3;
-				int py = y+3;
-				int bx = x+4 + (here.totbridges==1)*2;
-				int by = y+18;
-				
-				res.smallfont.color = 0x000000;
-				out.insert_text(px+1, py, res.smallfont, tostring(here.population));
-				out.insert_text(px, py+1, res.smallfont, tostring(here.population));
-				out.insert_text(bx+1, by, res.smallfont, tostring(here.totbridges));
-				out.insert_text(bx, by+1, res.smallfont, tostring(here.totbridges));
-				res.smallfont.color = 0xFFFF00;
-				out.insert_text(px, py, res.smallfont, tostring(here.population));
-				res.smallfont.color = 0xFFFFFF;
-				out.insert_text(bx, by, res.smallfont, tostring(here.totbridges));
-				
-				if (here.totbridges == here.population)
-					out.insert(x, y, res.islanddone);
-				if (here.totbridges > here.population)
-					out.insert(x, y, res.islandoverdone);
+				if (here.rootnode == ty*100+tx)
+				{
+					res.smallfont.scale = 1;
+					res.smallfont.color = 0xFFFF00;
+					out.insert_text(x+4, y+5, res.smallfont, "Pop.");
+					res.smallfont.color = 0xFFFFFF;
+					out.insert_text(x+18, y+26, res.smallfont, "Bri.");
+					res.smallfont.scale = 2;
+					
+					int px = x+25 + (here.population==1)*3;
+					int py = y+3;
+					int bx = x+4 + (here.totbridges==1)*2;
+					int by = y+18;
+					
+					res.smallfont.color = 0x000000;
+					out.insert_text(px+1, py, res.smallfont, tostring(here.population));
+					out.insert_text(px, py+1, res.smallfont, tostring(here.population));
+					out.insert_text(bx+1, by, res.smallfont, tostring(here.totbridges));
+					out.insert_text(bx, by+1, res.smallfont, tostring(here.totbridges));
+					res.smallfont.color = 0xFFFF00;
+					out.insert_text(px, py, res.smallfont, tostring(here.population));
+					res.smallfont.color = 0xFFFFFF;
+					out.insert_text(bx, by, res.smallfont, tostring(here.totbridges));
+					
+					if (here.totbridges == here.population)
+						out.insert(x, y, res.islanddone);
+					if (here.totbridges > here.population)
+						out.insert(x, y, res.islandoverdone);
+				}
 				
 				if (here.bridges[1] == 1)
 				{
@@ -825,7 +895,7 @@ out.insert_tile(100, 20, 440, 440, res.levelboxgold);
 			for (int shift=6;true;shift-=2)
 			{
 				dir = (dirs[slice]>>shift) & 3;
-				if (here.bridgelen[dir] != -1)
+				if (here.bridgelen[dir] != -1 && here.bridges[dir] != 3)
 				{
 					//clicking an ocean tile with a bridge shouldn't create a crossing bridge
 					if (here.population == -1 && here.bridges[dir] == 0 && here.bridges[dir^1] != 0) continue;
@@ -861,6 +931,7 @@ out.insert_tile(100, 20, 440, 440, res.levelboxgold);
 			
 			//can't use 'here', ty/tx may have changed
 			int len = map.map[ty][tx].bridgelen[dir];
+			
 			if (dir == 0)
 			{
 				out.insert_tile_with_border(x+37, y+14, len*48-34, 12, res.arrowh, 6, 9, 0, 0);
