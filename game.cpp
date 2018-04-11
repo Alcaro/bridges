@@ -4,16 +4,12 @@
 
 //TODO:
 //- end game screen
+//- better selection icon for keyboard gameplay
+//- better large-island graphics
 //- compressed UI, where islands are half size so maps can be up to 26x20
 //- more objects:
-//  - islands accepting an arbitrary number of bridges
-//  - larger islands, 40x88px, can build 2 bridges from each of the 6 possible exits
-//      cycle checker treats them as 2 separate islands with a mandatory bridge in between
-//  - even bigger islands, 88x88
-//  - maybe even huge non-rectangular islands, some of which extend off the edge of the map
-//      if yes, they cannot bridge themselves
-//  - castles; every island must be connected to a castle, but castles may not be connected to each other
-//      actually, combine some of the above
+//  - castles
+//      every island must be connected to a castle, but castles may not be connected to each other
 //      castles must be on large (minimum 2x2) islands, and are arbitrary-populated (violating either rule would be cluttered)
 //      multiple castles of the same color must be connected; multiple castles of different colors must be disjoint
 //      all four castles have different designs (mostly grayscale, but colorful roofs), and 16x12 flags
@@ -26,13 +22,13 @@
 //  - supports the new objects
 //      how will it deal with castles? does it pick one castle of each color and pretend they're connected?
 //        does that leave any actually-solvable map ambiguous?
-//          for example (using RBYG for castles)
-//            R2G
-//             R
+//          for example (using rbyg for castles)
+//            r2g
+//             r
 //          if the top two are fake-connected, the 2 could point right+down, which is illegal
 //          similarly,
-//            R22G
-//             R
+//            r22g
+//             r
 //          has the sole solution 'left 2 connects the reds, right 2 does both to green', but how does the solver prove that?
 //          limiting to one castle per color would be silly
 //          run the algorithm once for every combination of one castle of each color?
@@ -49,21 +45,12 @@
 //- reef: #
 //- large island: > ^ < v, ultimately pointing to a character defining the population (loops not allowed)
 //- island with more than 9 pop: A=10, B=11, etc, up to Z=36 (above 36 would just be annoying)
-//- castle: qwer (red, blue, yellow, green, respectively)
-//    or tyui to render off-center to the right; asdf for below; ghjk for below-right
-//    for ghjk, the three tiles below, right and below-right must be part of the same island
-//    for qwer, all eight surrounding must be on the island
-//    for asdf and tyui, five surrounding connected tiles are needed
+//- castle: rbyg (red, blue, yellow, green, respectively)
 
 //internal representation:
 //- reef: population -2, bridgelen is -1 across the area
-//- large islands:
-//    every slot in the grid contains an int16, pointing to the root node of that island, where pop/bri is rendered
-//    root nodes point to themselves; small islands (including oceans and reefs and small islands) have -1 there
-//    the root node has a bridge counter variable, which is updated every time something connects to the island
-//    bridgelen, if pointing to within the island, is -2; 'bridges' is 100 and not rendered
 //- castles:
-//    population is 80 plus color*1 plus moveright*4 plus movedown*8
+//    population is 80 plus color*1
 //    index to one castle of each color is stored in the gamemap (-1 if none)
 //    flood fill starts from them, one at the time; coloring an incorrect castle aborts the operation, correct is ignored
 //    finding if all are connected is done via island counting
@@ -243,10 +230,10 @@ public:
 			island& here = map[y][x];
 			
 			here.totbridges = 0;
-			here.bridges[0] = 0;
-			here.bridges[1] = 0;
-			here.bridges[2] = 0;
-			here.bridges[3] = 0;
+			if (here.bridges[0] <= 2) here.bridges[0] = 0;
+			if (here.bridges[1] <= 2) here.bridges[1] = 0;
+			if (here.bridges[2] <= 2) here.bridges[2] = 0;
+			if (here.bridges[3] <= 2) here.bridges[3] = 0;
 		}
 	}
 	
@@ -780,10 +767,10 @@ out.insert_tile(100, 20, 440, 440, res.levelboxgold);
 			
 			if (here.population != -1)
 			{
-				bool joinr = (tx < map.width-1  && map.map[ty][tx+1].rootnode == here.rootnode);
-				bool joinu = (ty > 0            && map.map[ty-1][tx].rootnode == here.rootnode);
-				bool joinl = (tx > 0            && map.map[ty][tx-1].rootnode == here.rootnode);
-				bool joind = (ty < map.height-1 && map.map[ty+1][tx].rootnode == here.rootnode);
+				bool joinr = (here.bridges[0]==3);
+				bool joinu = (here.bridges[1]==3);
+				bool joinl = (here.bridges[2]==3);
+				bool joind = (here.bridges[3]==3);
 				if (joinr || joinu || joinl || joind)
 				{
 					bool joindr = (joinr && joind && map.map[ty+1][tx+1].rootnode == here.rootnode);
