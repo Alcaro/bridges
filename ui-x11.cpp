@@ -60,7 +60,7 @@ int main(int argc, char** argv)
 	
 	static uint32_t pixels[640*480]; // static to keep the stack frame small
 	image out; // initialized up here so perf-ui can use it too
-	out.init_ptr(pixels, 640, 480, sizeof(uint32_t)*640, ifmt_xrgb8888);
+	out.init_ptr(pixels, 640, 480, sizeof(uint32_t)*640, ifmt_xrgb8888); // xrgb is faster than 0rgb
 	
 	if (do_bench_solv && do_bench_ui)
 	{
@@ -148,15 +148,6 @@ int main(int argc, char** argv)
 	gl.create(view, aropengl::t_ver_1_0);
 	gl.swapInterval(1);
 	
-	gl.Disable(GL_ALPHA_TEST);
-	gl.Disable(GL_BLEND);
-	gl.Disable(GL_DEPTH_TEST);
-	gl.Disable(GL_POLYGON_SMOOTH);
-	gl.Disable(GL_STENCIL_TEST);
-	
-	gl.Enable(GL_DITHER);
-	gl.Enable(GL_TEXTURE_2D);
-	
 	gl.MatrixMode(GL_PROJECTION);
 	gl.LoadIdentity();
 	gl.Ortho(0, 640, 0, 480, -1.0, 1.0);
@@ -165,6 +156,7 @@ int main(int argc, char** argv)
 	gl.MatrixMode(GL_MODELVIEW);
 	gl.LoadIdentity();
 	
+	gl.Enable(GL_TEXTURE_2D);
 	GLuint tex;
 	gl.GenTextures(1, &tex);
 	gl.BindTexture(GL_TEXTURE_2D, tex);
@@ -175,17 +167,17 @@ int main(int argc, char** argv)
 	
 	pressed_keys_init();
 	
-	game::savedat fakesave;
-	fakesave.unlocked = 6;
-	game* g = game::create(fakesave);
+	//save support not implemented here, just hardcode a save file
+	static const uint8_t saveraw[] = { 6 };
+	game::savedat save;
+	static_assert(sizeof(save) && sizeof(saveraw));
+	memcpy(&save, saveraw, sizeof(save));
 	
-	time_t lastfps = time(NULL);
-	int fps = 0;
+	game* g = game::create(save);
 	
 	goto enter; // force render the first frame, to avoid drawing an uninitialized texture
 	while (wnd->is_visible())
 	{
-//static int l=0;l++;if(l==120)break;
 		if (wnd->is_active())
 		{
 	enter: ;
@@ -211,19 +203,11 @@ int main(int argc, char** argv)
 			
 			g->run(in, out);
 			gl.TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 640, 480, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, pixels);
-			
-			time_t newtime = time(NULL);
-			if (newtime != lastfps)
-			{
-				//printf("%ifps\n", fps);
-				lastfps = newtime;
-				fps = 0;
-			}
-			fps++;
 		}
 		
 		//redraw the texture, to avoid glitches if we're sent an Expose event
 		//no point reuploading, and no point caring about whether the event was Expose or not, just redraw
+		gl.Clear(GL_COLOR_BUFFER_BIT); // does nothing, but likely makes things faster
 		gl.Begin(GL_TRIANGLE_STRIP);
 		gl.TexCoord2f(0,            0          ); gl.Vertex3i(0,   480, 0);
 		gl.TexCoord2f(640.0/1024.0, 0          ); gl.Vertex3i(640, 480, 0);

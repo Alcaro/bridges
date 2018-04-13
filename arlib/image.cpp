@@ -42,12 +42,13 @@ void image::insert(int32_t x, int32_t y, const image& other)
 }
 
 //newalpha can be 0 to set alpha to 0, 0xFF000000 to set alpha to 255, or -1 to not change alpha
+//  other newalpha are undefined behavior
 //alpha in the target must be known equal to the value implied by newalpha;
 //  the functions are allowed to copy alpha from target instead
 template<bool checksrcalpha, uint32_t newalpha>
 static inline void image_insert_noov_8888_to_8888(image& target, int32_t x, int32_t y, const image& source);
 template<uint32_t newalpha>
-static inline void image_insert_noov_8888_to_8888_alphasrc(image& target, int32_t x, int32_t y, const image& source);
+static inline void image_insert_noov_8888_to_8888_blend(image& target, int32_t x, int32_t y, const image& source);
 
 static inline void image_insert_noov(image& target, int32_t x, int32_t y, const image& source)
 {
@@ -62,7 +63,7 @@ static inline void image_insert_noov(image& target, int32_t x, int32_t y, const 
 	// ?= - bitwise copy if opaque, otherwise leave unchanged
 	// ?=0 - if opaque, bitwise copy but set alpha to 0; otherwise leave unchanged
 	// C0 - composite, but set output alpha to zero
-	// Ca - composite, but assume A=1 or A=0 are the common cases
+	// Ca - composite
 	// dst=ba src=a with non-ba-compliant src will yield shitty results,
 	//  but there is no possible answer so the only real solution is banning it in the API.
 	
@@ -71,9 +72,9 @@ static inline void image_insert_noov(image& target, int32_t x, int32_t y, const 
 	if (source.fmt == ifmt_bargb8888)
 		return image_insert_noov_8888_to_8888<true, -1>(target, x, y, source);
 	if (source.fmt == ifmt_argb8888 && target.fmt == ifmt_0rgb8888)
-		return image_insert_noov_8888_to_8888_alphasrc<0x00000000>(target, x, y, source);
+		return image_insert_noov_8888_to_8888_blend<0x00000000>(target, x, y, source);
 	if (source.fmt == ifmt_argb8888)
-		return image_insert_noov_8888_to_8888_alphasrc<-1>(target, x, y, source);
+		return image_insert_noov_8888_to_8888_blend<-1>(target, x, y, source);
 	if (target.fmt == ifmt_argb8888 || target.fmt == ifmt_bargb8888)
 		return image_insert_noov_8888_to_8888<false, 0xFF000000>(target, x, y, source);
 	if (target.fmt == ifmt_0rgb8888 && source.fmt == ifmt_xrgb8888)
@@ -83,7 +84,7 @@ static inline void image_insert_noov(image& target, int32_t x, int32_t y, const 
 }
 
 template<uint32_t newalpha>
-static inline void image_insert_noov_8888_to_8888_alphasrc(image& target, int32_t x, int32_t y, const image& source)
+static inline void image_insert_noov_8888_to_8888_blend(image& target, int32_t x, int32_t y, const image& source)
 {
 	for (uint32_t yy=0;yy<source.height;yy++)
 	{
@@ -114,12 +115,12 @@ static inline void image_insert_noov_8888_to_8888_alphasrc(image& target, int32_
 					//ugly magic constants: (u16)*8081>>23 = (u16)/255
 					simd128 newcols = newcols255.mulhiu16(simd128::repeat16(0x8081)).rshiftu16(7);
 					
-					// contains u8: {0}*8, sac (source alpha contribution), sbc, sgc, src, tac, tbc, tgc, trc
-					// doesn't matter what the second one is; _mm_undefined_si128() would make more sense, but my gcc doesn't support that
-					// and that one just maps to 'whatever is in xmm0 right now' which isn't faster than picking the same reg twice
+					//contains u8: {0}*8, sac (source alpha contribution), sbc, sgc, src, tac, tbc, tgc, trc
+					//the second newcols can be anything; _mm_undefined_si128() would make more sense, but my gcc doesn't support that
+					//and that one just maps to 'whatever is in xmm0 right now' which isn't faster than picking the same reg twice
 					simd128 newpack = newcols.compress16to8u(newcols);
-					//_mm_packus_epi16(newcols, newcols);
-					// contains u8: {don't care}*12, sac+tac, sbc+tbc, sgc+tgc, src+trc
+					//contains u8: {don't care}*12, sac+tac, sbc+tbc, sgc+tgc, src+trc
+					//the components are known to not overflow
 					simd128 newpacksum = newpack.add32(newpack.shuffle32<1>());
 					
 					uint32_t newpx = newpacksum.low32();
@@ -184,7 +185,7 @@ static inline void image_insert_noov_8888_to_8888(image& target, int32_t x, int3
 		{
 			simdmax px = simdmax::loadu(&sourcepxw[xx]);
 			
-			//there's no 'mirror every 32nd bit 32 times' instruction, but 'less than zero' does the same thing
+			//there's no 'mirror every 32nd bit 32 times' instruction, but '32bit less than zero' does the same thing
 			simdmax mask_local = px.cmplts32(simdmax::zero());
 			
 			px = px.and32(mask_and);
@@ -201,6 +202,8 @@ static inline void image_insert_noov_8888_to_8888(image& target, int32_t x, int3
 			px.storeu(&targetpxw[xx]);
 		}
 #else
+		//the one-pixel loop is needed to handle the last few pixels without overflow
+		//if there's no SIMD, just run it for everything
 		size_t xxew = 0;
 		size_t nsimd = 0;
 #endif
@@ -335,9 +338,9 @@ void image::insert_tile_with_border(int32_t x, int32_t y, uint32_t width, uint32
 	
 	image sub;
 	
-	insert_sub(x,          y, other, 0,  0, x1, y1); // top left
-	sub.init_ref_sub(other, x1, 0, w2, h1); insert_tile(x+x1,        y,           width-w1-w3, h1,           sub); // top
-	insert_sub(x+width-w3, y, other, x2, 0, w3, y1); // top right
+	insert_sub(x,          y,           other, 0,  0,  x1, y1); // top left
+	sub.init_ref_sub(other, x1, 0,  w2, h1); insert_tile(x+x1,       y,           width-w1-w3, h1,           sub); // top
+	insert_sub(x+width-w3, y,           other, x2, 0,  w3, y1); // top right
 	
 	sub.init_ref_sub(other, 0,  y1, w1, h2); insert_tile(x,          y+y1,        w1,          height-h1-h3, sub); // left
 	sub.init_ref_sub(other, x1, y1, w2, h2); insert_tile(x+x1,       y+y1,        width-w1-w3, height-h1-h3, sub); // middle

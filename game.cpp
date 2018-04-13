@@ -5,7 +5,6 @@
 //TODO:
 //- end game screen
 //- better selection icon for keyboard gameplay
-//- better large-island graphics
 //- compressed UI, where islands are half size so maps can be up to 26x20
 //- more objects:
 //  - castles
@@ -452,7 +451,8 @@ public:
 	{
 		state = st_title;
 		birdfg.reset(true);
-//to_game(0);
+//to_game(0,false);
+//popup_id=0;
 	}
 	
 	void title()
@@ -654,7 +654,6 @@ out.insert_tile(100, 20, 440, 440, res.levelboxgold);
 		if (id == 0) popup_id = pop_tutor1;
 		if (id == 5) popup_id = pop_lv6p1;
 		if (id == 10) popup_id = pop_lv11;
-//popup_id = pop_welldone;
 		
 		birdfg.reset(false);
 		
@@ -665,7 +664,6 @@ out.insert_tile(100, 20, 440, 440, res.levelboxgold);
 	
 	void draw_island_fragment(int x, int y, bool right, bool up, bool left, bool down, bool downright)
 	{
-//int tileset=1;
 		image& im = (tileset==0 ? res.fg0 : tileset==1 ? res.fg1 : res.fg2);
 		
 		int bx = (tileset==2 ? 5 : 3); // border x
@@ -735,6 +733,39 @@ out.insert_tile(100, 20, 440, 440, res.levelboxgold);
 		}
 	}
 	
+	void draw_island_fragment_border(int x, int y, bool right, bool up, bool left, bool down, uint32_t border)
+	{
+		if (out.fmt == ifmt_argb8888 || out.fmt == ifmt_bargb8888) border |= 0xFF000000;
+		
+		int ymul = out.stride/sizeof(uint32_t);
+		
+		uint32_t* pixels = out.pixels32 + y*ymul + x;
+		if (!up)
+		{
+			int xs = (left ? -11 : 2);
+			int xe = (right ? 51 : 38);
+			for (int x=xs;x<xe;x++) pixels[ymul*2 + x] = border;
+		}
+		if (!down)
+		{
+			int xs = (left ? -11 : 2);
+			int xe = (right ? 51 : 38);
+			for (int x=xs;x<xe;x++) pixels[ymul*37 + x] = border;
+		}
+		if (!left)
+		{
+			int ys = (up ? -11 : 2);
+			int ye = (down ? 51 : 38);
+			for (int y=ys;y<ye;y++) pixels[y*ymul + 2] = border;
+		}
+		if (!right)
+		{
+			int ys = (up ? -11 : 2);
+			int ye = (down ? 51 : 38);
+			for (int y=ys;y<ye;y++) pixels[y*ymul + 37] = border;
+		}
+	}
+	
 	void ingame()
 	{
 		background();
@@ -757,6 +788,7 @@ out.insert_tile(100, 20, 440, 440, res.levelboxgold);
 		int sx = (320 - 24*map.width);
 		int sy = (240 - 24*map.height);
 		
+		//must draw islands before islands themselves, to allow pop/pri and 'finished' borders to spread out
 		for (int ty=0;ty<map.height;ty++)
 		for (int tx=0;tx<map.width;tx++)
 		{
@@ -771,7 +803,9 @@ out.insert_tile(100, 20, 440, 440, res.levelboxgold);
 				bool joinu = (here.bridges[1]==3);
 				bool joinl = (here.bridges[2]==3);
 				bool joind = (here.bridges[3]==3);
-				if (joinr || joinu || joinl || joind)
+				
+				bool large = (joinr || joinu || joinl || joind);
+				if (large)
 				{
 					bool joindr = (joinr && joind && map.map[ty+1][tx+1].rootnode == here.rootnode);
 					draw_island_fragment(x, y, joinr, joinu, joinl, joind, joindr);
@@ -780,35 +814,109 @@ out.insert_tile(100, 20, 440, 440, res.levelboxgold);
 				{
 					out.insert(x, y, fg);
 				}
+			}
+		}
+		
+		for (int ty=0;ty<map.height;ty++)
+		for (int tx=0;tx<map.width;tx++)
+		{
+			int x = sx + tx*48;
+			int y = sy + ty*48;
+			
+			gamemap::island& here = map.map[ty][tx];
+			
+			if (here.population != -1)
+			{
+				bool joinr = (here.bridges[0]==3);
+				bool joinu = (here.bridges[1]==3);
+				bool joinl = (here.bridges[2]==3);
+				bool joind = (here.bridges[3]==3);
+				
+				//bool large = (joinr || joinu || joinl || joind);
 				
 				if (here.rootnode == ty*100+tx)
 				{
+					int plx; // population label x
+					int ply;
+					int blx;
+					int bly;
+					int px;
+					int py;
+					int bx;
+					int by;
+					
+					if (joinr)
+					{
+						plx = 16;
+						ply = 6;
+						blx = 55;
+						bly = 25;
+						
+						px = 16;
+						py = 16;
+						bx = 55;
+						by = 6;
+						goto align_popbri;
+					}
+					else if (joind)
+					{
+						plx = 10;
+						ply = 13;
+						blx = 10;
+						bly = 67;
+						
+						px = 10;
+						py = 23;
+						bx = 10;
+						by = 48;
+						
+					align_popbri:
+						if (here.population==1) px += 2;
+						if (here.population<=9) px += 4;
+						if (here.population==11) px += 2;
+						if (here.totbridges==1) bx += 2;
+						if (here.totbridges<=9) bx += 4;
+						if (here.totbridges==11) bx += 2;
+					}
+					else
+					{
+						//else island is known small, so pop/bri>=10 won't happen
+						
+						plx = 4;
+						ply = 4;
+						blx = 18;
+						bly = 26;
+						
+						px = 25 + (here.population==1)*3;
+						py = 3;
+						bx = 4 + (here.totbridges==1)*2;
+						by = 18;
+					}
+					
 					res.smallfont.scale = 1;
 					res.smallfont.color = 0xFFFF00;
-					out.insert_text(x+4, y+5, res.smallfont, "Pop.");
+					out.insert_text(x+plx, y+ply, res.smallfont, "Pop.");
 					res.smallfont.color = 0xFFFFFF;
-					out.insert_text(x+18, y+26, res.smallfont, "Bri.");
+					out.insert_text(x+blx, y+bly, res.smallfont, "Bri.");
 					res.smallfont.scale = 2;
 					
-					int px = x+25 + (here.population==1)*3;
-					int py = y+3;
-					int bx = x+4 + (here.totbridges==1)*2;
-					int by = y+18;
-					
 					res.smallfont.color = 0x000000;
-					out.insert_text(px+1, py, res.smallfont, tostring(here.population));
-					out.insert_text(px, py+1, res.smallfont, tostring(here.population));
-					out.insert_text(bx+1, by, res.smallfont, tostring(here.totbridges));
-					out.insert_text(bx, by+1, res.smallfont, tostring(here.totbridges));
+					out.insert_text(x+px+1, y+py, res.smallfont, tostring(here.population));
+					out.insert_text(x+px, y+py+1, res.smallfont, tostring(here.population));
+					out.insert_text(x+bx+1, y+by, res.smallfont, tostring(here.totbridges));
+					out.insert_text(x+bx, y+by+1, res.smallfont, tostring(here.totbridges));
 					res.smallfont.color = 0xFFFF00;
-					out.insert_text(px, py, res.smallfont, tostring(here.population));
+					out.insert_text(x+px, y+py, res.smallfont, tostring(here.population));
 					res.smallfont.color = 0xFFFFFF;
-					out.insert_text(bx, by, res.smallfont, tostring(here.totbridges));
-					
-					if (here.totbridges == here.population)
-						out.insert(x, y, res.islanddone);
-					if (here.totbridges > here.population)
-						out.insert(x, y, res.islandoverdone);
+					out.insert_text(x+bx, y+by, res.smallfont, tostring(here.totbridges));
+				}
+				
+				int totbridges = map.get(here.rootnode).totbridges;
+				int population = map.get(here.rootnode).population;
+				uint32_t border = (totbridges < population ? -1 : totbridges == population ? 0xFFFF00 : 0xFF0000);
+				if (totbridges >= population)
+				{
+					draw_island_fragment_border(x, y, joinr, joinu, joinl, joind, border);
 				}
 				
 				if (here.bridges[1] == 1)
@@ -961,47 +1069,53 @@ out.insert_tile(100, 20, 440, 440, res.levelboxgold);
 			
 			if (in.keys & 1<<k_confirm || game_kb_state == 2)
 			{
-				auto build = [this](int dir) {
+				bool didanything = false;
+				for (int dir=0;dir<4;dir++)
+				{
+					static_assert(k_right == 0);
+					static_assert(k_up    == 1);
+					static_assert(k_left  == 2);
+					static_assert(k_down  == 3);
+					if (!(in_press & 1<<dir)) continue;
+					
 					int x = game_kb_x;
 					int y = game_kb_y;
 					
 					gamemap::island& here = map.map[y][x];
 					
+					int realdir = dir;
 					if (here.population == -1)
 					{
-						if (dir == 3) dir = 1;
-						if (dir == 0) dir = 2;
+						if (realdir == 3) realdir = 1;
+						if (realdir == 0) realdir = 2;
 					}
 					
-					if (here.bridgelen[dir] != -1)
+					if (here.bridgelen[realdir] != -1)
 					{
-						if (dir == 1)
+						if (realdir == 1)
 						{
 							y -= here.bridgelen[1];
-							dir = 3;
+							realdir = 3;
 						}
 						
-						if (dir == 2)
+						if (realdir == 2)
 						{
 							x -= here.bridgelen[2];
-							dir = 0;
+							realdir = 0;
 						}
 						
-						map.toggle(x, y, dir);
-						if (map.finished())
-						{
-							popup_id = pop_welldone;
-							popup_frame = 0;
-						}
+						map.toggle(x, y, realdir);
+						didanything = true;
 					}
 					
 					game_kb_state = 1;
-				};
+				}
 				
-				if (in_press & 1<<k_right) build(0);
-				if (in_press & 1<<k_up) build(1);
-				if (in_press & 1<<k_left) build(2);
-				if (in_press & 1<<k_down) build(3);
+				if (didanything && map.finished())
+				{
+					popup_id = pop_welldone;
+					popup_frame = 0;
+				}
 			}
 			else
 			{

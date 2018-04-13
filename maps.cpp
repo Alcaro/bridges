@@ -1,20 +1,31 @@
+//map rules:
+//- large islands must eventually terminate, no loops allowed
+//- for performance reasons, large islands should use the shortest possible path to the roots
+//- the root of a large island must be joined to the tile below or right; it may not be on the bottom-right edge
+//- castles must be joined with the tile below, right, AND below-right
+
 extern const char * const game_maps[] = {
-	//"          \n" // test map
-	//"    5  3< \n"
-	//">2  ^     \n"
-	//"       v  \n"
-	//"    1 >1  \n",
-	
-//"          \n"
-//" >4 v  1  \n"
-//"    2 2 2 \n"
+//"          \n" // test map
+//" 4< 2  1  \n"
+//"    ^ 2 2 \n"
 //" >v    1  \n"
 //" 8<       \n"
 //"     >>>v \n"
-//"  v  ^>Av \n"
-//" >v< ^^ v \n"
-//"  A  ^^<< \n"
+//"  v  ^<<A \n"
+//" >A< ^^ v \n"
+//"  ^  ^^<< \n"
 //"          \n",
+
+
+//">>>A<<<<\n" // test map
+//"1<2<3<4<\n"
+//">>>B<<<<\n"
+//"v1v12345\n"
+//"v^v     \n"
+//"A2B     \n"
+//"^^^     \n"
+//"^3^     \n"
+//"^^^     \n",
 	
 	
 	"  2  \n" // 1
