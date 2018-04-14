@@ -480,37 +480,15 @@ public:
 		res.smallfont.color = 0xFFFFFF;
 		out.insert_text_wrap(270, 340, 520, res.smallfont, "Play Game");
 		
+		res.smallfont.scale = 1;
+		out.insert_text_wrap(200, 195, 520, res.smallfont, "keybol 2010");
+		out.insert_text_wrap(380, 195, 520, res.smallfont, "Alcaro 2018");
+		res.smallfont.scale = 2;
+		
 		if (in_press & 1<<k_confirm) to_menu(true);
 		if (in_press & 1<<k_click) to_menu(false);
 		
 		birdfg.draw(out, res.bird, 0);
-		
-/*
-static const bool z[10][10] = {
-{0,0,0,0,0,0,0,0,0,0},
-{0,1,1,0,1,0,0,1,0,0},
-{0,0,0,0,1,0,1,0,1,0},
-{0,1,1,0,0,0,0,1,0,0},
-{0,1,1,0,0,0,0,0,0,0},
-{0,0,0,0,0,1,1,1,1,0},
-{0,0,1,0,0,1,1,1,1,0},
-{0,1,1,1,0,1,1,0,1,0},
-{0,0,1,0,0,1,1,1,1,0},
-{0,0,0,0,0,0,0,0,0,0},
-};
-background();
-for (int y=0;y<10;y++)
-for (int x=0;x<10;x++)
-{
-if (z[y][x])
-{
-draw_island_fragment(x*40, y*40, z[y][x+1], z[y-1][x], z[y][x-1], z[y+1][x]);
-}
-}
-out.insert_tile_with_border(400, 20, 230, 440, res.fg0, 3, 37, 4, 36);
-out.insert_tile(100, 20, 440, 440, res.levelboxgold);
-//out.insert_tile(100, 20, 440, 440, res.fg0mask);
-*/
 	}
 	
 	

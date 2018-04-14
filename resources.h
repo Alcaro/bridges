@@ -51,6 +51,6 @@ static const uint8_t popupsm_raw[191];
 image popupsm;
 static const uint8_t smallfont_raw[561];
 font smallfont;
-static const uint8_t title_raw[335];
+static const uint8_t title_raw[338];
 image title;
 };
