@@ -1110,7 +1110,7 @@ public:
 		
 		birdfg.draw(out, res.bird, tileset);
 		
-		out.insert(600, 460, res.menuopen);
+		out.insert(599, 459, tileset==2 ? res.menuopenborder : res.menuopen);
 		
 		if (in_press & 1<<k_cancel)
 		{
