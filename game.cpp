@@ -5,40 +5,24 @@
 //TODO:
 //- end game screen
 //- better selection icon for keyboard gameplay
+//- better reef graphics
 //- compressed UI, where islands are half size so maps can be up to 26x20
-//- more objects:
-//  - castles
-//      every island must be connected to a castle, but castles may not be connected to each other
-//      castles must be on large (minimum 2x2) islands, and are arbitrary-populated (violating either rule would be cluttered)
-//      multiple castles of the same color must be connected; multiple castles of different colors must be disjoint
-//      all four castles have different designs (mostly grayscale, but colorful roofs), and 16x12 flags
-//  - reef; can't build bridges across a reef
 //- design some levels containing the new objects
 //    is the randomizer good enough, or do I make a map editor?
+//    make sure to introduce the new objects in a reasonable way
 //- make a new solver
-//  - faster than the current one
-//  - can return a single hint, rather than the full solution
-//  - supports the new objects
-//      how will it deal with castles? does it pick one castle of each color and pretend they're connected?
-//        does that leave any actually-solvable map ambiguous?
-//          for example (using rbyg for castles)
-//            r2g
-//             r
-//          if the top two are fake-connected, the 2 could point right+down, which is illegal
-//          similarly,
-//            r22g
-//             r
-//          has the sole solution 'left 2 connects the reds, right 2 does both to green', but how does the solver prove that?
-//          limiting to one castle per color would be silly
-//          run the algorithm once for every combination of one castle of each color?
-//        to bypass the four-connections-per-initial-tile limit,
-//          the mandatory loop in a 2x2 island can be redirected to the next/previous castles
+//    - faster than the current one
+//    - can return a single hint, rather than the full solution
+//    - supports the new objects
+//    see solver.cpp for planning
 //- if possible, create difficulty estimator
 //    at any point, how many bridges can be proven to exist or not exist? are they close to the edge?
 //    does it involve the must-be-connected rule?
 //    does it require guessing? how many tiles need to be considered to prove which is the case?
-//    the solver can represent seven possible states for each possible bridge (plus unsolvable), humans can't; does this make it harder?
+//    the solver can represent seven possible states for each possible bridge (plus unsolvable), humans can't; does this make it easier?
 //- integrate game generator (requires solver)
+//- lava background must move down-left at arbitrarily slow pace (30px/s?)
+//- level select: everything except starts out at 2x size, shrinking over ~.3s
 
 //map structure for the new objects:
 //- reef: #
@@ -55,246 +39,6 @@
 //    finding if all are connected is done via island counting
 
 namespace {
-class gamemap {
-public:
-	//known to be 100 or less
-	//(UI supports 13x10, anything more goes out of bounds)
-	int width;
-	int height;
-	
-	int numislands;
-	
-	struct island {
-		int8_t population; // -1 for ocean
-		int8_t totbridges;
-		int16_t rootnode; // -1 for ocean, y*100+x for most islands, something else for large islands
-		
-		//1 if the next tile in that direction is an island, 2 if there's one ocean tile before the next island
-		//-1 if a bridge there would run into the edge of the map
-		//valid for both islands and ocean tiles
-		//[0] is right, [1] is up, [2] left, [3] down
-		int8_t bridgelen[4];
-		
-		//number of bridges exiting this tile in the given direction, 0-2
-		//set for ocean tiles too; [0]=[2] and [1]=[3] for oceans
-		//if that island is part of the current one (rootnode equal), 3 bridges
-		uint8_t bridges[4];
-	};
-	
-	island map[100][100];
-	
-	//these two are used only inside finished(), to check if the map is connected
-	bool visited[100*100];
-	int16_t towalk[100*100];
-	
-	island& get(int key) { return map[key/100][key%100]; }
-	
-	void init(const char * inmap)
-	{
-		width = 0;
-		while (inmap[width] != '\n') width++;
-		height = 0;
-		while (inmap[(width+1) * height] != '\0') height++;
-		
-		
-		numislands = 0;
-		
-		for (int y=0;y<height;y++)
-		for (int x=0;x<width;x++)
-		{
-			island& here = map[y][x];
-			
-			int rootpos = y*100+x;
-			char mapchar = inmap[y*(width+1) + x];
-			
-			while (mapchar == '<' || mapchar == '>' || mapchar == 'v' || mapchar == '^')
-			{
-				if (mapchar == '>') rootpos += 1;
-				if (mapchar == '^') rootpos -= 100;
-				if (mapchar == '<') rootpos -= 1;
-				if (mapchar == 'v') rootpos += 100;
-				
-				int y2 = rootpos/100;
-				int x2 = rootpos%100;
-				mapchar = inmap[y2*(width+1) + x2];
-			}
-			
-			if (mapchar == ' ') here.population = -1;
-			else if (mapchar >= '0' && mapchar <= '9') here.population = mapchar-'0';
-			else here.population = mapchar-'A'+10;
-			
-			here.totbridges = 0;
-			here.bridges[0] = 0;
-			here.bridges[1] = 0;
-			here.bridges[2] = 0;
-			here.bridges[3] = 0;
-			
-			here.bridgelen[0] = -1;
-			here.bridgelen[1] = -1;
-			here.bridgelen[2] = -1;
-			here.bridgelen[3] = -1;
-			
-			here.rootnode = rootpos;
-			
-			if (here.population != -1)
-			{
-				numislands++;
-				
-				for (int x2=x-1;x2>=0;x2--)
-				{
-					if (map[y][x2].population != -1)
-					{
-						here.bridgelen[2] = x-x2;
-						map[y][x2].bridgelen[0] = x-x2;
-						for (int x3=x2+1;x3<x;x3++)
-						{
-							map[y][x3].bridgelen[0] = x-x3;
-							map[y][x3].bridgelen[2] = x3-x2;
-						}
-						
-						if (map[y][x2].rootnode == here.rootnode && x-x2==1)
-						{
-							here.bridges[2] = 3;
-							map[y][x2].bridges[0] = 3;
-						}
-						
-						break;
-					}
-				}
-				for (int y2=y-1;y2>=0;y2--)
-				{
-					if (map[y2][x].population != -1)
-					{
-						here.bridgelen[1] = y-y2;
-						map[y2][x].bridgelen[3] = y-y2;
-						for (int y3=y2+1;y3<y;y3++)
-						{
-							map[y3][x].bridgelen[1] = y3-y2;
-							map[y3][x].bridgelen[3] = y-y3;
-						}
-						
-						if (map[y2][x].rootnode == here.rootnode && y-y2==1)
-						{
-							here.bridges[1] = 3;
-							map[y2][x].bridges[3] = 3;
-						}
-						
-						break;
-					}
-				}
-			}
-		}
-	}
-	
-	//only allows dir=0 or 3
-	void toggle(int x, int y, int dir)
-	{
-		if (dir == 0)
-		{
-			island& here = map[y][x];
-			if (here.bridges[0] == 3) return;
-			
-			int newbridges = (here.bridges[0]+1)%3;
-			int diff = newbridges - here.bridges[0];
-			for (int xx=0;xx<here.bridgelen[0];xx++)
-			{
-				map[y][x+xx  ].bridges[0] = newbridges;
-				map[y][x+xx+1].bridges[2] = newbridges;
-				get(map[y][x+xx  ].rootnode).totbridges += diff;
-				get(map[y][x+xx+1].rootnode).totbridges += diff;
-			}
-		}
-		else
-		{
-			island& here = map[y][x];
-			if (here.bridges[3] == 3) return;
-			
-			int newbridges = (here.bridges[3]+1)%3;
-			int diff = newbridges - here.bridges[3];
-			for (int yy=0;yy<here.bridgelen[3];yy++)
-			{
-				map[y+yy  ][x].bridges[3] = newbridges;
-				map[y+yy+1][x].bridges[1] = newbridges;
-				get(map[y+yy  ][x].rootnode).totbridges += diff;
-				get(map[y+yy+1][x].rootnode).totbridges += diff;
-			}
-		}
-	}
-	
-	void reset()
-	{
-		for (int y=0;y<height;y++)
-		for (int x=0;x<width;x++)
-		{
-			island& here = map[y][x];
-			
-			here.totbridges = 0;
-			if (here.bridges[0] <= 2) here.bridges[0] = 0;
-			if (here.bridges[1] <= 2) here.bridges[1] = 0;
-			if (here.bridges[2] <= 2) here.bridges[2] = 0;
-			if (here.bridges[3] <= 2) here.bridges[3] = 0;
-		}
-	}
-	
-	//The map is finished if
-	//(1) the sum of bridgelen[y][x][0..3] equals population[y][x] for all non-ocean tiles
-	//(2) no bridges cross each other
-	//(3) all tiles are reachable from each other by following bridges
-	bool finished()
-	{
-		int ixstart = 0;
-		
-		for (int y=0;y<height;y++)
-		for (int x=0;x<width;x++)
-		{
-			island& here = map[y][x];
-			
-			if (here.population != -1) ixstart = y*100+x; // keep track of one arbitrary island
-			
-			//if not ocean and wrong number of bridges,
-			if (here.population != -1 && here.rootnode == y*100+x && here.totbridges != here.population)
-			{
-				return false; // then map isn't solved
-			}
-			
-			//if ocean and has both horizontal and vertical bridges,
-			if (here.population == -1 &&
-			    here.bridges[0] != 0 &&
-			    here.bridges[3] != 0)
-			{
-				return false; // then map isn't solved
-			}
-		}
-		
-		//all islands are satisfied and there's no crossing - test if everything is connected
-		int foundislands = 0;
-		memset(visited, 0, sizeof(visited));
-		
-		int ntowalk = 0;
-		towalk[ntowalk++] = ixstart;
-		while (ntowalk)
-		{
-			int ix = towalk[--ntowalk];
-			if (visited[ix]) continue;
-			visited[ix] = true;
-			
-			island& here = map[ix/100][ix%100];
-			foundislands++;
-			
-			if (here.bridges[0])
-				towalk[ntowalk++] = ix + here.bridgelen[0];
-			if (here.bridges[1])
-				towalk[ntowalk++] = ix - here.bridgelen[1]*100;
-			if (here.bridges[2])
-				towalk[ntowalk++] = ix - here.bridgelen[2];
-			if (here.bridges[3])
-				towalk[ntowalk++] = ix + here.bridgelen[3]*100;
-		}
-		
-		return (foundislands == numislands);
-	}
-};
-
 class birds {
 	static const int spd = 4;
 	static const constexpr float flock_angle_rad = 155 * M_PI*2/360;
@@ -383,6 +127,8 @@ public:
 	
 	birds birdfg;
 	
+	int title_frame;
+	
 	int menu_focus;
 	
 	gamemap map;
@@ -394,6 +140,7 @@ public:
 	int game_kb_x;
 	int game_kb_y;
 	uint8_t game_kb_state; // 0 - keyboard inactive, focus box invisible; 1 - not focused, moving around; 2 - held down
+	uint8_t game_kb_holdtimer; // if this hits 0 and the key is still held, move another step
 	
 	enum {
 		pop_none,
@@ -420,7 +167,7 @@ public:
 	{
 		res_bg0b.init_clone(res.bg0, -1, 1);
 		res_menuclose.init_clone(res.menuopen, 1, -1);
-		res_titlebig.init_clone(res.title, 4, 4);
+		res_titlebig.init_new(res.title.width*16, res.title.height*16, res.title.fmt);
 		
 		res.smallfont.scale = 2;
 		res.smallfont.height = 9;
@@ -435,7 +182,8 @@ public:
 		}
 		if (tileset == 1)
 		{
-			out.insert_tile(0, 0, 640, 480, res.bg1);
+			int off = (bgpos/6)%21;
+			out.insert_tile(0, 0, 640, 480, res.bg1, off, 21-off);
 		}
 		if (tileset == 2)
 		{
@@ -443,7 +191,11 @@ public:
 		}
 		
 		bgpos++;
-		bgpos %= 1200;
+		//must be a multiple of
+		//- 30 (bg0 animation)
+		//- 6*21 (bg1 animation)
+		//- 90 (castle flag animation)
+		bgpos %= 630;
 	}
 	
 	
@@ -451,6 +203,7 @@ public:
 	{
 		state = st_title;
 		birdfg.reset(true);
+		title_frame = 0;
 //to_game(0,false);
 //popup_id=0;
 	}
@@ -471,18 +224,48 @@ public:
 		out.insert_tile(406, 323, 11, 54, res.bridgev);
 		out.insert_tile(424, 323, 11, 54, res.bridgev);
 		
-		out.insert(193, 88, res_titlebig);
+		int titlescale = (16 - title_frame/2);
+		if (titlescale < 4) titlescale = 4;
 		
-		res.smallfont.color = 0x000000;
-		out.insert_text_wrap(270, 341, 520, res.smallfont, "Play Game");
-		out.insert_text_wrap(271, 340, 520, res.smallfont, "Play Game");
+		if (title_frame <= 24) // to not waste cpu rerendering what's already there
+		{
+			res_titlebig.insert_scale_unsafe(0, 0, res.title, titlescale, titlescale);
+		}
+		out.insert_sub(319-(63*titlescale)/2, 144-(28*titlescale)/2, res_titlebig,
+		               0, 0, res.title.width*titlescale, res.title.height*titlescale);
 		
-		res.smallfont.color = 0xFFFFFF;
-		out.insert_text_wrap(270, 340, 520, res.smallfont, "Play Game");
+		if (title_frame > 48)
+		{
+			int fontscale = (8 - (title_frame-48)/2);
+			if (fontscale < 2) fontscale = 2;
+			res.smallfont.scale = fontscale;
+			
+			int textx = 320 - 25*fontscale;
+			int texty = 349 - 9*fontscale/2;
+			
+			res.smallfont.color = 0x000000;
+			out.insert_text(textx  , texty+1, res.smallfont, "Play Game");
+			out.insert_text(textx+1, texty  , res.smallfont, "Play Game");
+			
+			res.smallfont.color = 0xFFFFFF;
+			out.insert_text(textx  , texty  , res.smallfont, "Play Game");
+		}
 		
-		res.smallfont.scale = 1;
-		out.insert_text_wrap(200, 195, 520, res.smallfont, "keybol 2010");
-		out.insert_text_wrap(380, 195, 520, res.smallfont, "Alcaro 2018");
+		if (title_frame > 60)
+		{
+			res.smallfont.scale = 1;
+			out.insert_text(200, 195, res.smallfont, "keybol 2010");
+			out.insert_text(380, 195, res.smallfont, "Alcaro 2018");
+			
+			if (in.mousex > 238 && in.mousex < 406 && in.mousey > 309 && in.mousey < 388)
+			{
+				// contrary to what this icon implies, the entire map is clickable
+				// but it looks nice, so it stays
+				out.insert(257, 344, res.menuchoice);
+			}
+		}
+		else title_frame++;
+		
 		res.smallfont.scale = 2;
 		
 		if (in_press & 1<<k_confirm) to_menu(true);
@@ -775,7 +558,7 @@ public:
 			
 			gamemap::island& here = map.map[ty][tx];
 			
-			if (here.population != -1)
+			if (here.population >= 0)
 			{
 				bool joinr = (here.bridges[0]==3);
 				bool joinu = (here.bridges[1]==3);
@@ -793,6 +576,10 @@ public:
 					out.insert(x, y, fg);
 				}
 			}
+			if (here.population == -2)
+			{
+				out.insert(x, y, res.levelboxgold);
+			}
 		}
 		
 		for (int ty=0;ty<map.height;ty++)
@@ -803,7 +590,7 @@ public:
 			
 			gamemap::island& here = map.map[ty][tx];
 			
-			if (here.population != -1)
+			if (here.population >= 0)
 			{
 				bool joinr = (here.bridges[0]==3);
 				bool joinu = (here.bridges[1]==3);
@@ -811,8 +598,35 @@ public:
 				bool joind = (here.bridges[3]==3);
 				
 				//bool large = (joinr || joinu || joinl || joind);
+				bool isroot = (here.rootnode == ty*100+tx);
 				
-				if (here.rootnode == ty*100+tx)
+				if (isroot && here.population >= 80)
+				{
+					out.insert_sub(x+12, y+12, res.castle, 64*(here.population-80), 0, 64, 64);
+					
+					int flagx1;
+					int flagx2;
+					int flagy;
+					
+					if (here.population == 80) { flagx1=14; flagx2=51; flagy=0; }
+					if (here.population == 81) { flagx1=28; flagx2=28; flagy=3; }
+					if (here.population == 82) { flagx1=20; flagx2=48; flagy=2; }
+					if (here.population == 83) { flagx1=32; flagx2=32; flagy=2; }
+					
+					
+					int waveframe = (x + y + bgpos/3)%30;
+					
+					bool upleft = (waveframe>=15);
+					int cut = waveframe%15 * 2;
+					if (cut > 16) cut = 16;
+					//else cut = 0;
+					
+					out.insert_sub(x+12+flagx1,     y+12+flagy+  upleft, res.flags, 16*(here.population-80),     0, cut,    12);
+					out.insert_sub(x+12+flagx1+cut, y+12+flagy+1-upleft, res.flags, 16*(here.population-80)+cut, 0, 16-cut, 12);
+					out.insert_sub(x+12+flagx2,     y+12+flagy+  upleft, res.flags, 16*(here.population-80),     0, cut,    12);
+					out.insert_sub(x+12+flagx2+cut, y+12+flagy+1-upleft, res.flags, 16*(here.population-80)+cut, 0, 16-cut, 12);
+				}
+				else if (isroot)
 				{
 					int plx; // population label x
 					int ply;
@@ -1032,10 +846,22 @@ public:
 			game_kb_x = 0;
 			game_kb_y = 0;
 			
-			in_press &= k_cancel;
+			in_press &= 1<<k_cancel;
 		}
+		
 		if (game_kb_state != 0 && !game_menu)
 		{
+			if ((in.keys == 1<<k_right || in.keys == 1<<k_up || in.keys == 1<<k_left || in.keys == 1<<k_down) &&
+					(in_press&~(1<<k_click)) == 0)
+			{
+				if (--game_kb_holdtimer == 0)
+				{
+					game_kb_holdtimer = 3;
+					in_press = in.keys;
+				}
+			}
+			else game_kb_holdtimer = 20;
+			
 			if (in_press & 1<<k_confirm)
 			{
 				gamemap::island& here = map.map[game_kb_y][game_kb_x];
@@ -1183,7 +1009,8 @@ public:
 			}
 			if (item(3, 375, "Level Select")) to_menu(in_press & 1<<k_confirm);
 			if (item(4, 545, "Hint"))
-game_menu_pos = 480; // TODO
+solver_solve(map);
+//game_menu_pos = 480; // TODO
 			
 			out.insert(600, game_menu_pos+18, res_menuclose);
 			if (in_press & 1<<k_click && in.mousex >= 595 && in.mousex < 637 &&

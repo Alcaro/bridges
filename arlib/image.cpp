@@ -108,18 +108,17 @@ static inline void image_insert_noov_8888_to_8888_blend(image& target, int32_t x
 					// contains u16: spx.a, spx.b, spx.g, spx.r, tpx.{a,b,g,r}
 					simd128 vals = simd128::create32(0, 0, spx, tpx).extend8uto16();
 					
-					//contains {sa}*4, {255-sa}*4
+					//contains u16: {sa}*4, {255-sa}*4
 					simd128 alphas = simd128::repeat16(spx>>24).xor16(simd128::create16(0,0,0,0, 255,255,255,255));
-					simd128 newcols255 = vals.mul16(alphas); // contains pixel contributions times 255
+					//contains u16: pixel contributions times 255
+					simd128 newcols255 = vals.mul16(alphas);
 					
-					//ugly magic constants: (u16)*8081>>23 = (u16)/255
+					//ugly magic constants: (u16)*8081>>16>>7 = (u16)/255
 					simd128 newcols = newcols255.mulhiu16(simd128::repeat16(0x8081)).rshiftu16(7);
 					
-					//contains u8: {0}*8, sac (source alpha contribution), sbc, sgc, src, tac, tbc, tgc, trc
-					//the second newcols can be anything; _mm_undefined_si128() would make more sense, but my gcc doesn't support that
-					//and that one just maps to 'whatever is in xmm0 right now' which isn't faster than picking the same reg twice
+					//contains u8: {don't care}*8, sac (source alpha contribution), sbc, sgc, src, tac, tbc, tgc, trc
 					simd128 newpack = newcols.compress16to8u(newcols);
-					//contains u8: {don't care}*12, sac+tac, sbc+tbc, sgc+tgc, src+trc
+					//contains u8: {don't care}*12, sac+tac = result alpha, sbc+tbc, sgc+tgc, src+trc
 					//the components are known to not overflow
 					simd128 newpacksum = newpack.add32(newpack.shuffle32<1>());
 					
@@ -170,23 +169,30 @@ static inline void image_insert_noov_8888_to_8888(image& target, int32_t x, int3
 		uint32_t* targetpx = target.pixels32 + (y+yy)*target.stride/sizeof(uint32_t) + x;
 		uint32_t* sourcepx = source.pixels32 + yy*source.stride/sizeof(uint32_t);
 		
+		//strangely enough, doing this slows things down.
+		//if (!checksrcalpha && newalpha==-1)
+		//{
+		//	memcpy(targetpx, sourcepx, sizeof(uint32_t)*source.width);
+		//	continue;
+		//}
+		
 #ifdef HAVE_SIMD
 		//SIMD translation of the below
-		size_t nsimd = simdmax::count32();
+		size_t nsimd = simdmax::count32;
 		
 		simdmax* targetpxw = (simdmax*)targetpx;
 		simdmax* sourcepxw = (simdmax*)sourcepx;
 		uint32_t xxew = source.width/nsimd;
 		
-		simdmax mask_or = (newalpha == 0xFF000000 ? simdmax::repeat32(0xFF000000) : simdmax::repeat32(0));
+		simdmax mask_or  = (newalpha == 0xFF000000 ? simdmax::repeat32(0xFF000000) : simdmax::repeat32(0x00000000));
 		simdmax mask_and = (newalpha == 0x00000000 ? simdmax::repeat32(0x00FFFFFF) : simdmax::repeat32(0xFFFFFFFF));
 		
 		for (uint32_t xx=0;xx<xxew;xx++)
 		{
 			simdmax px = simdmax::loadu(&sourcepxw[xx]);
 			
-			//there's no 'mirror every 32nd bit 32 times' instruction, but '32bit less than zero' does the same thing
-			simdmax mask_local = px.cmplts32(simdmax::zero());
+			//copy sign bit to everywhere
+			simdmax mask_local = px.rshifts32(31);
 			
 			px = px.and32(mask_and);
 			px = px.or32(mask_or);
@@ -195,8 +201,8 @@ static inline void image_insert_noov_8888_to_8888(image& target, int32_t x, int3
 			{
 				simdmax tpx = simdmax::loadu(&targetpxw[xx]);
 				//if mask_local bit is set, copy from sp, otherwise from tp
-				//there's no specific instruction for that, but it's easy to bithack
-				//(there is SSE4.1 _mm_blend_epi8, but it's annoying to extract the mask from that one)
+				//this is AVX2 _mm_maskstore_epi32, but that's not available in SSE2
+				//but it's also easy to bithack
 				px = tpx.xor32(mask_local.and32(px.xor32(tpx)));
 			}
 			px.storeu(&targetpxw[xx]);
@@ -204,6 +210,7 @@ static inline void image_insert_noov_8888_to_8888(image& target, int32_t x, int3
 #else
 		//the one-pixel loop is needed to handle the last few pixels without overflow
 		//if there's no SIMD, just run it for everything
+		//compilers can autovectorize, but not on -Os (and I've only seen it happen with AVX2, not SSE2)
 		size_t xxew = 0;
 		size_t nsimd = 0;
 #endif
@@ -353,26 +360,26 @@ void image::insert_tile_with_border(int32_t x, int32_t y, uint32_t width, uint32
 
 
 
-void image::init_clone(const image& other, int32_t scalex, int32_t scaley)
+void image::insert_scale_unsafe(int32_t x, int32_t y, const image& other, int32_t scalex, int32_t scaley)
 {
 	bool flipx = (scalex<0);
 	bool flipy = (scaley<0);
 	scalex = abs(scalex);
 	scaley = abs(scaley);
 	
-	init_new(other.width * scalex, other.height * scaley, other.fmt);
-	for (uint32_t y=0;y<other.height;y++)
+	for (uint32_t sy=0;sy<other.height;sy++)
 	{
-		int ty = y*scaley;
-		if (flipy) ty = (height-1-y)*scaley;
+		int ty = y + sy*scaley;
+		if (flipy) ty = y + (height-1-sy)*scaley;
 		uint32_t* targetpx = this->pixels32 + ty*this->stride/sizeof(uint32_t);
-		uint32_t* sourcepx = other.pixels32 +  y*other.stride/sizeof(uint32_t);
+		uint32_t* sourcepx = other.pixels32 + sy*other.stride/sizeof(uint32_t);
 		uint32_t* targetpxorg = targetpx;
+		sourcepx += x;
 		
 		if (flipx)
 		{
 			sourcepx += width;
-			for (uint32_t x=0;x<other.width;x++)
+			for (uint32_t sx=0;sx<other.width;sx++)
 			{
 				sourcepx--;
 				for (int32_t xx=0;xx<scalex;xx++)
@@ -383,7 +390,7 @@ void image::init_clone(const image& other, int32_t scalex, int32_t scaley)
 		}
 		else
 		{
-			for (uint32_t x=0;x<other.width;x++)
+			for (uint32_t sx=0;sx<other.width;sx++)
 			{
 				for (int32_t xx=0;xx<scalex;xx++)
 				{
@@ -398,6 +405,12 @@ void image::init_clone(const image& other, int32_t scalex, int32_t scaley)
 			memcpy(targetpxorg+yy*stride/sizeof(uint32_t), targetpxorg, sizeof(uint32_t)*width);
 		}
 	}
+}
+
+void image::init_clone(const image& other, int32_t scalex, int32_t scaley)
+{
+	init_new(other.width * (scalex<0 ? -scalex : scalex), other.height * (scaley<0 ? -scaley : scaley), other.fmt);
+	insert_scale_unsafe(0, 0, other, scalex, scaley);
 }
 
 

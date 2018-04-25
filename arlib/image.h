@@ -50,10 +50,17 @@ struct image : nocopy {
 	void convert(imagefmt newfmt);
 	//Inserts the given image at the given coordinates. If that would place the new image partially outside the target,
 	// the excess pixels are ignored.
-	//Inserting an ARGB image into a BARGB image, if the result is unrepresentable, gives undefined results.
+	//Attempting to create impossible values (by rendering ARGB a=80 into BARGB a=0) is undefined behavior.
+	//If source overlaps target, undefined behavior. However, they don't need to be distinct allocations.
 	void insert(int32_t x, int32_t y, const image& other);
+	//Inserts the given image, with every pixel turned into a scalex*scaley rectangle, nearest neighbor.
+	//Can also mirror the image, by using negative scalex/scaley. Zero is not allowed.
+	//WARNING: Does not blend alpha properly. It just copies the source pixels. Do not use with 0rgb target and non-0rgb source.
+	//WARNING: Does not check for overflow. If the scaled source doesn't fit in the target,
+	//         or the target coordinate is negative, undefined behavior.
+	void insert_scale_unsafe(int32_t x, int32_t y, const image& other, int32_t scalex, int32_t scaley);
 	//Inserts the subset of the image starting at (offx,offy) continuing for (width,height) pixels.
-	//If that's outside target, undefined behavior.
+	//If that's outside 'other', undefined behavior.
 	void insert_sub(int32_t x, int32_t y, const image& other, uint32_t offx, uint32_t offy, uint32_t width, uint32_t height)
 	{
 		image sub;
@@ -68,7 +75,7 @@ struct image : nocopy {
 	                 const image& other, int32_t offx, int32_t offy);
 	//Treats the image as nine different images, with cuts at x1/x2/y1/y2.
 	//The middle images are repeated until the requested rectangle is covered.
-	//If that yields a noninteger number of repetitions, the top/left parts are repeated.
+	//If that yields a noninteger number of repetitions, the top/left parts are repeated once more.
 	void insert_tile_with_border(int32_t x, int32_t y, uint32_t width, uint32_t height,
 	                             const image& other, uint32_t x1, uint32_t x2, uint32_t y1, uint32_t y2);
 	
@@ -85,11 +92,6 @@ struct image : nocopy {
 	//Wrapped lines are justified, non-wrapped are left-aligned.
 	void insert_text_wrap(int32_t x, int32_t y, uint32_t width, const font& fnt, cstring text);
 	
-	//template<typename T> arrayvieww<T> view()
-	//{
-	//	size_t nbyte = stride*(height-1) + width*byteperpix(fmt);
-	//	return arrayvieww<T>((T*)pixels, nbyte/sizeof(T));
-	//}
 	
 	//Result is undefined for ifmt_none and unknown formats.
 	static uint8_t byteperpix(imagefmt fmt)
@@ -137,7 +139,7 @@ struct image : nocopy {
 		pixelsv = other.pixelsv;
 	}
 	//Sets *this to a part of other. other may be *this.
-	//Going outside the image (x<0, x+width > other.width), or zero or negative sizes (width <= 0), is undefined behavior.
+	//Going outside the image (x<0, x+width > other.width), or negative sizes (width < 0), is undefined behavior.
 	void init_ref_sub(const image& other, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
 	{
 		init_ref(other);

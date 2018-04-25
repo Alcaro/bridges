@@ -1,106 +1,264 @@
 #include "game.h"
 
-//#error
-//  after finding a solution, save it somewhere, then make only contradictory assumptions
-//  if that yields any other solution, return 2
-//#error
-//  after implementing the above, switch to depth-first search
-//#error
-//  find a suitable data structure for representing a graph, supporting the operations
-//    - init; creates all vertices and edges (maximum 4 edges per vertex)
-//    - join; combines two vertices into one
-//    - query; returns all edges from a vertex
-//    - lookback; tells which two nodes an edge originally connected to
-//#error
-//  start with combining all vertices with known-existing bridges
-//  from an arbitrary starting point, follow arbitrary edges without repetition, until dead end or reaching the original vertex
-//  if original vertex, combine all visited vertices into one
-//  if dead end, either our end vertex has exactly one edge, or we visited it twice
-//  if former, mark the bridge corresponding to that edge known to exist
-//  if latter, we walked in a loop; follow the same path until reaching that vertex the first time, then union all remaining visitables
-//  after combining vertices, if that group now has exactly one edge, mark that bridge known to exist,
-//    then combine the islands and check if the new one has one edge; if yes, repeat
-//  terminate the algorithm once there's only one vertex left
-//  or if any vertex has zero edges, in which case the map is impossible
-//#error
-//  make sure that [1]s, which can only be leaves, don't waste time - remove them all, along with their edges
-//#error
-//  hardcode that if there are three or more islands, two 2s can't be connected with two bridges, and two 1s can't have any
-//  probably makes it faster
-//  only needs to be done once
-
 namespace {
+
+//TODO: template this class on whether it's hint/solve/solve_another/difficulty
+//template<bool
 class solver {
-	int width;
-	int height;
-	int size;
+	//design goal: be able to solve all 100*100 maps, in 1MB RAM or less (including stack and gamemap)
+	//1MB / 10000 = 100 bytes per tile
+	//usage:
+	//- gamemap: 1+1+2+4+4 = 12 bytes per tile
+	//- gamemap finished() buffers (can be moved to stack if necessary): 1+2 = 3 bytes per tile
+	//- nextjoined: 2 bytes per tile
+	//- possibilities: 20 bytes per tile
+	//- links: 16 bytes per tile
+	//- sum: 12+3+2+20+16 = 53 bytes per tile
+	//anything that's not per tile (including the stack) fits in the 48576 bytes left in the megabyte
 	
-	int not_ocean; // index to an arbitrary island
-	int n_islands;
+	gamemap& map;
 	
-	array<int8_t> map; // number of bridges, 1-8, or -1 for ocean
-	                   // (0 is legal too, but unless that's the only non-ocean, that map is impossible.)
-	array<uint16_t> state; // the 1<<0 bit means 'it's possible that 0 bridges exit this tile to the right'
-	                       // 1<<(1,2,3) means up, left and down, respectively
-	                       // the 1<<(4..7) bits mean it's possible to have 1 bridge in that direction
-	                       // 1<<(8..11) means 2 bridges
-	                       // 1<<12 is used to check whether all islands are connected; outside that function, always false
-	                       // 1<<(13..15) are completely unused
-	                       // ocean tiles have this set too; for them, left and right are always equal, as are up/down
+	//a linked list of all tiles joined with this one, in arbitrary order, to allow iterating through them
+	//unspecified value for ocean tiles
+	uint16_t nextjoined[100*100];
 	
-	array<uint16_t> idx_next; // idx_next[idx*4 + dir] is the index to the next island in that direction, or -1 if nonexistent
+	// the 1<<0 bit means 'it's possible that 0 bridges exit this tile to the right'
+	// 1<<(1,2,3) means up, left and down, respectively
+	// the 1<<(4..7) bits mean it's possible to have 1 bridge in that direction
+	// 1<<(8..11) means 2 bridges
+	// 1<<(12..15) means joined with that island; if set, 0 1 and 2 are banned in that direction
+	// ocean tiles have this set too; for them, left and right are always equal, as are up/down
+	uint16_t possibilities[10][100*100];
 	
-	array<int> towalk;
-	array<uint8_t> towalk_bits;
-	int n_towalk;
 	
-	//Sets state[ix] to newbits, and updates the corresponding bits for the connecting islands.
-	//Can only clear bits, can't set.
-	//Returns false if any fill_known_at does (i.e. if doing that makes the map impossible).
-	bool set_state(int ix, uint16_t newstate)
-	{
-		uint16_t oldstate = state[ix];
+	//This is similar to union-find, but not exactly. The operations I need are slightly different.
+	struct link_t {
+		uint16_t links[4]; // Available links, or -1. May point to a node with the same root.
 		
-		int offsets[4] = { 1, -width, -1, width };
+		uint16_t join_root; // Points towards the root node of any joined set. May not necessarily be the actual root.
+		uint16_t join_next; // This creates a linked list of joined nodes. The last one points to the root.
+		
+		// These two are only used by the root node. For others, value is unspecified and probably outdated.
+		uint16_t join_firstneighbor; // Points to the first joined node to have neighbors.
+		uint16_t join_last; // Points to the last node in the linked list.
+		
+		//TODO: union some of these
+	};
+	link_t links[100*100];
+	uint16_t n_linkable_islands;
+	uint16_t a_linkable_island; // Points to any one island that does not have population 1.
+	
+	void link_init()
+	{
+		for (int y=0;y<map.height;y++)
+		for (int x=0;x<map.width;x++)
+		{
+			uint16_t index = y*100+x;
+			gamemap::island& here = map.map[y][x];
+			link_t& lhere = links[index];
+			
+			if (here.population >= 0)
+			{
+				//lhere.links[0] = (here.bridgelen[0]>=1 ? index + here.bridgelen[0]     : -1);
+				//lhere.links[1] = (here.bridgelen[1]>=1 ? index - here.bridgelen[1]*100 : -1);
+				//lhere.links[2] = (here.bridgelen[2]>=1 ? index - here.bridgelen[2]     : -1);
+				//lhere.links[3] = (here.bridgelen[3]>=1 ? index + here.bridgelen[3]*100 : -1);
+				uint16_t flags = possibilities[0][index];
+				lhere.links[0] = (flags&0x1110 ? index + here.bridgelen[0]     : -1);
+				lhere.links[1] = (flags&0x2220 ? index - here.bridgelen[1]*100 : -1);
+				lhere.links[2] = (flags&0x4440 ? index - here.bridgelen[2]     : -1);
+				lhere.links[3] = (flags&0x8880 ? index + here.bridgelen[3]*100 : -1);
+				
+				lhere.join_root = index;
+				lhere.join_next = index;
+				lhere.join_firstneighbor = index;
+				lhere.join_last = index;
+			}
+			//else the island will never be touched by these functions
+		}
+		
+		//drop pop-1 nodes
+		n_linkable_islands = 0;
+		for (int y=0;y<map.height;y++)
+		for (int x=0;x<map.width;x++)
+		{
+			uint16_t index = y*100+x;
+			gamemap::island& here = map.map[y][x];
+			link_t& lhere = links[index];
+			
+			if (here.population == 1)
+			{
+printf("UNREACHABLE:%.3i\n",index);
+				for (int i=0;i<4;i++)
+				{
+					if (lhere.links[i] != (uint16_t)-1)
+					{
+printf("UNLINK:%.3i,%.3i\n",index,lhere.links[i]);
+						links[lhere.links[i]].links[i^2] = -1;
+						lhere.links[i] = -1;
+					}
+				}
+			}
+			if (here.population > 1)
+			{
+				a_linkable_island = index;
+				n_linkable_islands++;
+			}
+		}
+		
+		//TODO: castles
+	}
+	uint16_t link_root(uint16_t index)
+	{
+		uint16_t root = index;
+		while (root != links[root].join_root)
+		{
+			root = links[root].join_root;
+		}
+		
+		uint16_t ni = index;
+		while (ni != root)
+		{
+			uint16_t tmp = links[ni].join_root;
+			links[ni].join_root = root;
+			ni = tmp;
+		}
+		
+		return root;
+	}
+	
+	void link_join(uint16_t a, uint16_t b)
+	{
+		//link_t& la = links[a];
+		//link_t& lb = links[b];
+		uint16_t r1 = link_root(a);
+		uint16_t r2 = link_root(b);
+		
+		if (r1 == r2) return;
+		
+		link_t& lr1 = links[r1];
+		link_t& lr2 = links[r2];
+		
+		links[lr1.join_last].join_next = r2;
+		links[lr2.join_last].join_next = r1;
+		lr1.join_last = lr2.join_last;
+		lr2.join_root = r1;
+	}
+	//Returns any link from 'index', except the first link leading to 'other' is excluded.
+	//If there are two links to 'other', one can be returned.
+	//Always returns the same output for the same input. Does not necessarily return links to root nodes.
+	uint16_t link_query(uint16_t index, uint16_t other)
+	{
+		if (other != (uint16_t)-1) other = link_root(other);
+		uint16_t root = link_root(index);
+		uint16_t ni = links[root].join_firstneighbor;
+		do {
+			link_t& link = links[ni];
+			
+			for (int i=0;i<4;i++)
+			{
+				if (link.links[i] != (uint16_t)-1)
+				{
+					uint16_t targetroot = link_root(link.links[i]);
+					if (targetroot == root)
+						link.links[i] = -1;
+					else if (targetroot == other)
+						other = -1;
+					else
+						return link.links[i];
+				}
+			}
+			
+			ni = link.join_next;
+			//if (a == -1) links[root].join_firstneighbor = ni;
+		} while (ni != root);
+		return -1;
+	}
+	//Given 'link', which is a return value from link_query, and 'orig', the input to link_query,
+	// tells which bridge on the original map that corresponds to, and in which direction.
+	//If there are multiple possible bridges between those two roots, returns an arbitrary one.
+	void link_lookback(uint16_t link, uint16_t orig, uint16_t& topleft, bool& down)
+	{
+		gamemap::island& here = map.get(link);
+		orig = link_root(orig);
+		
+		if (here.bridgelen[0] != -1 && link_root(link + here.bridgelen[0]) == orig)
+		{
+			topleft = link;
+			down = false;
+			return;
+		}
+		
+		if (here.bridgelen[1] != -1 && link_root(link - here.bridgelen[1]*100) == orig)
+		{
+			topleft = link - here.bridgelen[1]*100;
+			down = true;
+			return;
+		}
+		
+		if (here.bridgelen[2] != -1 && link_root(link - here.bridgelen[2]) == orig)
+		{
+			topleft = link - here.bridgelen[2];
+			down = false;
+			return;
+		}
+		
+		if (here.bridgelen[3] != -1 && link_root(link + here.bridgelen[3]*100) == orig)
+		{
+			topleft = link;
+			down = true;
+			return;
+		}
+		
+		abort(); // unreachable
+	}
+	
+	
+	//Can only block possibilities, never allow anything new.
+	void set_state(uint16_t index, uint16_t newstate)
+	{
+		uint16_t prevstate = possibilities[0][index];
+		
+//printf("\n%.3i,%.4x,%.4x",index,prevstate,newstate);
+		
+		int16_t offsets[4] = { 1, -100, -1, 100 };
 		
 		for (int dir=0;dir<4;dir++)
 		{
-			int offset = offsets[dir];
-			int src_bits = ((oldstate^newstate) & (0x0111<<dir));
-			int dst_bits = (dir&2) ? (src_bits>>2) : (src_bits<<2);
-			if ((oldstate^newstate) & (0x0111<<dir))
+			int16_t offset = offsets[dir];
+			uint16_t src_bits = ((prevstate^newstate) & (0x0111<<dir));
+			uint16_t dst_bits = (dir&2) ? (src_bits>>2) : (src_bits<<2);
+			if ((prevstate^newstate) & (0x0111<<dir))
 			{
-				int ix2 = ix;
+				uint16_t ix2 = index;
 				do
 				{
-					state[ix2] ^= src_bits;
+					possibilities[0][ix2] ^= src_bits;
 					ix2 += offset;
-					state[ix2] ^= dst_bits;
-				} while (map[ix2 % size] == -1);
+					possibilities[0][ix2] ^= dst_bits;
+				} while (map.get(ix2).population < 0);
 			}
 		}
-		
-		int bank = ix / size;
-		ix %= size;
 		
 		for (int dir=0;dir<4;dir++)
 		{
-			int offset = offsets[dir];
-			if ((oldstate^newstate) & (0x0111<<dir))
+			int16_t offset = offsets[dir];
+			if ((prevstate^newstate) & (0x0111<<dir))
 			{
 				//don't merge those calls, it's a tiny slowdown for whatever reason
-				int ix2 = ix + offset;
-				while (map[ix2] == -1)
+				uint16_t ix2 = index + offset;
+				while (map.get(ix2).population < 0)
 				{
-					if (!fill_known_at(bank, ix2)) return false;
+					fill_simple(ix2);
 					ix2 += offset;
 				}
-				if (!fill_known_at(bank, ix2)) return false;
+				fill_simple(ix2);
 			}
 		}
 		
-		return true;
+		fill_simple(index);
 	}
+	
 	
 	//Returns popcount of the middle eight bits, ignoring the other eight.
 	__attribute__((always_inline)) int popcount_mid(uint16_t in)
@@ -109,587 +267,332 @@ class solver {
 		return ((pack >> ((in>>2) & 0x3C)) + (pack >> ((in>>6) & 0x3C)))&15;
 	}
 	
-	//Removes any possibilities from the given index that would create crossing bridges,
-	// or require more or less bridges than that tile allows.
-	//Returns false if that map is now known unsolvable. If so, the state is now undefined; if not, the state is valid.
-	bool fill_known_at(int bank, int ix)
+	//If 'index' is not an island root node, undefined behavior.
+	void count_bridges(uint16_t index, uint8_t& min, uint8_t& max, bool& has_doubles)
 	{
-		int required = map[ix];
-		
-		ix += bank*size;
-		uint16_t flags = state[ix];
-		
-		if (required != -1)
+		if (LIKELY((possibilities[0][index]&0xF000) == 0))
 		{
+			uint16_t flags = possibilities[0][index];
+			
 			//check how many bridges exit from each tile
 			//keep only the lowest and highest bits
 			// (the <<8s would be unneeded if '0 or 2 but not 1' was impossible, but I don't think it is)
 			uint16_t flags_min = (flags & ~(flags<<4 | flags<<8));
 			uint16_t flags_max = flags;
 			
-			int min = popcount_mid(flags_min | flags_min>>4);
-			int max = popcount_mid(flags_max | flags_max>>4);
+			min = popcount_mid(flags_min | flags_min>>4);
+			max = popcount_mid(flags_max | flags_max>>4);
+			has_doubles = (flags & (flags>>8));
 			
-			if (min > required || max < required) return false;
-			if (min == max) return true;
-			
-			//if no further bridges can be built, ban the options
-			if (min == required) return set_state(ix, flags_min);
-			//if all possible bridges must be built, do that
-			if (max == required) return set_state(ix, (flags & ~(flags>>4 | flags>>8)));
-			
-			//if only one more bridge is free, lock all two-bridge possibilities
-			if (min == max-1) return true; // no two-bridge possibilities open -> skip checks
-			
-			uint16_t flags_min_minus1 = (flags & ~(flags<<8));
-			uint16_t flags_max_minus1 = (flags & ~(flags>>8));
-			if (min == required-1 && flags_min_minus1 != flags) return set_state(ix, flags_min_minus1);
-			if (max == required+1 && flags_max_minus1 != flags) return set_state(ix, flags_max_minus1);
+			return;
 		}
-		else
+		
+		min = 0;
+		max = 0;
+		has_doubles = false;
+		
+		uint16_t ni = index;
+		do {
+			uint16_t flags = possibilities[0][ni] & ~0xF000;
+			
+			//check how many bridges exit from each tile
+			//keep only the lowest and highest bits
+			// (the <<8s would be unneeded if '0 or 2 but not 1' was impossible, but I don't think it is)
+			uint16_t flags_min = (flags & ~(flags<<4 | flags<<8));
+			uint16_t flags_max = flags;
+			
+			min += popcount_mid(flags_min | flags_min>>4);
+			max += popcount_mid(flags_max | flags_max>>4);
+			has_doubles |= (flags & (flags>>8));
+			
+			ni = nextjoined[index];
+		} while (ni != index);
+	}
+	
+	
+	void fill_simple(uint16_t index)
+	{
+		gamemap::island& here = map.get(index);
+		if (here.rootnode != index) return;
+		
+		if (here.population < 0)
 		{
+			uint16_t flags = possibilities[0][index];
+			
 			//ocean tile with mandatory vertical bridge and allowed horizontal -> require zero horizontal
 			if ((flags & 0x0550) != 0 && (flags & 0x000A) == 0)
-			{
-				return set_state(ix, flags & 0x0AAF);
-			}
+				set_state(index, flags & 0x0AAF);
 			//mandatory horizontal -> ban vertical
 			if ((flags & 0x0AA0) != 0 && (flags & 0x0005) == 0)
-			{
-				return set_state(ix, flags & 0x055F);
-			}
+				set_state(index, flags & 0x055F);
+			return;
 		}
-		return true;
-	}
-	
-	//Returns whether the given map is disjoint, i.e. there is at least one pair of tiles that can't be reached from the other.
-	//Unfortunately, due to assuming anything leading to a few more tiles being known, simplifying to 'check if these two points are connected'
-	// is impossible.
-	bool is_disjoint(int bank)
-	{
-		int banksize = bank*size;
 		
-		memset(towalk_bits.ptr(), 0, sizeof(uint8_t)*towalk_bits.size());
 		
-		n_towalk = 1;
-		towalk_bits[not_ocean] = 9;
-		towalk[0] = not_ocean;
+		uint8_t min;
+		uint8_t max;
+		bool has_doubles;
+		count_bridges(index, min, max, has_doubles);
 		
-		int visited = 0;
-		while (n_towalk)
+		if (min == max) return;
+		
+		//if no further bridges can be built, ban the options
+		if (here.population == min)
 		{
-			int ix = towalk[--n_towalk];
-			visited++;
-			
-			int flags = state[banksize + ix];
-			int sourcedir = towalk_bits[ix]; // 1 - don't go right; 2 - don't go up; 3 - don't go left; 4 - don't go down; 9 - go anywhere
-			
-			flags &= ~(0x0110>>1 << sourcedir);
-			
-			//unrolled for performance
-			
-			//right
-			if ((flags & 0x0110))
-			{
-				int ix2 = idx_next[ix*4 + 0];
+			uint16_t ni = index;
+			do {
+				uint16_t flags = possibilities[0][ni];
+				uint16_t flags_min = (flags & ~(flags<<4 | flags<<8));
+				set_state(ni, flags_min);
 				
-				if (towalk_bits[ix2] == 0)
-				{
-					towalk_bits[ix2] = 3;
-					towalk[n_towalk++] = ix2;
-				}
-			}
+				ni = nextjoined[index];
+			} while (ni != index);
 			
-			//up
-			if ((flags & 0x0220))
-			{
-				int ix2 = idx_next[ix*4 + 1];
+			return;
+		}
+		
+		//if all possible bridges must be built, do that
+		if (here.population == max)
+		{
+			uint16_t ni = index;
+			do {
+				uint16_t flags = possibilities[0][ni];
+				uint16_t flags_max = (flags & ~(flags>>4 | flags>>8));
+				set_state(ni, flags_max);
 				
-				if (towalk_bits[ix2] == 0)
-				{
-					towalk_bits[ix2] = 4;
-					towalk[n_towalk++] = ix2;
-				}
-			}
+				ni = nextjoined[index];
+			} while (ni != index);
 			
-			//left
-			if ((flags & 0x0440))
-			{
-				int ix2 = idx_next[ix*4 + 2];
+			return;
+		}
+		
+		//if only one more bridge is free, or all but one must be taken, lock all two-bridge possibilities
+		if (!has_doubles) return; // no two-bridge possibilities open -> skip checks
+		
+		if (here.population-1 == min)
+		{
+			uint16_t ni = index;
+			do {
+				uint16_t flags = possibilities[0][ni];
+				uint16_t flags_min_minus1 = (flags & ~(flags<<8));
+				set_state(ni, flags_min_minus1);
 				
-				if (towalk_bits[ix2] == 0)
-				{
-					towalk_bits[ix2] = 1;
-					towalk[n_towalk++] = ix2;
-				}
-			}
-			
-			//down
-			if ((flags & 0x0880))
-			{
-				int ix2 = idx_next[ix*4 + 3];
+				ni = nextjoined[index];
+			} while (ni != index);
+		}
+		if (here.population+1 == max)
+		{
+			uint16_t ni = index;
+			do {
+				uint16_t flags = possibilities[0][ni];
+				uint16_t flags_max_minus1 = (flags & ~(flags>>8));
+				set_state(ni, flags_max_minus1);
 				
-				if (towalk_bits[ix2] == 0)
-				{
-					towalk_bits[ix2] = 2;
-					towalk[n_towalk++] = ix2;
-				}
-			}
+				ni = nextjoined[index];
+			} while (ni != index);
 		}
-		
-		if (visited != n_islands) return true;
-		
-		return false;
-	}
-	
-	bool finished(int bank)
-	{
-		for (int y=0;y<height;y++)
-		for (int x=0;x<width;x++)
-		{
-			uint16_t flags = state[bank*size + y*width + x];
-			if (flags & (flags>>4 | flags>>8))
-			{
-				return false;
-			}
-		}
-		return true;
-	}
-	
-	void copy_bank(int dst, int src)
-	{
-		memcpy(state.slice(dst*size, size).ptr(),
-		       state.slice(src*size, size).ptr(),
-		       sizeof(uint16_t)*size);
-	}
-	
-	int solve_rec(int depthat, int maxdepth)
-	{
-		if (finished(depthat)) return 1;
-		
-		if (depthat == maxdepth) return -1;
-		
-	fill_again:
-		bool didsomething = false;
-		
-		for (int y=0;y<height;y++)
-		for (int x=0;x<width;x++)
-		{
-			if (map[y*width + x] == -1) continue;
-			
-			int ix      =  depthat   *size + y*width + x;
-			int ix_next = (depthat+1)*size + y*width + x;
-			uint16_t flags = state[ix];
-			
-			//right and up (ignore left/down, they'd only find duplicates)
-			for (int dir=0;dir<=1;dir++)
-			{
-				//if multiple bridge numbers are allowed in this direction
-				if (flags & (flags>>4 | flags>>8) & (0x0111<<dir))
-				{
-					int set_mask = (dir ? 0x0DDD : 0x0EEE);
-					int n_solvable = 0;
-					for (int n=0;n<=2;n++)
-					{
-						int dirbit = (0x0001<<(n*4)<<dir);
-						if (flags & dirbit)
-						{
-							copy_bank(depthat+1, depthat);
-							int ret = 1;
-							//assuming a bridge exists can ban a crossing bridge and make it disjoint
-							//assuming a bridge exists can require others to exist or not exist, making it disjoint
-							//for example (* being ocean):
-							// 1*2
-							//1  3
-							//1  3
-							// 2 3
-							//assume there is no bridge at the *. then it must be vertical, which isolates the 1s at the left.
-							if (ret == 1 && !set_state(ix_next, flags & (set_mask | dirbit))) ret = 0;
-							if (ret == 1 && is_disjoint(depthat+1)) ret = 0;
-							if (ret == 1) ret = solve_rec(depthat+1, maxdepth);
-							
-							if (ret == -1) n_solvable = -99;
-							if (ret == 0)
-							{
-								if (!set_state(ix, state[ix] & ~dirbit)) return 0;
-								didsomething = true;
-								
-								if (is_disjoint(depthat)) return 0;
-								if (finished(depthat)) return 1;
-							}
-							if (ret == 1)
-							{
-								n_solvable++;
-								if (n_solvable > 1) return 2;
-							}
-							if (ret == 2) return 2;
-						}
-					}
-					
-					if (!(state[ix] & (0x0111<<dir))) return 0; // if all options are impossible, drop it
-				}
-			}
-		}
-		
-		if (didsomething) goto fill_again;
-		
-		return -1;
-	}
-	
-	//Takes a string of the form " 2 \n271\n 2 \n". Calculates width and height automatically.
-	//Must be rectangular; trailing spaces must exist on all lines, and a trailing linebreak must exist. Non-square inputs are fine.
-	void init(cstring inmap)
-	{
-		width = 0;
-		while (inmap[width] != '\n') width++;
-		height = 0;
-		while (inmap[(width+1) * height] != '\0') height++;
-		size = height * width;
-		
-		n_islands = 0;
-		
-		map.resize(size);
-		idx_next.resize(size*4);
-		state.resize(size);
-		towalk.resize(size);
-		towalk_bits.resize(size);
-		
-		for (int y=0;y<height;y++)
-		for (int x=0;x<width;x++)
-		{
-			int idx = y*width + x;
-			
-			char mapchar = inmap[y*(width+1) + x];
-			int8_t neighbors;
-			if (mapchar == ' ') neighbors = -1;
-			else neighbors = mapchar-'0';
-			map[idx] = neighbors;
-			
-			state[idx] = 0x000F; // all tiles can have 0 bridges towards anywhere, including oceans and things pointing outside the map
-			idx_next[idx*4 + 0] = -1;
-			idx_next[idx*4 + 1] = -1;
-			idx_next[idx*4 + 2] = -1;
-			idx_next[idx*4 + 3] = -1;
-			
-			if (neighbors != -1)
-			{
-				n_islands++;
-				
-				not_ocean = idx;
-				for (int x2=x-1;x2>=0;x2--)
-				{
-					if (map[y*width + x2] != -1)
-					{
-						state[y*width + x2] |= 0x0111; // right
-						state[y*width + x ] |= 0x0444; // left
-						idx_next[(y*width + x2)*4 + 0] = y*width + x; // right
-						idx_next[(y*width + x )*4 + 2] = y*width + x2; // left
-						x2++;
-						while (x2 != x)
-						{
-							state[y*width + x2] |= 0x0555;
-							x2++;
-						}
-						break;
-					}
-				}
-				for (int y2=y-1;y2>=0;y2--)
-				{
-					if (map[y2*width + x] != -1)
-					{
-						state[y2*width + x] |= 0x0888; // down
-						state[y *width + x] |= 0x0222; // up
-						idx_next[(y2*width + x)*4 + 3] = y *width + x; // down
-						idx_next[(y *width + x)*4 + 1] = y2*width + x; // up
-						y2++;
-						while (y2 != y)
-						{
-							state[y2*width + x] |= 0x0AAA;
-							y2++;
-						}
-						break;
-					}
-				}
-			}
-		}
-	}
-	
-	//maxdepth is number of nested guesses that may be made in an attempt to solve the map.
-	//Runtime is O(s^(4*(d+1))), where s is width*height and d is max depth. (Probably less, but I can't prove it.)
-	//Higher depth can solve more maps, but maps needing high depth are also hard to solve for humans.
-	//Returns:
-	//-1 if it's unsolvable with that max depth, but will give another answer on higher depth
-	//0 if unsolvable
-	//1 if there is a unique solution
-	//2 if there are multiple valid solutions
-	//If 1, you may call solution().
-	int solve(int maxdepth, int* neededdepth)
-	{
-		if (neededdepth) *neededdepth = 0;
-		state.reserve(size*(maxdepth+1));
-		
-		for (int ix=0;ix<size;ix++)
-		{
-			if (!fill_known_at(0, ix)) return 0;
-		}
-		if (is_disjoint(0)) return 0;
-		
-		for (int depth = 0; depth <= maxdepth; depth++)
-		{
-			if (neededdepth) *neededdepth = depth;
-			int ret = solve_rec(0, depth);
-			if (ret >= 0) return ret;
-		}
-		return -1;
-	}
-	
-	//The solution is in the same shape as the input, and contains the number of bridges that exit at the right of the given cell.
-	//Ocean tiles remain spaces.
-	//To find the bridges from the left, check the previous tile. To find vertical bridges, start at an edge and fill in everything.
-	string solution()
-	{
-		string ret = "";
-		for (int y=0;y<height;y++)
-		{
-			for (int x=0;x<width;x++)
-			{
-				if (map[y*width + x] == -1)
-				{
-					ret += ' ';
-					continue;
-				}
-				uint16_t flags = state[y*width + x];
-				if (flags & (flags>>4 | flags>>8)) return ""; // unsolved
-				if (flags & (0x0100)) ret += '2';
-				if (flags & (0x0010)) ret += '1';
-				if (flags & (0x0001)) ret += '0';
-			}
-			ret += '\n';
-		}
-		return ret;
-	}
-	
-	void print(int bank)
-	{
-		printf("%i,%i d=%i\n", width, height, bank);
-		
-		for (int y=0;y<height;y++)
-		{
-			for (int x=0;x<width;x++)
-			{
-				printf("%.4X ", state[bank*size + y*width + x]);
-			}
-			puts("");
-		}
-		puts(finished(bank) ? "finished" : "unfinished");
 	}
 	
 public:
-	
-	solver(cstring map, int* perror, int maxdepth, int* neededdepth, string* psolution)
+	solver(gamemap& map, bool use_source_bridges) : map(map)
 	{
-		if (map) init(map);
-		else n_islands = 0;
+		//make sure that existing bridges are labeled as such on all tiles they're on
+		//'map' is known correct, but anything other than that should use set_state
 		
-		if (n_islands == 0)
+		for (int y=0;y<map.height;y++)
+		for (int x=0;x<map.width;x++)
 		{
-			if (perror) *perror = 1;
-			if (neededdepth) *neededdepth = 0;
-			*psolution = map;
-			return;
+			nextjoined[y*100+x] = y*100+x;
 		}
-		int error = solve(maxdepth, neededdepth);
-		if (perror) *perror = error;
-		*psolution = solution();
+		
+		for (int y=0;y<map.height;y++)
+		for (int x=0;x<map.width;x++)
+		{
+			gamemap::island& here = map.map[y][x];
+			int index = y*100+x;
+			
+			if (here.rootnode != index)
+			{
+				int tmp = nextjoined[here.rootnode];
+				nextjoined[here.rootnode] = nextjoined[index];
+				nextjoined[index] = tmp;
+			}
+			
+			uint16_t flags = 0x000F;
+			for (int dir=0;dir<4;dir++)
+			{
+				if (here.bridgelen[dir] != -1) flags |= 0x0110<<dir;
+				if (use_source_bridges && here.bridges[dir] == 1) flags &= ~(0x0001<<dir);
+				if (use_source_bridges && here.bridges[dir] == 2) flags &= ~(0x0011<<dir);
+				if (here.bridges[dir] == 3) { flags &= ~(0x0111<<dir); flags |= 0x1000<<dir; }
+			}
+			possibilities[0][index] = flags;
+		}
 	}
+	
+	//Returns index (y*100+x) to an island where a bridge can be determined buildable.
+	//If skip is 1, the second available hint is returned. If no further bridges can be determined buildable on this map, returns -1.
+	//Can return -1 for skip=0 if the map is unsolvable or input bridges are incorrect.
+	int16_t hint(const gamemap& map, int skip = 0);
+	
+	//Returns whether the given map is solvable. Assumes input bridges are correct.
+	//If solvable, the relevant bridges are added to the map. If not solvable, the bridges in 'map' are undefined.
+	bool solve()
+	{
+		if (map.numislands == 0) return true;
+		
+		//block 1s and 2s from using both of their bindings towards each other
+		if (map.numislands > 2) // except if that's the only two islands, waste of time
+		{
+			for (int y=0;y<map.height;y++)
+			for (int x=0;x<map.width;x++)
+			{
+				gamemap::island& here = map.map[y][x];
+				uint16_t flags = possibilities[0][y*100+x];
+				uint16_t newflags = flags;
+				
+				if (here.population == 2 && (flags&0x0100) && map.map[y][x+here.bridgelen[0]].population == 2)
+					newflags &= ~0x0100;
+				if (here.population == 1 && (flags&0x0010) && map.map[y][x+here.bridgelen[0]].population == 1)
+					newflags &= ~0x0010;
+				
+				if (here.population == 2 && (flags&0x0800) && map.map[y+here.bridgelen[3]][x].population == 2)
+					newflags &= ~0x0800;
+				if (here.population == 1 && (flags&0x0080) && map.map[y+here.bridgelen[3]][x].population == 1)
+					newflags &= ~0x0080;
+				
+				if (flags != newflags) set_state(y*100+x, newflags);
+			}
+		}
+		
+		for (int y=0;y<map.height;y++)
+		for (int x=0;x<map.width;x++)
+		{
+			fill_simple(y*100+x);
+		}
+		
+		//use the isolation rule
+	link_again_top: ;
+		link_init();
+		for (int y=0;y<map.height;y++)
+		for (int x=0;x<map.width;x++)
+		{
+			uint16_t index = y*100+x;
+			gamemap::island& here = map.map[y][x];
+			//link_t& lhere = links[index];
+			
+			uint16_t flags = possibilities[0][index];
+			if (here.population > 1 && !(flags & 0x0001)) link_join(index, index+here.bridgelen[0]);
+			if (here.population > 1 && !(flags & 0x0008)) link_join(index, index+here.bridgelen[3]*100);
+		}
+		
+puts("HELLO");
+		bool link_did_any = false;
+		while (true)
+		{
+	link_again: ;
+			uint16_t index1 = a_linkable_island;
+			uint16_t index2 = a_linkable_island;
+			uint16_t index1p = -1;
+			uint16_t index2p = -1;
+			
+			do
+			{
+				uint16_t next;
+				
+				next = link_query(index1, index1p);
+printf("1:%.3i(%.3i),%.3i(%.3i),%.3i(%.3i)\n",
+index1,link_root(index1),
+index1p,(index1p==65535)?-1:link_root(index1p),
+next,(next==65535)?-1:link_root(next));
+				index1p = index1;
+				index1 = next;
+				if (next == (uint16_t)-1) goto link_done; // only a single island left? then we're done
+				
+				next = link_query(index2, index2p);
+//printf("2:%.3i(%.3i),%.3i(%.3i),%.3i(%.3i)\n",
+//index2,link_root(index2),
+//index2p,(index2p==65535)?-1:link_root(index2p),
+//next,(next==65535)?-1:link_root(next));
+				if (next != (uint16_t)-1)
+				{
+					index2p = index2;
+					index2 = next;
+					
+					next = link_query(index2, index2p);
+//printf("3:%.3i(%.3i),%.3i(%.3i),%.3i(%.3i)\n",
+//index2,link_root(index2),
+//index2p,(index2p==65535)?-1:link_root(index2p),
+//next,(next==65535)?-1:link_root(next));
+				}
+				if (next != (uint16_t)-1)
+				{
+					index2p = index2;
+					index2 = next;
+				}
+				
+				if (next == (uint16_t)-1)
+				{
+					uint16_t topleft;
+					bool down;
+					link_lookback(index2, index2p, topleft, down);
+printf("FORCEJOIN=%.3i(%.3i) - join %.3i dir %i\n", index2, index2p, topleft, down*3);
+					link_join(index2, index2p);
+					set_state(topleft, possibilities[0][topleft] & ~(down ? 0x0008 : 0x0001));
+					link_did_any = true;
+					goto link_again;
+				}
+			} while (index1 != index2);
+			
+			printf("LOOP=%.3i\n",index1);
+			
+			int numvisited = 0;
+			do {
+				map.towalk[numvisited++] = index2;
+				
+				uint16_t next = link_query(index2, index2p);
+				index2p = index2;
+				index2 = next;
+			} while (index1 != index2);
+			
+			for (int i=1;i<numvisited;i++)
+			{
+				printf("JOINLOOP:%.3i,%.3i\n",index1,map.towalk[i]);
+				link_join(index1, map.towalk[i]);
+			}
+		}
+	link_done: ;
+		// if a set_state from a forced join helped, perhaps that set_state blocked some other bridges,
+		// so we can be sure of something new
+		if (link_did_any) goto link_again_top;
+		
+		//TODO: guessing (recursion)
+		//TODO: test large islands and castles
+		
+		for (int y=0;y<map.height;y++)
+		for (int x=0;x<map.width;x++)
+		{
+			uint16_t flags = possibilities[0][y*100+x];
+			
+			uint8_t nright = !(flags&0x0001) + !(flags&0x0011) + !(flags&0x0111);
+			uint8_t ndown  = !(flags&0x0008) + !(flags&0x0088) + !(flags&0x0888);
+//printf("IX=%.3i FL=%.4X BR=%i BD=%i\n",y*100+x,flags,nright,ndown);
+			
+			while (map.map[y][x].bridges[0] < nright) map.toggle(x, y, 0);
+			while (map.map[y][x].bridges[3] < ndown)  map.toggle(x, y, 3);
+		}
+		
+		return map.finished();
+	}
+	//Give it a solved map as input. Returns another solution for the same map, if one exists; otherwise, returns false.
+	bool solve_another(gamemap& map);
+	
+	//This is only an estimate.
+	int difficulty(const gamemap& map);
 };
 }
 
-string map_solve(cstring map, int* error, int maxdepth, int* neededdepth)
-{
-	string ret;
-	solver s(map, error, maxdepth, neededdepth, &ret);
-	return ret;
-}
-
-
-static void test_split(cstring in, string& map, string& solution)
-{
-	array<cstring> lines = in.csplit("\n");
-	
-	for (size_t i=0;i<lines.size()-1;i+=2)
-	{
-		map      += lines[i  ]+"\n";
-		solution += lines[i+1]+"\n";
-	}
-}
-
-static void test_one(int maxdepth, cstring test)
-{
-	string map;
-	string solution_good;
-	test_split(test, map, solution_good);
-	
-	int result;
-	int depth;
-	string solution = map_solve(map, &result, maxdepth, &depth);
-	assert_eq(result, 1);
-	assert_eq(solution, solution_good);
-	assert_eq(depth, maxdepth);
-}
-
-static void test_error(int maxdepth, int exp, cstring map)
-{
-	int result;
-	int depth;
-	map_solve(map, &result, maxdepth, &depth);
-	assert_eq(result, exp);
-	assert_eq(depth, maxdepth);
-}
-
-
-test("solver", "", "solver")
-{
-	testcall(test_one(0, // the outer islands only connect to one island each, so the map is trivial
-		" 2 \n" /* */ " 0 \n"
-		"271\n" /* */ "210\n"
-		" 2 \n" /* */ " 0 \n"
-	));
-	testcall(test_one(0, // a few islands are immediately obvious, the others show up once x
-		" 1  3\n" /* */ " 1  0\n"
-		"2 1  \n" /* */ "1 0  \n"
-		"2  23\n" /* */ "1  10\n"
-	));
-	testcall(test_one(0, // make sure the smallest possible maps remain functional
-		"11\n" /* */ "10\n"
-	));
-	testcall(test_one(0,
-		"2\n" /* */ "0\n"
-		"2\n" /* */ "0\n"
-	));
-	testcall(test_one(0, // the fabled zero
-		"    \n" /* */ "    \n"
-		"  0 \n" /* */ "  0 \n"
-		"    \n" /* */ "    \n"
-		"    \n" /* */ "    \n"
-	));
-	testcall(test_one(0, // a map without islands, while unusual, is valid
-		"   \n" /* */ "   \n"
-		"   \n" /* */ "   \n"
-	));
-	testcall(test_one(0, // a 0x0 map is even more unusual, but equally valid
-		"" /* */ ""
-	));
-	testcall(test_one(0, // bridges may not cross
-		"464\n" /* */ "220\n"
-		"4 4\n" /* */ "0 0\n"
-		"2 2\n" /* */ "0 0\n"
-		" 2 \n" /* */ " 0 \n"
-	));
-	testcall(test_one(1, // requires guessing
-		"2 2\n" /* */ "1 0\n"
-		"222\n" /* */ "110\n"
-	));
-	testcall(test_one(1, // all islands must be connected
-		"22\n" /* */ "10\n"
-		"22\n" /* */ "10\n"
-	));
-	testcall(test_one(0, // not sure if this enters the fill-mandatory-bridges function, but it has caught a few bugs
-		"1 2  \n" /* */ "1 0  \n"
-		" 1 1 \n" /* */ " 0 0 \n"
-		"14441\n" /* */ "11110\n"
-		" 1 1 \n" /* */ " 0 0 \n"
-		"  2 1\n" /* */ "  1 0\n"
-	));
-	testcall(test_one(0, // bigger and nastier
-		"4    4 \n" /* */ "2    0 \n"
-		"  4 4  \n" /* */ "  2 0  \n"
-		"    682\n" /* */ "    220\n"
-		" 282   \n" /* */ " 220   \n"
-		"  4 4  \n" /* */ "  2 0  \n"
-		"4    4 \n" /* */ "2    0 \n"
-	));
-	testcall(test_one(1, // also requires guessing, multiple times
-		"2  2\n" /* */ "1  0\n"
-		" 22 \n" /* */ " 10 \n"
-		"  33\n" /* */ "  10\n"
-		" 22 \n" /* */ " 10 \n"
-		"2  2\n" /* */ "1  0\n"
-	));
-	testcall(test_one(1, // nasty amount of cycles because must annoy island tracker
-		"2          2\n" /* */ "1          0\n"
-		" 2        2 \n" /* */ " 1        0 \n"
-		"  2  3   2  \n" /* */ "  1  1   0  \n"
-		"   2 3  2   \n" /* */ "   1 1  0   \n"
-		"    2  2    \n" /* */ "    1  0    \n"
-		"       33   \n" /* */ "       10   \n"
-		" 33         \n" /* */ " 10         \n"
-		"    2  2    \n" /* */ "    1  0    \n"
-		"   2    2   \n" /* */ "   1    0   \n"
-		"  2      2  \n" /* */ "  1      0  \n"
-		" 2    3   2 \n" /* */ " 1    1   0 \n"
-		"2     3    2\n" /* */ "1     1    0\n"
-	));
-	// these require nested guesses (created by the game generator)
-	// (humans can solve them all without nested guesses, by knowing that 1s can't combine two islands)
-	// (TODO: make smarter solver, then generate new nasty maps)
-	testcall(test_one(2,
-		"2  1\n" /* */ "0  0\n"
-		"3233\n" /* */ "1110\n"
-		" 131\n" /* */ " 100\n"
-		"1 2 \n" /* */ "1 0 \n"
-	));
-	testcall(test_one(2,
-		"1232\n" /* */ "0120\n"
-		"2 11\n" /* */ "0 00\n"
-		"5543\n" /* */ "2120\n"
-		"23 2\n" /* */ "02 0\n"
-	));
-	testcall(test_one(2,
-		"1332\n" /* */ "1100\n"
-		"13 3\n" /* */ "10 0\n"
-		"21  \n" /* */ "00  \n"
-		"3 42\n" /* */ "1 10\n"
-	));
-	testcall(test_one(2,
-		"3431\n" /* */ "2110\n"
-		" 112\n" /* */ " 000\n"
-		"32 3\n" /* */ "11 0\n"
-		"2  1\n" /* */ "1  0\n"
-	));
-	
-	testcall(test_error(1, 0, // obviously impossible
-		"11\n"
-		"11\n"
-	));
-	testcall(test_error(0, 0, // even more obviously impossible
-		"12\n"
-	));
-	testcall(test_error(0, 0, // stupidly obviously impossible
-		"2 \n"
-		" 3\n"
-	));
-	testcall(test_error(0, 0, // filling in everything yields a disjoint map
-		"2 2 \n"
-		" 2 2\n"
-	));
-	testcall(test_error(1, 2, // has multiple solutions
-		"33\n"
-		"22\n"
-	));
-	testcall(test_error(2, 2, // this too
-		" 31\n"
-		"272\n"
-		"131\n"
-	));
-	testcall(test_error(3, 2, // requires high depth
-		"232\n"
-		"343\n"
-		"232\n"
-	));
-	testcall(test_error(3, 2, // takes forever to try all two-assumption options (3 finishes instantly)
-		"2332\n"
-		"3443\n"
-		"2332\n"
-	));
-}
+//int16_t solver_hint(const gamemap& map, int skip) { solver s; return s.hint(map, skip); }
+bool solver_solve(gamemap& map) { solver s(map, true); return s.solve(); }
+//bool solver_solve_another(gamemap& map) { solver s; return s.solve_another(map); }
+//int solver_difficulty(const gamemap& map) { solver s; return s.difficulty(map); }

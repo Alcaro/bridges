@@ -10,15 +10,16 @@
 class simd128 {
 	__m128i val;
 	
+	void x() { static_assert(sizeof(simd128) == sizeof(__m128i)); }
+	
 public:
 	simd128(__m128i val) : val(val) {} // better not use these, but they exist if you need them
 	operator __m128i() { return val; }
 	
-	template<typename T> static size_t count() { return sizeof(simd128)/sizeof(T); }
-	static size_t count8() { return sizeof(simd128)/sizeof(uint8_t); }
-	static size_t count16() { return sizeof(simd128)/sizeof(uint16_t); }
-	static size_t count32() { return sizeof(simd128)/sizeof(uint32_t); }
-	static size_t count64() { return sizeof(simd128)/sizeof(uint64_t); }
+	static const size_t count8  = sizeof(__m128i)/sizeof(uint8_t);
+	static const size_t count16 = sizeof(__m128i)/sizeof(uint16_t);
+	static const size_t count32 = sizeof(__m128i)/sizeof(uint32_t);
+	static const size_t count64 = sizeof(__m128i)/sizeof(uint64_t);
 	
 	//aligned / unaligned
 	static simd128 loada(const simd128* ptr) { return _mm_load_si128((__m128i*)ptr); }

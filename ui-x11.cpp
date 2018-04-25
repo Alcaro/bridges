@@ -69,6 +69,75 @@ int main(int argc, char** argv)
 	}
 	if (do_bench_solv)
 	{
+
+//while (true)
+//{
+//again: ;
+//
+////is-island, do-down, do-right
+////top left forced to be 2s, to not trivialize the others
+//uint8_t bridge[7][9][3] = {
+//	{ {1,2,2},{0    },{0    },{0    },{0    },{0    },{0    },{0    },{1,1,0} },
+//	{ {1,1,1},{0    },{1,0,1},{0    },{1,1,1},{0    },{1,0,0},{0    },{0    } },
+//	{ {0    },{1,1,1},{0    },{1,0,0},{0    },{1,0,1},{0    },{1,1,0},{0    } },
+//	{ {1,1,0},{0    },{1,0,1},{0    },{1,1,1},{0    },{1,0,0},{0    },{0    } },
+//	{ {0    },{1,0,1},{0    },{1,1,0},{0    },{1,0,1},{0    },{1,1,0},{0    } },
+//	{ {1,0,1},{0    },{1,0,0},{0    },{1,0,1},{0    },{1,0,0},{0    },{0    } },
+//	{ {0    },{1,0,1},{0    },{1,0,1},{0    },{1,0,1},{0    },{1,0,1},{1,0,0} },
+//};
+//
+//for (int y=0;y<7;y++)
+//for (int x=0;x<9;x++)
+//{
+//	if (bridge[y][x][1] && rand()%100 < 50) bridge[y][x][1] = 2;
+//	if (bridge[y][x][2] && rand()%100 < 50) bridge[y][x][2] = 2;
+//}
+//
+//string out = "";
+//for (int y=0;y<7;y++)
+//{
+//for (int x=0;x<9;x++)
+//{
+//	int bri = 0;
+//	bri += bridge[y][x][1];
+//	bri += bridge[y][x][2];
+//	for (int yy=y-1;yy>=0;yy--)
+//	{
+//		if (bridge[yy][x][0]) { bri += bridge[yy][x][1]; break; }
+//	}
+//	for (int xx=x-1;xx>=0;xx--)
+//	{
+//		if (bridge[y][xx][0]) { bri += bridge[y][xx][2]; break; }
+//	}
+//	if (bridge[y][x][0]) out += (char)('0'+bri);
+//	else out += ' ';
+//	
+//	if (y==3 && x==4 && bri!=4) goto again;
+//}
+//out+="\n";
+//}
+//
+//puts(out);
+//
+//int result;
+//int steps;
+//map_solve(out, &result, 3, &steps);
+//
+//if (result == 1 && steps > 0) exit(0);
+//
+////"4-------4\n" // test map
+////"6-4-6-2 |\n"
+////"|4-2|2-4|\n"
+////"4|2-8-2||\n"
+////"|4-4|2-6|\n"
+////"4-2|4-2||\n"
+////" 2-6-4-64\n"
+//
+//
+//}
+
+
+
 		srand(0);
 		bool vg = RUNNING_ON_VALGRIND;
 		uint64_t start = time_ms_ne();
@@ -118,6 +187,8 @@ int main(int argc, char** argv)
 	{
 		game* g = game::create();
 		game::input in = {};
+		game::input in_press = {};
+		in_press.keys = 1 << game::k_confirm;
 		
 		int frames = 0;
 		
@@ -134,7 +205,24 @@ int main(int argc, char** argv)
 			end = time_ms_ne();
 		}
 		
-		printf("rendered %i frames in %u ms = %ffps\n", frames, (unsigned)(end-start), frames/(float)(end-start)*1000);
+		printf("title screen: %i frames in %u ms = %ffps\n", frames, (unsigned)(end-start), frames/(float)(end-start)*1000);
+		
+		g->run(in_press, out);
+		
+		start = time_ms_ne();
+		end = start;
+		while (end < start+5000)
+		{
+			for (int i=0;i<100;i++) // only checking timer every 100 frames boosts framerate from 1220 to 1418
+			{
+				g->run(in, out);
+				frames++;
+			}
+			end = time_ms_ne();
+		}
+		
+		printf("level select: %i frames in %u ms = %ffps\n", frames, (unsigned)(end-start), frames/(float)(end-start)*1000);
+		
 		return 0;
 	}
 	
