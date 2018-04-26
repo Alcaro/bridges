@@ -604,9 +604,9 @@ public:
 				{
 					out.insert_sub(x+12, y+12, res.castle, 64*(here.population-80), 0, 64, 64);
 					
-					int flagx1;
-					int flagx2;
-					int flagy;
+					int flagx1 = 0; // these values won't be used, but gcc doesn't know that
+					int flagx2 = 0;
+					int flagy = 0;
 					
 					if (here.population == 80) { flagx1=14; flagx2=51; flagy=0; }
 					if (here.population == 81) { flagx1=28; flagx2=28; flagy=3; }

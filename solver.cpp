@@ -2,35 +2,10 @@
 
 namespace {
 
-//TODO: template this class on whether it's hint/solve/solve_another/difficulty
-//template<bool
-class solver {
-	//design goal: be able to solve all 100*100 maps, in 1MB RAM or less (including stack and gamemap)
-	//1MB / 10000 = 100 bytes per tile
-	//usage:
-	//- gamemap: 1+1+2+4+4 = 12 bytes per tile
-	//- gamemap finished() buffers (can be moved to stack if necessary): 1+2 = 3 bytes per tile
-	//- nextjoined: 2 bytes per tile
-	//- possibilities: 20 bytes per tile
-	//- links: 16 bytes per tile
-	//- sum: 12+3+2+20+16 = 53 bytes per tile
-	//anything that's not per tile (including the stack) fits in the 48576 bytes left in the megabyte
-	
-	gamemap& map;
-	
-	//a linked list of all tiles joined with this one, in arbitrary order, to allow iterating through them
-	//unspecified value for ocean tiles
-	uint16_t nextjoined[100*100];
-	
-	// the 1<<0 bit means 'it's possible that 0 bridges exit this tile to the right'
-	// 1<<(1,2,3) means up, left and down, respectively
-	// the 1<<(4..7) bits mean it's possible to have 1 bridge in that direction
-	// 1<<(8..11) means 2 bridges
-	// 1<<(12..15) means joined with that island; if set, 0 1 and 2 are banned in that direction
-	// ocean tiles have this set too; for them, left and right are always equal, as are up/down
-	uint16_t possibilities[10][100*100];
-	
-	
+//#define printf(...)
+//#define puts(...)
+
+class linker {
 	//This is similar to union-find, but not exactly. The operations I need are slightly different.
 	struct link_t {
 		uint16_t links[4]; // Available links, or -1. May point to a node with the same root.
@@ -48,7 +23,8 @@ class solver {
 	uint16_t n_linkable_islands;
 	uint16_t a_linkable_island; // Points to any one island that does not have population 1.
 	
-	void link_init()
+public:
+	void init(gamemap& map, uint16_t* possibilities)
 	{
 		for (int y=0;y<map.height;y++)
 		for (int x=0;x<map.width;x++)
@@ -63,7 +39,7 @@ class solver {
 				//lhere.links[1] = (here.bridgelen[1]>=1 ? index - here.bridgelen[1]*100 : -1);
 				//lhere.links[2] = (here.bridgelen[2]>=1 ? index - here.bridgelen[2]     : -1);
 				//lhere.links[3] = (here.bridgelen[3]>=1 ? index + here.bridgelen[3]*100 : -1);
-				uint16_t flags = possibilities[0][index];
+				uint16_t flags = possibilities[index];
 				lhere.links[0] = (flags&0x1110 ? index + here.bridgelen[0]     : -1);
 				lhere.links[1] = (flags&0x2220 ? index - here.bridgelen[1]*100 : -1);
 				lhere.links[2] = (flags&0x4440 ? index - here.bridgelen[2]     : -1);
@@ -108,7 +84,8 @@ printf("UNLINK:%.3i,%.3i\n",index,lhere.links[i]);
 		
 		//TODO: castles
 	}
-	uint16_t link_root(uint16_t index)
+	
+	uint16_t root(uint16_t index)
 	{
 		uint16_t root = index;
 		while (root != links[root].join_root)
@@ -127,12 +104,25 @@ printf("UNLINK:%.3i,%.3i\n",index,lhere.links[i]);
 		return root;
 	}
 	
-	void link_join(uint16_t a, uint16_t b)
+	uint16_t count() { return n_linkable_islands; }
+	uint16_t any() { return a_linkable_island; }
+	//Returns an island joined with this one.
+	//It's cyclical; keep calling this, and once you get the starting point back, you've seen them all.
+	uint16_t iter(uint16_t index)
+	{
+		return links[index].join_next;
+	}
+	
+	bool can_join(uint16_t index, int dir)
+	{
+		return links[index].links[dir] != (uint16_t)-1;
+	}
+	void join(uint16_t a, uint16_t b)
 	{
 		//link_t& la = links[a];
 		//link_t& lb = links[b];
-		uint16_t r1 = link_root(a);
-		uint16_t r2 = link_root(b);
+		uint16_t r1 = root(a);
+		uint16_t r2 = root(b);
 		
 		if (r1 == r2) return;
 		
@@ -147,11 +137,11 @@ printf("UNLINK:%.3i,%.3i\n",index,lhere.links[i]);
 	//Returns any link from 'index', except the first link leading to 'other' is excluded.
 	//If there are two links to 'other', one can be returned.
 	//Always returns the same output for the same input. Does not necessarily return links to root nodes.
-	uint16_t link_query(uint16_t index, uint16_t other)
+	uint16_t query(uint16_t index, uint16_t other)
 	{
-		if (other != (uint16_t)-1) other = link_root(other);
-		uint16_t root = link_root(index);
-		uint16_t ni = links[root].join_firstneighbor;
+		if (other != (uint16_t)-1) other = root(other);
+		uint16_t r = root(index);
+		uint16_t ni = links[r].join_firstneighbor;
 		do {
 			link_t& link = links[ni];
 			
@@ -159,8 +149,8 @@ printf("UNLINK:%.3i,%.3i\n",index,lhere.links[i]);
 			{
 				if (link.links[i] != (uint16_t)-1)
 				{
-					uint16_t targetroot = link_root(link.links[i]);
-					if (targetroot == root)
+					uint16_t targetroot = root(link.links[i]);
+					if (targetroot == r)
 						link.links[i] = -1;
 					else if (targetroot == other)
 						other = -1;
@@ -171,39 +161,39 @@ printf("UNLINK:%.3i,%.3i\n",index,lhere.links[i]);
 			
 			ni = link.join_next;
 			//if (a == -1) links[root].join_firstneighbor = ni;
-		} while (ni != root);
+		} while (ni != r);
 		return -1;
 	}
-	//Given 'link', which is a return value from link_query, and 'orig', the input to link_query,
+	//Given 'link', which is a return value from linker::query, and 'orig', the input to linker::query,
 	// tells which bridge on the original map that corresponds to, and in which direction.
 	//If there are multiple possible bridges between those two roots, returns an arbitrary one.
-	void link_lookback(uint16_t link, uint16_t orig, uint16_t& topleft, bool& down)
+	void lookback(gamemap& map, uint16_t link, uint16_t orig, uint16_t& topleft, bool& down)
 	{
 		gamemap::island& here = map.get(link);
-		orig = link_root(orig);
+		orig = root(orig);
 		
-		if (here.bridgelen[0] != -1 && link_root(link + here.bridgelen[0]) == orig)
+		if (here.bridgelen[0] != -1 && root(link + here.bridgelen[0]) == orig)
 		{
 			topleft = link;
 			down = false;
 			return;
 		}
 		
-		if (here.bridgelen[1] != -1 && link_root(link - here.bridgelen[1]*100) == orig)
+		if (here.bridgelen[1] != -1 && root(link - here.bridgelen[1]*100) == orig)
 		{
 			topleft = link - here.bridgelen[1]*100;
 			down = true;
 			return;
 		}
 		
-		if (here.bridgelen[2] != -1 && link_root(link - here.bridgelen[2]) == orig)
+		if (here.bridgelen[2] != -1 && root(link - here.bridgelen[2]) == orig)
 		{
 			topleft = link - here.bridgelen[2];
 			down = false;
 			return;
 		}
 		
-		if (here.bridgelen[3] != -1 && link_root(link + here.bridgelen[3]*100) == orig)
+		if (here.bridgelen[3] != -1 && root(link + here.bridgelen[3]*100) == orig)
 		{
 			topleft = link;
 			down = true;
@@ -212,14 +202,54 @@ printf("UNLINK:%.3i,%.3i\n",index,lhere.links[i]);
 		
 		abort(); // unreachable
 	}
+};
+
+template<bool op_another>
+class solver {
+	//design goal: be able to solve as many 100*100 maps as possible, in 1MB RAM or less (including stack and gamemap)
+	//1MB / 10000 = 104 bytes per tile, but let's say 100 to give ample space for not-per-tile stuff
+	//usage:
+	//- gamemap: 1+1+2+4+4 = 12 bytes per tile
+	//- gamemap finished() buffers (can be moved to stack if necessary): 1+2 = 3 bytes per tile
+	//- nextjoined: 2 bytes per tile
+	//- possibilities: 64 bytes per tile
+	//- links: 16 bytes per tile
+	//- sum: 12+3+2+20+16 = 97 bytes per tile
+	//anything that's not per tile (including the stack) fits in the 48576 bytes left in the megabyte
+	
+	gamemap& map;
+	
+	//for small islands, points to self
+	//for large islands, cyclical linked list of all tiles of the island (arbitrary order), to allow iterating through them
+	//for ocean tiles, unspecified value
+	uint16_t nextjoined[100*100];
+	
+	// the 1<<0 bit means 'it's possible that 0 bridges exit this tile to the right'
+	// 1<<(1,2,3) means up, left and down, respectively
+	// the 1<<(4..7) bits mean it's possible to have 1 bridge in that direction
+	// 1<<(8..11) means 2 bridges
+	// 1<<(12..15) means joined with that island; if set, 0 1 and 2 are banned in that direction
+	// ocean tiles have this set too; for them, left and right are always equal, as are up/down
+	uint16_t* possibilities;
+	uint16_t possibilities_buf[32][100*100];
+	
+	linker link;
+	
+	uint32_t difficulty;
 	
 	
 	//Can only block possibilities, never allow anything new.
-	void set_state(uint16_t index, uint16_t newstate)
+	//Returns false if the map is now known unsolvable. If so, 'possibilities' is unspecified.
+	bool set_state(uint16_t index, uint16_t newstate)
 	{
-		uint16_t prevstate = possibilities[0][index];
+		uint16_t prevstate = possibilities[index];
+printf("SET(%.3i):%.4X->%.4X\n",index,prevstate,newstate);
 		
-//printf("\n%.3i,%.4x,%.4x",index,prevstate,newstate);
+		if (newstate & ~prevstate) abort();
+		if (!(newstate&0x1111)) abort();
+		if (!(newstate&0x2222)) abort();
+		if (!(newstate&0x4444)) abort();
+		if (!(newstate&0x8888)) abort();
 		
 		int16_t offsets[4] = { 1, -100, -1, 100 };
 		
@@ -233,9 +263,9 @@ printf("UNLINK:%.3i,%.3i\n",index,lhere.links[i]);
 				uint16_t ix2 = index;
 				do
 				{
-					possibilities[0][ix2] ^= src_bits;
+					possibilities[ix2] ^= src_bits;
 					ix2 += offset;
-					possibilities[0][ix2] ^= dst_bits;
+					possibilities[ix2] ^= dst_bits;
 				} while (map.get(ix2).population < 0);
 			}
 		}
@@ -252,11 +282,12 @@ printf("UNLINK:%.3i,%.3i\n",index,lhere.links[i]);
 					fill_simple(ix2);
 					ix2 += offset;
 				}
-				fill_simple(ix2);
+				if (!fill_simple(ix2)) return false;
 			}
 		}
 		
-		fill_simple(index);
+		if (!fill_simple(index)) return false;
+		return true;
 	}
 	
 	
@@ -270,9 +301,9 @@ printf("UNLINK:%.3i,%.3i\n",index,lhere.links[i]);
 	//If 'index' is not an island root node, undefined behavior.
 	void count_bridges(uint16_t index, uint8_t& min, uint8_t& max, bool& has_doubles)
 	{
-		if (LIKELY((possibilities[0][index]&0xF000) == 0))
+		if (LIKELY((possibilities[index]&0xF000) == 0))
 		{
-			uint16_t flags = possibilities[0][index];
+			uint16_t flags = possibilities[index];
 			
 			//check how many bridges exit from each tile
 			//keep only the lowest and highest bits
@@ -293,7 +324,7 @@ printf("UNLINK:%.3i,%.3i\n",index,lhere.links[i]);
 		
 		uint16_t ni = index;
 		do {
-			uint16_t flags = possibilities[0][ni] & ~0xF000;
+			uint16_t flags = possibilities[ni] & ~0xF000;
 			
 			//check how many bridges exit from each tile
 			//keep only the lowest and highest bits
@@ -310,22 +341,25 @@ printf("UNLINK:%.3i,%.3i\n",index,lhere.links[i]);
 	}
 	
 	
-	void fill_simple(uint16_t index)
+	//Returns false if the map is now known unsolvable. If so, 'possibilities' is unspecified.
+	bool fill_simple(uint16_t index)
 	{
+		index = map.get(index).rootnode;
 		gamemap::island& here = map.get(index);
-		if (here.rootnode != index) return;
 		
 		if (here.population < 0)
 		{
-			uint16_t flags = possibilities[0][index];
+			uint16_t flags = possibilities[index];
 			
 			//ocean tile with mandatory vertical bridge and allowed horizontal -> require zero horizontal
 			if ((flags & 0x0550) != 0 && (flags & 0x000A) == 0)
-				set_state(index, flags & 0x0AAF);
+				if (!set_state(index, flags & 0x0AAF)) return false;
 			//mandatory horizontal -> ban vertical
 			if ((flags & 0x0AA0) != 0 && (flags & 0x0005) == 0)
-				set_state(index, flags & 0x055F);
-			return;
+				if (!set_state(index, flags & 0x055F)) return false;
+			
+			if (!(flags&0x1111) || !(flags&0x2222) || !(flags&0x4444) || !(flags&0x8888)) return false;
+			return true;
 		}
 		
 		
@@ -334,21 +368,22 @@ printf("UNLINK:%.3i,%.3i\n",index,lhere.links[i]);
 		bool has_doubles;
 		count_bridges(index, min, max, has_doubles);
 		
-		if (min == max) return;
+		if (here.population < min || here.population > max) return false;
+		if (min == max) return true;
 		
 		//if no further bridges can be built, ban the options
 		if (here.population == min)
 		{
 			uint16_t ni = index;
 			do {
-				uint16_t flags = possibilities[0][ni];
+				uint16_t flags = possibilities[ni];
 				uint16_t flags_min = (flags & ~(flags<<4 | flags<<8));
-				set_state(ni, flags_min);
+				if (!set_state(ni, flags_min)) return false;;
 				
 				ni = nextjoined[index];
 			} while (ni != index);
 			
-			return;
+			return true;
 		}
 		
 		//if all possible bridges must be built, do that
@@ -356,26 +391,26 @@ printf("UNLINK:%.3i,%.3i\n",index,lhere.links[i]);
 		{
 			uint16_t ni = index;
 			do {
-				uint16_t flags = possibilities[0][ni];
+				uint16_t flags = possibilities[ni];
 				uint16_t flags_max = (flags & ~(flags>>4 | flags>>8));
-				set_state(ni, flags_max);
+				if (!set_state(ni, flags_max)) return false;
 				
 				ni = nextjoined[index];
 			} while (ni != index);
 			
-			return;
+			return true;
 		}
 		
 		//if only one more bridge is free, or all but one must be taken, lock all two-bridge possibilities
-		if (!has_doubles) return; // no two-bridge possibilities open -> skip checks
+		if (!has_doubles) return true; // no two-bridge possibilities open -> skip checks
 		
 		if (here.population-1 == min)
 		{
 			uint16_t ni = index;
 			do {
-				uint16_t flags = possibilities[0][ni];
+				uint16_t flags = possibilities[ni];
 				uint16_t flags_min_minus1 = (flags & ~(flags<<8));
-				set_state(ni, flags_min_minus1);
+				if (!set_state(ni, flags_min_minus1)) return false;;
 				
 				ni = nextjoined[index];
 			} while (ni != index);
@@ -384,18 +419,22 @@ printf("UNLINK:%.3i,%.3i\n",index,lhere.links[i]);
 		{
 			uint16_t ni = index;
 			do {
-				uint16_t flags = possibilities[0][ni];
+				uint16_t flags = possibilities[ni];
 				uint16_t flags_max_minus1 = (flags & ~(flags>>8));
-				set_state(ni, flags_max_minus1);
+				if (!set_state(ni, flags_max_minus1)) return false;;
 				
 				ni = nextjoined[index];
 			} while (ni != index);
 		}
+		
+		return true;
 	}
 	
 public:
-	solver(gamemap& map, bool use_source_bridges) : map(map)
+	solver(gamemap& map) : map(map)
 	{
+		possibilities = possibilities_buf[0];
+		
 		//make sure that existing bridges are labeled as such on all tiles they're on
 		//'map' is known correct, but anything other than that should use set_state
 		
@@ -422,33 +461,228 @@ public:
 			for (int dir=0;dir<4;dir++)
 			{
 				if (here.bridgelen[dir] != -1) flags |= 0x0110<<dir;
-				if (use_source_bridges && here.bridges[dir] == 1) flags &= ~(0x0001<<dir);
-				if (use_source_bridges && here.bridges[dir] == 2) flags &= ~(0x0011<<dir);
+				if (!op_another && here.bridges[dir] == 1) flags &= ~(0x0001<<dir);
+				if (!op_another && here.bridges[dir] == 2) flags &= ~(0x0011<<dir);
 				if (here.bridges[dir] == 3) { flags &= ~(0x0111<<dir); flags |= 0x1000<<dir; }
 			}
-			possibilities[0][index] = flags;
+			possibilities[index] = flags;
 		}
 	}
 	
-	//Returns index (y*100+x) to an island where a bridge can be determined buildable.
-	//If skip is 1, the second available hint is returned. If no further bridges can be determined buildable on this map, returns -1.
-	//Can return -1 for skip=0 if the map is unsolvable or input bridges are incorrect.
-	int16_t hint(const gamemap& map, int skip = 0);
+	bool solve_rec(uint16_t layer)
+	{
+		//use the isolation rule
+	link_again_top: ;
+		link.init(map, possibilities);
+		for (int y=0;y<map.height;y++)
+		for (int x=0;x<map.width;x++)
+		{
+			uint16_t index = y*100+x;
+			gamemap::island& here = map.map[y][x];
+			
+			uint16_t flags = possibilities[index];
+			if (here.population>0 && !(flags & 0x0001) && link.can_join(index, 0))
+			{
+				link.join(index, index+here.bridgelen[0]);
+			}
+			if (here.population>0 && !(flags & 0x0008) && link.can_join(index, 3))
+			{
+				link.join(index, index+here.bridgelen[3]*100);
+			}
+		}
+		
+puts("HELLO");
+		bool link_did_any = false;
+		if (link.count() != 0)
+		{
+	link_again: ;
+			uint16_t index1 = link.any();
+			uint16_t index2 = link.any();
+			uint16_t index1p = -1;
+			uint16_t index2p = -1;
+			
+			do
+			{
+				uint16_t next;
+				
+//printf("1:%.3i(...),%.3i(...),...\n",index1,index1p);
+//printf("1:%.3i(%.3i),%.3i(%.3i),...\n",
+//index1,link.root(index1),
+//index1p,(index1p==65535)?-1:link.root(index1p));
+				next = link.query(index1, index1p);
+printf("1:%.3i(%.3i),%.3i(%.3i),%.3i(%.3i)\n",
+index1,link.root(index1),
+index1p,(index1p==65535)?-1:link.root(index1p),
+next,(next==65535)?-1:link.root(next));
+				index1p = index1;
+				index1 = next;
+				if (next == (uint16_t)-1) goto link_done; // only a single island left? then we're done
+				
+				next = link.query(index2, index2p);
+//printf("2:%.3i(%.3i),%.3i(%.3i),%.3i(%.3i)\n",
+//index2,link.root(index2),
+//index2p,(index2p==65535)?-1:link.root(index2p),
+//next,(next==65535)?-1:link.root(next));
+				if (next != (uint16_t)-1)
+				{
+					index2p = index2;
+					index2 = next;
+					
+					next = link.query(index2, index2p);
+//printf("3:%.3i(%.3i),%.3i(%.3i),%.3i(%.3i)\n",
+//index2,link.root(index2),
+//index2p,(index2p==65535)?-1:link.root(index2p),
+//next,(next==65535)?-1:link.root(next));
+				}
+				if (next != (uint16_t)-1)
+				{
+					index2p = index2;
+					index2 = next;
+				}
+				
+				if (next == (uint16_t)-1)
+				{
+					uint16_t topleft;
+					bool down;
+					link.lookback(map, index2, index2p, topleft, down);
+printf("FORCEJOIN=%.3i(%.3i) - join %.3i dir %i\n", index2, index2p, topleft, down*3);
+					link.join(index2, index2p);
+					if (!set_state(topleft, possibilities[topleft] & ~(down ? 0x0008 : 0x0001))) return false;
+					link_did_any = true;
+					goto link_again;
+				}
+			} while (index1 != index2);
+			
+			printf("LOOP=%.3i\n",index1);
+			
+			int numvisited = 0;
+			do {
+				map.towalk[numvisited++] = index2;
+				
+				uint16_t next = link.query(index2, index2p);
+				index2p = index2;
+				index2 = next;
+			} while (index1 != index2);
+			
+			for (int i=1;i<numvisited;i++)
+			{
+				printf("JOINLOOP:%.3i,%.3i\n",index1,map.towalk[i]);
+				link.join(index1, map.towalk[i]);
+			}
+			goto link_again;
+		}
+	link_done: ;
+		// if a set_state from a forced join helped, perhaps that set_state blocked some other bridges,
+		// so let's check if we can prove anything new
+abort();
+		if (link_did_any) goto link_again_top;
+		
+		
+		if (link.count() != 0)
+		{
+			//iterate everything joined with a_linkable_island; if not equal to n_linkable_islands, it's disjoint, so return false
+			uint16_t n_linked_islands = 0;
+			uint16_t index = link.any();
+			
+			do {
+printf("LINK::%.3i\n",index);
+				n_linked_islands++;
+				index = link.iter(index);
+			} while (index != link.any());
+			
+			printf("LINKS=%i,%i\n",n_linked_islands,link.count());
+			if (n_linked_islands != link.count()) return false;
+		}
+		
+		
+		//if still unsure, guess
+		if (layer < sizeof(possibilities_buf)/sizeof(possibilities_buf[0]))
+		{
+			for (int y=0;y<map.height;y++)
+			for (int x=0;x<map.width;x++)
+			{
+				uint16_t index = y*100+x;
+printf("EEE=%.3i\n",index);
+				//gamemap::island& here = map.map[y][x];
+				uint16_t flags = possibilities[index];
+				uint16_t multidir_flags = (flags & (flags>>4 | flags>>8));
+				if (!multidir_flags) continue;
+				
+				//right and up (ignore left/down, they'd only find duplicates)
+				for (int dir=0;dir<2;dir++)
+				{
+printf("%.4X:%.4X\n",flags,multidir_flags & (0x0111<<dir));
+					//if multiple bridge numbers are allowed in this direction...
+					if (multidir_flags & (0x0111<<dir))
+					{
+						int set_mask = (dir ? 0xDDDD : 0xEEEE);
+						for (int n=0;n<=2;n++)
+						{
+							int dirbit = (0x0001<<(n*4)<<dir);
+							if (flags & dirbit)
+							{
+printf("GUESS:BEGIN(%.3i:%.4X->%.4X)\n",index,flags,(flags & (set_mask | dirbit)));
+								//if looking for another solution, only make contrary assumptions
+								if (op_another && map.get(index).bridges[dir] == n)
+								{
+puts("GUESS:NOTSAME");
+									continue;
+								}
+								
+								int newflags = (flags & (set_mask | dirbit));
+								memcpy(possibilities_buf[layer+1], possibilities_buf[layer], sizeof(possibilities_buf[0]));
+								possibilities = possibilities_buf[layer+1];
+								
+								if (set_state(index, newflags) && solve_rec(layer+1))
+								{
+puts("GUESS:GOOD");
+									//if that's a valid solution, return it
+									//otherwise, mark the map unsolvable
+									possibilities = possibilities_buf[layer];
+									memcpy(possibilities_buf[layer], possibilities_buf[layer+1], sizeof(possibilities_buf[0]));
+									return true;
+								}
+								else
+								{
+puts("GUESS:BAD");
+									//if that can't be a valid solution, mark it as such
+									possibilities = possibilities_buf[layer];
+									set_state(index, flags & ~dirbit);
+									
+									flags = possibilities[index];
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		else
+		{
+			//if out of memory, report it's unsolvable I guess?
+			abort();
+			return false;
+		}
+		
+		//TODO: test large islands and castles
+		
+		if (op_another && layer==0) return false;
+		return true;
+	}
 	
-	//Returns whether the given map is solvable. Assumes input bridges are correct.
-	//If solvable, the relevant bridges are added to the map. If not solvable, the bridges in 'map' are undefined.
 	bool solve()
 	{
-		if (map.numislands == 0) return true;
+puts("SOLVEBEGIN");
+		if (map.numislands == 0) return !op_another;
 		
 		//block 1s and 2s from using both of their bindings towards each other
-		if (map.numislands > 2) // except if that's the only two islands, waste of time
+		if (map.numislands > 2) // except if that's the only two islands, those maps are valid
 		{
 			for (int y=0;y<map.height;y++)
 			for (int x=0;x<map.width;x++)
 			{
 				gamemap::island& here = map.map[y][x];
-				uint16_t flags = possibilities[0][y*100+x];
+				uint16_t flags = possibilities[y*100+x];
 				uint16_t newflags = flags;
 				
 				if (here.population == 2 && (flags&0x0100) && map.map[y][x+here.bridgelen[0]].population == 2)
@@ -468,131 +702,32 @@ public:
 		for (int y=0;y<map.height;y++)
 		for (int x=0;x<map.width;x++)
 		{
-			fill_simple(y*100+x);
+			if (map.map[y][x].rootnode != y*100+x) continue; // only poke the roots, no point doing duplicate checks
+			if (!fill_simple(y*100+x)) return false;
 		}
 		
-		//use the isolation rule
-	link_again_top: ;
-		link_init();
-		for (int y=0;y<map.height;y++)
-		for (int x=0;x<map.width;x++)
-		{
-			uint16_t index = y*100+x;
-			gamemap::island& here = map.map[y][x];
-			//link_t& lhere = links[index];
-			
-			uint16_t flags = possibilities[0][index];
-			if (here.population > 1 && !(flags & 0x0001)) link_join(index, index+here.bridgelen[0]);
-			if (here.population > 1 && !(flags & 0x0008)) link_join(index, index+here.bridgelen[3]*100);
-		}
-		
-puts("HELLO");
-		bool link_did_any = false;
-		while (true)
-		{
-	link_again: ;
-			uint16_t index1 = a_linkable_island;
-			uint16_t index2 = a_linkable_island;
-			uint16_t index1p = -1;
-			uint16_t index2p = -1;
-			
-			do
-			{
-				uint16_t next;
-				
-				next = link_query(index1, index1p);
-printf("1:%.3i(%.3i),%.3i(%.3i),%.3i(%.3i)\n",
-index1,link_root(index1),
-index1p,(index1p==65535)?-1:link_root(index1p),
-next,(next==65535)?-1:link_root(next));
-				index1p = index1;
-				index1 = next;
-				if (next == (uint16_t)-1) goto link_done; // only a single island left? then we're done
-				
-				next = link_query(index2, index2p);
-//printf("2:%.3i(%.3i),%.3i(%.3i),%.3i(%.3i)\n",
-//index2,link_root(index2),
-//index2p,(index2p==65535)?-1:link_root(index2p),
-//next,(next==65535)?-1:link_root(next));
-				if (next != (uint16_t)-1)
-				{
-					index2p = index2;
-					index2 = next;
-					
-					next = link_query(index2, index2p);
-//printf("3:%.3i(%.3i),%.3i(%.3i),%.3i(%.3i)\n",
-//index2,link_root(index2),
-//index2p,(index2p==65535)?-1:link_root(index2p),
-//next,(next==65535)?-1:link_root(next));
-				}
-				if (next != (uint16_t)-1)
-				{
-					index2p = index2;
-					index2 = next;
-				}
-				
-				if (next == (uint16_t)-1)
-				{
-					uint16_t topleft;
-					bool down;
-					link_lookback(index2, index2p, topleft, down);
-printf("FORCEJOIN=%.3i(%.3i) - join %.3i dir %i\n", index2, index2p, topleft, down*3);
-					link_join(index2, index2p);
-					set_state(topleft, possibilities[0][topleft] & ~(down ? 0x0008 : 0x0001));
-					link_did_any = true;
-					goto link_again;
-				}
-			} while (index1 != index2);
-			
-			printf("LOOP=%.3i\n",index1);
-			
-			int numvisited = 0;
-			do {
-				map.towalk[numvisited++] = index2;
-				
-				uint16_t next = link_query(index2, index2p);
-				index2p = index2;
-				index2 = next;
-			} while (index1 != index2);
-			
-			for (int i=1;i<numvisited;i++)
-			{
-				printf("JOINLOOP:%.3i,%.3i\n",index1,map.towalk[i]);
-				link_join(index1, map.towalk[i]);
-			}
-		}
-	link_done: ;
-		// if a set_state from a forced join helped, perhaps that set_state blocked some other bridges,
-		// so we can be sure of something new
-		if (link_did_any) goto link_again_top;
-		
-		//TODO: guessing (recursion)
-		//TODO: test large islands and castles
+		if (!solve_rec(0)) return false;
 		
 		for (int y=0;y<map.height;y++)
 		for (int x=0;x<map.width;x++)
 		{
-			uint16_t flags = possibilities[0][y*100+x];
+			uint16_t flags = possibilities[y*100+x];
 			
 			uint8_t nright = !(flags&0x0001) + !(flags&0x0011) + !(flags&0x0111);
 			uint8_t ndown  = !(flags&0x0008) + !(flags&0x0088) + !(flags&0x0888);
 //printf("IX=%.3i FL=%.4X BR=%i BD=%i\n",y*100+x,flags,nright,ndown);
 			
-			while (map.map[y][x].bridges[0] < nright) map.toggle(x, y, 0);
-			while (map.map[y][x].bridges[3] < ndown)  map.toggle(x, y, 3);
+			while (map.map[y][x].bridges[0] != nright) map.toggle(x, y, 0);
+			while (map.map[y][x].bridges[3] != ndown)  map.toggle(x, y, 3);
 		}
 		
-		return map.finished();
+		if (!map.finished()) abort();
+		return true;
 	}
-	//Give it a solved map as input. Returns another solution for the same map, if one exists; otherwise, returns false.
-	bool solve_another(gamemap& map);
-	
-	//This is only an estimate.
-	int difficulty(const gamemap& map);
 };
 }
 
 //int16_t solver_hint(const gamemap& map, int skip) { solver s; return s.hint(map, skip); }
-bool solver_solve(gamemap& map) { solver s(map, true); return s.solve(); }
-//bool solver_solve_another(gamemap& map) { solver s; return s.solve_another(map); }
+bool solver_solve(gamemap& map) { solver<false> s(map); return s.solve(); }
+bool solver_solve_another(gamemap& map) { solver<true> s(map); return s.solve(); }
 //int solver_difficulty(const gamemap& map) { solver s; return s.difficulty(map); }

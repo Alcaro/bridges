@@ -66,8 +66,8 @@ public:
 	int numislands; // includes non-root islands
 	
 	struct island {
-		int8_t population; // -1 for ocean, -2 for reef
-		int8_t totbridges;
+		int8_t population; // -1 for ocean, -2 for reef; valid for all parts of this large island
+		int8_t totbridges; // unspecified for large islands; all other members are valid for larges
 		int16_t rootnode; // -1 for ocean, y*100+x for most islands, something else for large island non-roots
 		
 		//1 if the next tile in that direction is an island, 2 if there's one ocean tile before the next island
@@ -99,7 +99,16 @@ public:
 	bool finished();
 };
 
-int16_t solver_hint(const gamemap& map, int skip = 0);
+//Returns whether the given map is solvable. Assumes input bridges are correct.
+//If solvable, the relevant bridges are added to the map. If not solvable, the bridges in 'map' are undefined.
 bool solver_solve(gamemap& map);
+//Give it a solved map as input. Returns another solution for the same map, if one exists.
+//If not, returns false, and undefined bridges.
 bool solver_solve_another(gamemap& map);
+//Returns an estimate. If the map is unsolvable, return value is unspecified.
+//If the map has multiple solutions, the system will get whiny.
 int solver_difficulty(const gamemap& map);
+//Returns index (y*100+x) to an island where a bridge can be determined buildable.
+//If skip is 1, the second available hint is returned. If no further bridges can be determined buildable on this map, returns -1.
+//Can return -1 for skip=0 if the map is unsolvable or input bridges are incorrect.
+int16_t solver_hint(const gamemap& map, int skip = 0);

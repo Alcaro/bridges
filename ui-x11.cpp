@@ -138,6 +138,8 @@ int main(int argc, char** argv)
 
 
 
+		if (false)
+		{
 		srand(0);
 		bool vg = RUNNING_ON_VALGRIND;
 		uint64_t start = time_ms_ne();
@@ -149,7 +151,7 @@ int main(int argc, char** argv)
 		{
 			for (int i=0;i<(vg ? 1000 : 10000);i++)
 			{
-				if (i%(vg ? 1 : 1000) == 0) { printf("%i %i     \r", side, i); fflush(stdout); }
+				if (i%(vg ? 1 : 1) == 0) { printf("%i %i     \r", side, i); fflush(stdout); }
 				int minislands = side*2;
 				int maxislands = side*side/2;
 				int islands = minislands + rand()%(maxislands+1-minislands);
@@ -180,6 +182,63 @@ int main(int argc, char** argv)
 		uint64_t end = time_ms_ne();
 		printf("%i solvable, %i unsolvable, %i multiple solutions, took %u ms\n",
 		       nsolv, nunsolv, nmultisolv, (unsigned)(end-start));
+		}
+
+		if (true)
+		{
+		srand(0);
+		bool vg = RUNNING_ON_VALGRIND;
+		uint64_t start = time_ms_ne();
+		
+		int nsolv = 0;
+		int nunsolv = 0;
+		int nmultisolv = 0;
+		for (int side=3;side<10;side++)
+		{
+			for (int i=0;i<(vg ? 1000 : 10000);i++)
+			{
+				if (i%(vg ? 1 : 1) == 0) { printf("%i %i     \r", side, i); fflush(stdout); }
+				int minislands = side*2;
+				int maxislands = side*side/2;
+				int islands = minislands + rand()%(maxislands+1-minislands);
+				string map = map_generate(side, side, islands);
+if(i==1256)puts("##########\n"+map+"\n##########");
+				
+				gamemap map2;
+				map2.init(map);
+				int result = 0;
+				if (solver_solve(map2))
+				{
+					result = 1;
+					if (solver_solve_another(map2)) result = 2;
+				}
+				
+				//int result;
+				int steps = 1;
+				//map_solve(map, &result, 3, &steps);
+				
+				if (result == 1 && steps >= 3)
+				//if (steps >= 5)
+				{
+					puts("MULTISTEP "+tostring(steps)+" "+tostring(result));
+					puts(map);
+				}
+				if (result == 0)
+				{
+					puts("ERROR");
+					puts(map);
+					exit(1);
+				}
+				if (result == -1) nunsolv++;
+				if (result == 0) nunsolv++;
+				if (result == 1) nsolv++;
+				if (result == 2) nmultisolv++;
+			}
+		}
+		uint64_t end = time_ms_ne();
+		printf("%i solvable, %i unsolvable, %i multiple solutions, took %u ms\n",
+		       nsolv, nunsolv, nmultisolv, (unsigned)(end-start));
+		}
 		
 		return 0;
 	}

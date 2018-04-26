@@ -558,12 +558,12 @@ static void test_one(int maxdepth, cstring test)
 	string solution_good;
 	test_split(test, map, solution_good);
 	
-	int result;
-	int depth;
-	string solution = map_solve(map, &result, maxdepth, &depth);
-	assert_eq(result, 1);
-	assert_eq(solution, solution_good);
-	assert_eq(depth, maxdepth);
+	//int result;
+	//int depth;
+	//string solution = map_solve(map, &result, maxdepth, &depth);
+	//assert_eq(result, 1);
+	//assert_eq(solution, solution_good);
+	//assert_eq(depth, maxdepth);
 	
 	gamemap m;
 	m.init(map);
@@ -579,16 +579,16 @@ static void test_one(int maxdepth, cstring test)
 			assert_eq(m.map[y][x].bridges[0], exp-'0');
 		}
 	}
-	//assert(!solver_solve_another(m));
+	assert(!solver_solve_another(m));
 }
 
 static void test_error(int maxdepth, int exp, cstring map)
 {
-	int result;
-	int depth;
-	map_solve(map, &result, maxdepth, &depth);
-	assert_eq(result, exp);
-	assert_eq(depth, maxdepth);
+	//int result;
+	//int depth;
+	//map_solve(map, &result, maxdepth, &depth);
+	//assert_eq(result, exp);
+	//assert_eq(depth, maxdepth);
 	
 	gamemap m;
 	m.init(map.c_str());
@@ -599,13 +599,14 @@ static void test_error(int maxdepth, int exp, cstring map)
 	if (exp == 2)
 	{
 		assert(solver_solve(m));
-		//assert(solver_solve_another(m));
+		assert(solver_solve_another(m));
 	}
 }
 
 
 test("solver", "", "solver")
 {
+#if 0
 	testcall(test_one(0, // the outer islands only connect to one island each, so the map is trivial
 		" 2 \n" /* */ " 0 \n"
 		"271\n" /* */ "210\n"
@@ -747,6 +748,14 @@ test("solver", "", "solver")
 		" 122  \n" /* */ " 110  \n"
 		"2  213\n" /* */ "1  010\n"
 		"1 2  2\n" /* */ "1 1  0\n"
+	));
+#endif
+	
+	//for some reason, the new solver absolutely hates this one
+	testcall(test_one(1,
+		" 42\n" /* */ " 20\n"
+		"231\n" /* */ "000\n"
+		"442\n" /* */ "210\n"
 	));
 	
 	testcall(test_error(1, 0, // obviously impossible
