@@ -69,138 +69,6 @@ int main(int argc, char** argv)
 	}
 	if (do_bench_solv)
 	{
-
-//while (true)
-//{
-//again: ;
-//
-////is-island, do-down, do-right
-////top left forced to be 2s, to not trivialize the others
-//uint8_t bridge[7][9][3] = {
-//	{ {1,2,2},{0    },{0    },{0    },{0    },{0    },{0    },{0    },{1,1,0} },
-//	{ {1,1,1},{0    },{1,0,1},{0    },{1,1,1},{0    },{1,0,0},{0    },{0    } },
-//	{ {0    },{1,1,1},{0    },{1,0,0},{0    },{1,0,1},{0    },{1,1,0},{0    } },
-//	{ {1,1,0},{0    },{1,0,1},{0    },{1,1,1},{0    },{1,0,0},{0    },{0    } },
-//	{ {0    },{1,0,1},{0    },{1,1,0},{0    },{1,0,1},{0    },{1,1,0},{0    } },
-//	{ {1,0,1},{0    },{1,0,0},{0    },{1,0,1},{0    },{1,0,0},{0    },{0    } },
-//	{ {0    },{1,0,1},{0    },{1,0,1},{0    },{1,0,1},{0    },{1,0,1},{1,0,0} },
-//};
-//
-//for (int y=0;y<7;y++)
-//for (int x=0;x<9;x++)
-//{
-//	if (bridge[y][x][1] && rand()%100 < 50) bridge[y][x][1] = 2;
-//	if (bridge[y][x][2] && rand()%100 < 50) bridge[y][x][2] = 2;
-//}
-//
-//string out = "";
-//for (int y=0;y<7;y++)
-//{
-//for (int x=0;x<9;x++)
-//{
-//	int bri = 0;
-//	bri += bridge[y][x][1];
-//	bri += bridge[y][x][2];
-//	for (int yy=y-1;yy>=0;yy--)
-//	{
-//		if (bridge[yy][x][0]) { bri += bridge[yy][x][1]; break; }
-//	}
-//	for (int xx=x-1;xx>=0;xx--)
-//	{
-//		if (bridge[y][xx][0]) { bri += bridge[y][xx][2]; break; }
-//	}
-//	if (bridge[y][x][0]) out += (char)('0'+bri);
-//	else out += ' ';
-//	
-//	if (y==3 && x==4 && bri!=4) goto again;
-//}
-//out+="\n";
-//}
-//
-//puts(out);
-//
-//int result;
-//int steps;
-//map_solve(out, &result, 3, &steps);
-//
-//if (result == 1 && steps > 0) exit(0);
-//
-////"4-------4\n" // test map
-////"6-4-6-2 |\n"
-////"|4-2|2-4|\n"
-////"4|2-8-2||\n"
-////"|4-4|2-6|\n"
-////"4-2|4-2||\n"
-////" 2-6-4-64\n"
-//
-//
-//}
-
-
-
-		if (false)
-		{
-		srand(0);
-		bool vg = RUNNING_ON_VALGRIND;
-		uint64_t start = time_ms_ne();
-		
-		int nsolv = 0;
-		int nunsolv = 0;
-		int nmultisolv = 0;
-		for (int side=3;side<10;side++)
-		{
-			for (int i=0;i<(vg ? 1000 : 10000);i++)
-			{
-				if (i%(vg ? 1 : 1) == 0) { printf("%i %i     \r", side, i); fflush(stdout); }
-				int minislands = side*2;
-				int maxislands = side*side/2;
-				int islands = minislands + rand()%(maxislands+1-minislands);
-				string map = map_generate(side, side, islands);
-//if(side==5&&i==2017)puts("##########\n"+map+"##########");
-				
-				int result;
-				int steps;
-				map_solve(map, &result, 3, &steps);
-				
-				//gamemap map2;
-				//map2.init(map);
-				//int result2 = 0;
-				//if (solver_solve(map2))
-				//{
-				//	result2 = 1;
-				//	if (solver_solve_another(map2)) result2 = 2;
-				//}
-				//
-				//if (result != result2 && (result!=-1 || result2!=2))
-				//{
-				//	printf("%i:%i: solv1=%i solv2=%i\n###\n%s###\n", side, i, result, result2, (const char*)map);
-				//}
-				
-				if (result == 1 && steps >= 3)
-				//if (steps >= 5)
-				{
-					puts("MULTISTEP "+tostring(steps)+" "+tostring(result));
-					puts(map);
-				}
-				if (result == 0)
-				{
-					puts("ERROR");
-					puts(map);
-					exit(1);
-				}
-				if (result == -1) nunsolv++;
-				if (result == 0) nunsolv++;
-				if (result == 1) nsolv++;
-				if (result == 2) nmultisolv++;
-			}
-		}
-		uint64_t end = time_ms_ne();
-		printf("%i solvable, %i unsolvable, %i multiple solutions, took %u ms\n",
-		       nsolv, nunsolv, nmultisolv, (unsigned)(end-start));
-		}
-
-		if (true)
-		{
 		srand(0);
 		bool vg = RUNNING_ON_VALGRIND;
 		uint64_t start = time_ms_ne();
@@ -228,16 +96,6 @@ int main(int argc, char** argv)
 					if (solver_solve_another(map2)) result = 2;
 				}
 				
-				//int result;
-				int steps = 1;
-				//map_solve(map, &result, 3, &steps);
-				
-				if (result == 1 && steps >= 3)
-				//if (steps >= 5)
-				{
-					puts("MULTISTEP "+tostring(steps)+" "+tostring(result));
-					puts(map);
-				}
 				if (result == 0)
 				{
 					puts("ERROR");
@@ -253,7 +111,6 @@ int main(int argc, char** argv)
 		uint64_t end = time_ms_ne();
 		printf("%i solvable, %i unsolvable, %i multiple solutions, took %u ms\n",
 		       nsolv, nunsolv, nmultisolv, (unsigned)(end-start));
-		}
 		
 		return 0;
 	}

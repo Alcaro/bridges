@@ -9,9 +9,7 @@ class linker {
 		
 		uint16_t join_root; // Points towards the root node of any joined set. For the real root, points to itself.
 		uint16_t join_next; // This creates a linked list of joined nodes. The last one points to the root.
-		
-		// These two are only used by the root node. For others, value is unspecified and probably outdated.
-		uint16_t join_last; // Points to the last node in the linked list.
+		uint16_t join_last; // For the root node, points to the last node in the linked list. For others, unused.
 		
 		// including this speeds up the system a bit for some reason. simpler address calculation for size-16 objects than 14?
 		uint16_t padding;
@@ -76,6 +74,15 @@ public:
 		}
 		
 		//TODO: castles
+		//  during the initial phase, mark bridges between known-red and known-blue castles known to not exist
+		//    (requires the ability to query all edges from a vertex, not just two)
+		//  during the main phase, always start from a castle
+		//  if you reach a different-color castle, stop there, consider it a loop, and join them
+		//  alternatively and equivalently, create a fake connection between all castles (or one per color) and allow using that to create loops
+		//  this can make it report 'don't know' for some maps that should be solvable, but that's already the case for some maps, like
+		//   1331
+		//   1331
+		//  (or 22/22 if the no-double-binding-2s rule is relaxed), so a guessing engine is required anyways
 	}
 	
 	uint16_t root(uint16_t index)
@@ -742,3 +749,319 @@ bool solver_solve(gamemap& map) { solver<op_solve> s(map); return s.solve(); }
 bool solver_solve_another(gamemap& map) { solver<op_another> s(map); return s.solve(); }
 //int16_t solver_hint(const gamemap& map, int skip) { solver s; return s.hint(map, skip); }
 //int solver_difficulty(const gamemap& map) { solver s; return s.difficulty(map); }
+
+static void test_split(cstring in, string& map, string& solution)
+{
+	array<cstring> lines = in.csplit("\n");
+	
+	for (size_t i=0;i<lines.size()-1;i+=2)
+	{
+		map      += lines[i  ]+"\n";
+		solution += lines[i+1]+"\n";
+	}
+}
+
+static void test_one(cstring test)
+{
+	string map;
+	string solution_good;
+	test_split(test, map, solution_good);
+	
+	gamemap m;
+	m.init(map);
+	assert(solver_solve(m));
+	assert(m.finished());
+	for (int y=0;y<m.height;y++)
+	for (int x=0;x<m.width;x++)
+	{
+		char exp = solution_good[y*(m.width+1) + x];
+		if (exp != ' ')
+		{
+			assert_eq(m.map[y][x].bridges[0], exp-'0');
+		}
+	}
+	assert(!solver_solve_another(m));
+}
+
+static void test_unsolv(cstring map)
+{
+	gamemap m;
+	m.init(map.c_str());
+	assert(!solver_solve(m));
+}
+
+static void test_multi(cstring map)
+{
+	gamemap m;
+	m.init(map.c_str());
+	assert(solver_solve(m));
+	assert(m.finished());
+	assert(solver_solve_another(m));
+	assert(m.finished());
+}
+
+test("solver", "", "solver")
+{
+	testcall(test_one( // the outer islands only connect to one island each, so the map is trivial
+		" 2 \n" /* */ " 0 \n"
+		"271\n" /* */ "210\n"
+		" 2 \n" /* */ " 0 \n"
+	));
+	testcall(test_one( // a few islands are immediately obvious, the others show up once the simple ones are done
+		" 1  3\n" /* */ " 1  0\n"
+		"2 1  \n" /* */ "1 0  \n"
+		"2  23\n" /* */ "1  10\n"
+	));
+	testcall(test_one( // make sure the smallest possible maps remain functional
+		"11\n" /* */ "10\n"
+	));
+	testcall(test_one(
+		"2\n" /* */ "0\n"
+		"2\n" /* */ "0\n"
+	));
+	testcall(test_one( // the fabled zero
+		"    \n" /* */ "    \n"
+		"  0 \n" /* */ "  0 \n"
+		"    \n" /* */ "    \n"
+		"    \n" /* */ "    \n"
+	));
+	testcall(test_one( // a map without islands, while unusual, is valid
+		"   \n" /* */ "   \n"
+		"   \n" /* */ "   \n"
+	));
+	testcall(test_one( // a 0x1 map is even more unusual, but equally valid (0x0 is unrepresentable)
+		"\n" /* */ "\n"
+	));
+	testcall(test_one( // bridges may not cross
+		"464\n" /* */ "220\n"
+		"4 4\n" /* */ "0 0\n"
+		"2 2\n" /* */ "0 0\n"
+		" 2 \n" /* */ " 0 \n"
+	));
+	testcall(test_one( // requires guessing (or using the 2s-may-not-double-bind rule)
+		"2 2\n" /* */ "1 0\n"
+		"222\n" /* */ "110\n"
+	));
+	testcall(test_one( // all islands must be connected
+		"22\n" /* */ "10\n"
+		"22\n" /* */ "10\n"
+	));
+	testcall(test_one( // doesn't enter the must-be-connected function, but it has caught a few bugs
+		"1 2  \n" /* */ "1 0  \n"
+		" 1 1 \n" /* */ " 0 0 \n"
+		"14441\n" /* */ "11110\n"
+		" 1 1 \n" /* */ " 0 0 \n"
+		"  2 1\n" /* */ "  1 0\n"
+	));
+	testcall(test_one( // bigger and nastier
+		"4    4 \n" /* */ "2    0 \n"
+		"  4 4  \n" /* */ "  2 0  \n"
+		"    682\n" /* */ "    220\n"
+		" 282   \n" /* */ " 220   \n"
+		"  4 4  \n" /* */ "  2 0  \n"
+		"4    4 \n" /* */ "2    0 \n"
+	));
+	testcall(test_one( // also requires guessing, multiple times (or the 2s-may-not-double-bind rule)
+		"2  2\n" /* */ "1  0\n"
+		" 22 \n" /* */ " 10 \n"
+		"  33\n" /* */ "  10\n"
+		" 22 \n" /* */ " 10 \n"
+		"2  2\n" /* */ "1  0\n"
+	));
+	testcall(test_one( // nasty amount of cycles because must annoy island tracker
+		"2          2\n" /* */ "1          0\n"
+		" 2        2 \n" /* */ " 1        0 \n"
+		"  2  3   2  \n" /* */ "  1  1   0  \n"
+		"   2 3  2   \n" /* */ "   1 1  0   \n"
+		"    2  2    \n" /* */ "    1  0    \n"
+		"       33   \n" /* */ "       10   \n"
+		" 33         \n" /* */ " 10         \n"
+		"    2  2    \n" /* */ "    1  0    \n"
+		"   2    2   \n" /* */ "   1    0   \n"
+		"  2      2  \n" /* */ "  1      0  \n"
+		" 2    3   2 \n" /* */ " 1    1   0 \n"
+		"2     3    2\n" /* */ "1     1    0\n"
+	));
+	testcall(test_one( // all islands must be connected (exercises the new solver too)
+		" 1 \n" /* */ " 0 \n"
+		" 32\n" /* */ " 10\n"
+		"2 1\n" /* */ "0 0\n"
+		"32 \n" /* */ "10 \n"
+	));
+	
+	// these require nested guesses (created by the game generator)
+	// (humans can solve them all without nested guesses, by knowing that 1s can't connect two islands)
+	testcall(test_one(
+		"2  1\n" /* */ "0  0\n"
+		"3233\n" /* */ "1110\n"
+		" 131\n" /* */ " 100\n"
+		"1 2 \n" /* */ "1 0 \n"
+	));
+	testcall(test_one(
+		"1232\n" /* */ "0120\n"
+		"2 11\n" /* */ "0 00\n"
+		"5543\n" /* */ "2120\n"
+		"23 2\n" /* */ "02 0\n"
+	));
+	testcall(test_one(
+		"1332\n" /* */ "1100\n"
+		"13 3\n" /* */ "10 0\n"
+		"21  \n" /* */ "00  \n"
+		"3 42\n" /* */ "1 10\n"
+	));
+	testcall(test_one(
+		"3431\n" /* */ "2110\n"
+		" 112\n" /* */ " 000\n"
+		"32 3\n" /* */ "11 0\n"
+		"2  1\n" /* */ "1  0\n"
+	));
+	//these require guessing, even with the advanced solver
+	//the cycle detector doesn't know about the population rules
+	//(extra 1s to avoid the 2s-don't-double-bind special case)
+	testcall(test_one(
+		"1 \n" /* */ "0 \n"
+		"32\n" /* */ "10\n"
+		"23\n" /* */ "10\n"
+		" 1\n" /* */ " 0\n"
+	));
+	testcall(test_one( // make sure anisland[0] has population 1
+		" 11 \n" /* */ " 00 \n"
+		"1441\n" /* */ "1110\n"
+		"1441\n" /* */ "1110\n"
+		" 11 \n" /* */ " 00 \n"
+	));
+	testcall(test_one(
+		"1    1\n" /* */ "0    0\n"
+		"3    3\n" /* */ "1    0\n"
+		" 133  \n" /* */ " 120  \n"
+		"3  31 \n" /* */ "1  10 \n"
+		"113  3\n" /* */ "012  0\n"
+	));
+	testcall(test_one(
+		"22   2\n" /* */ "11   0\n"
+		" 122  \n" /* */ " 110  \n"
+		"2  213\n" /* */ "1  010\n"
+		"1 2  2\n" /* */ "1 1  0\n"
+	));
+	
+	//the new solver tried connecting a few impossible bridges to this one
+	testcall(test_one(
+		" 42\n" /* */ " 20\n"
+		"231\n" /* */ "000\n"
+		"442\n" /* */ "210\n"
+	));
+	//crashed after making an incorrect assumption
+	testcall(test_one(
+		"222\n" /* */ "110\n"
+		"3 4\n" /* */ "1 0\n"
+		"212\n" /* */ "100\n"
+	));
+	//didn't catch a 'no, that's impossible' from set_state on an ocean tile
+	testcall(test_one(
+		"2 21\n" /* */ "1 00\n"
+		"32 3\n" /* */ "20 0\n"
+		"  23\n" /* */ "  10\n"
+	));
+	//the old solver made a silly assumption and violated a population limit on this map
+	testcall(test_one(
+		"1     \n" /* */ "0     \n"
+		"244422\n" /* */ "121110\n"
+		"    1 \n" /* */ "    0 \n"
+		" 2  43\n" /* */ " 0  20\n"
+		"   45 \n" /* */ "   20 \n"
+		"   13 \n" /* */ "   10 \n"
+		" 34 1 \n" /* */ " 21 0 \n"
+	));
+	
+	
+	testcall(test_unsolv( // obviously impossible
+		"11\n"
+		"11\n"
+	));
+	testcall(test_unsolv( // even more obviously impossible
+		"12\n"
+	));
+	testcall(test_unsolv( // stupidly obviously impossible
+		"2 \n"
+		" 3\n"
+	));
+	testcall(test_unsolv( // filling in everything yields a disjoint map
+		"2 2 \n"
+		" 2 2\n"
+	));
+	
+	//these have multiple solutions
+	testcall(test_multi(
+		"33\n"
+		"22\n"
+	));
+	testcall(test_multi(
+		" 31\n"
+		"272\n"
+		"131\n"
+	));
+	testcall(test_multi(
+		"232\n"
+		"343\n"
+		"232\n"
+	));
+	testcall(test_multi(
+		"2332\n"
+		"3443\n"
+		"2332\n"
+	));
+	
+	//'are they joined' walk went 'A B C D B A' before noticing it's a loop, then couldn't follow the path back to 'B'
+	testcall(test_multi(
+		"331  \n"
+		"22  2\n"
+		"   13\n"
+		"  232\n"
+	));
+	//I don't remember what this caught, probably something assumption-related again
+	testcall(test_multi(
+		"3322\n" /* */ "3322\n"
+		"3   \n" /* */ "3   \n"
+		"353 \n" /* */ "353 \n"
+		"25 3\n" /* */ "25 3\n"
+	));
+	//if an assumption is false, it could claim the opposite is a valid solution, even if it's disjoint
+	testcall(test_multi(
+		"2 12 \n"
+		"4  52\n"
+		"2  2 \n"
+		"  252\n"
+		"   1 \n"
+	));
+	
+	//this map is requires a solver depth of 37
+	/*
+	testcall(test_multi(
+		"23  3 6  4  52 \n"
+		"2 3   5    45 3\n"
+		"34    5 4 2 32 \n"
+		"44         6  4\n"
+		"3 344  3  3 243\n"
+		"      2 1 4 2  \n"
+		"3 355 4 1 2 1  \n"
+		"  255  4   4 4 \n"
+		"4 2 5 3215 6 5 \n"
+		" 4    5 451 34 \n"
+		"3 1331 2 1145  \n"
+		"  3622 47 22 34\n"
+		"57 5 3323145  3\n"
+		" 4       44542 \n"
+		"442     332  22\n"
+	));
+	*/
+	
+	//enable these once the solver handles castles
+	/*
+	testcall(test_unsolv( // unsolvable, but falsely reported solvable if an_island[0] points to a corner and it walks from there
+		"2  2\n"
+		" r< \n"
+		" ^^ \n"
+		"2  2\n"
+	));
+	*/
+}
