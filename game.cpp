@@ -1010,6 +1010,8 @@ public:
 			if (item(3, 375, "Level Select")) to_menu(in_press & 1<<k_confirm);
 			if (item(4, 545, "Hint"))
 solver_solve(map);
+			if (item(4, 585, "AAA"))
+solver_solve_another(map);
 //game_menu_pos = 480; // TODO
 			
 			out.insert(600, game_menu_pos+18, res_menuclose);

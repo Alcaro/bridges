@@ -100,13 +100,17 @@ public:
 };
 
 //Returns whether the given map is solvable. Assumes input bridges are correct.
-//If solvable, the relevant bridges are added to the map. If not solvable, the bridges in 'map' are undefined.
+//If the input bridges are not correct, may falsely report the map unsolvable, or return an invalid solution.
+//If solvable, the relevant bridges are added to the map. If not solvable, 'map' remains unchanged.
+//If there are multiple solutions, nothing is guaranteed about which of them is returned.
 bool solver_solve(gamemap& map);
 //Give it a solved map as input. Returns another solution for the same map, if one exists.
-//If not, returns false, and undefined bridges.
+//If that's the only solution, returns false and doesn't change the input.
+//If the input is not solved, may yield any valid return value.
+//If there are multiple solutions, nothing is guaranteed about which of them is returned, except the input is not returned.
 bool solver_solve_another(gamemap& map);
-//Returns an estimate. If the map is unsolvable, return value is unspecified.
-//If the map has multiple solutions, the system will get whiny.
+//Returns an estimate. If the map is unsolvable, the return value is unspecified.
+//If the map has multiple solutions, it gets whiny.
 int solver_difficulty(const gamemap& map);
 //Returns index (y*100+x) to an island where a bridge can be determined buildable.
 //If skip is 1, the second available hint is returned. If no further bridges can be determined buildable on this map, returns -1.

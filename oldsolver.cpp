@@ -127,6 +127,7 @@ class solver {
 				if (!fill_known_at(bank, ix2)) return false;
 			}
 		}
+		if (!fill_known_at(bank, ix)) return false; // extremely rarely needed, but nonzero
 		
 		return true;
 	}
@@ -347,6 +348,14 @@ class solver {
 							}
 							if (ret == 1)
 							{
+//puts("SOLUTION:");
+//for(int y=0;y<height;y++)
+//for(int x=0;x<width;x++)
+//{
+//if(x==0&&y!=0)puts("");
+//printf("%.4X ",state[(depthat+1)*size + y*width + x]);
+//}
+//puts("\nEND");
 								n_solvable++;
 								if (n_solvable > 1) return 2;
 							}
@@ -558,16 +567,10 @@ static void test_one(int maxdepth, cstring test)
 	string solution_good;
 	test_split(test, map, solution_good);
 	
-	//int result;
-	//int depth;
-	//string solution = map_solve(map, &result, maxdepth, &depth);
-	//assert_eq(result, 1);
-	//assert_eq(solution, solution_good);
-	//assert_eq(depth, maxdepth);
-	
 	gamemap m;
 	m.init(map);
 	assert(solver_solve(m));
+	assert(m.finished());
 //puts("["+solution_good+"]");
 	for (int y=0;y<m.height;y++)
 	for (int x=0;x<m.width;x++)
@@ -580,6 +583,13 @@ static void test_one(int maxdepth, cstring test)
 		}
 	}
 	assert(!solver_solve_another(m));
+	
+	int result;
+	int depth;
+	string solution = map_solve(map, &result, 3, &depth);
+	assert_eq(result, 1);
+	assert_eq(solution, solution_good);
+	//assert_eq(depth, maxdepth);
 }
 
 static void test_error(int maxdepth, int exp, cstring map)
@@ -599,14 +609,16 @@ static void test_error(int maxdepth, int exp, cstring map)
 	if (exp == 2)
 	{
 		assert(solver_solve(m));
+		assert(m.finished());
 		assert(solver_solve_another(m));
+		assert(m.finished());
 	}
 }
 
 
 test("solver", "", "solver")
 {
-#if 0
+if(1){
 	testcall(test_one(0, // the outer islands only connect to one island each, so the map is trivial
 		" 2 \n" /* */ " 0 \n"
 		"271\n" /* */ "210\n"
@@ -749,14 +761,36 @@ test("solver", "", "solver")
 		"2  213\n" /* */ "1  010\n"
 		"1 2  2\n" /* */ "1 1  0\n"
 	));
-#endif
 	
-	//for some reason, the new solver absolutely hates this one
+	//the new solver tried connecting a few impossible bridges to this one
 	testcall(test_one(1,
 		" 42\n" /* */ " 20\n"
 		"231\n" /* */ "000\n"
 		"442\n" /* */ "210\n"
 	));
+	//crashed after making an incorrect assumption
+	testcall(test_one(1,
+		"222\n" /* */ "110\n"
+		"3 4\n" /* */ "1 0\n"
+		"212\n" /* */ "100\n"
+	));
+	//didn't catch a 'no, that's impossible' from set_state on an ocean tile
+	testcall(test_one(1,
+		"2 21\n" /* */ "1 00\n"
+		"32 3\n" /* */ "20 0\n"
+		"  23\n" /* */ "  10\n"
+	));
+	//the old solver made a silly assumption and violated a population limit on this map
+	testcall(test_one(1,
+		"1     \n" /* */ "0     \n"
+		"244422\n" /* */ "121110\n"
+		"    1 \n" /* */ "    0 \n"
+		" 2  43\n" /* */ " 0  20\n"
+		"   45 \n" /* */ "   20 \n"
+		"   13 \n" /* */ "   10 \n"
+		" 34 1 \n" /* */ " 21 0 \n"
+	));
+	
 	
 	testcall(test_error(1, 0, // obviously impossible
 		"11\n"
@@ -792,6 +826,50 @@ test("solver", "", "solver")
 		"3443\n"
 		"2332\n"
 	));
+	
+	//'are they joined' walk went 'A B C D B A' before noticing it's a loop, then couldn't follow the path back to 'B'
+	testcall(test_error(1, 2,
+		"331  \n"
+		"22  2\n"
+		"   13\n"
+		"  232\n"
+	));
+	//I don't remember what this caught, probably something assumption-related again
+	testcall(test_error(1, 2,
+		"3322\n" /* */ "3322\n"
+		"3   \n" /* */ "3   \n"
+		"353 \n" /* */ "353 \n"
+		"25 3\n" /* */ "25 3\n"
+	));
+	//if an assumption is false, it could claim the opposite is a valid solution, even if it's disjoint
+	testcall(test_error(1, 2,
+		"2 12 \n"
+		"4  52\n"
+		"2  2 \n"
+		"  252\n"
+		"   1 \n"
+	));
+}
+	//this map is solvable on the new one, but requires a depth of 37 and takes way too long
+	/*
+	testcall(test_error(1, 2,
+		"23  3 6  4  52 \n"
+		"2 3   5    45 3\n"
+		"34    5 4 2 32 \n"
+		"44         6  4\n"
+		"3 344  3  3 243\n"
+		"      2 1 4 2  \n"
+		"3 355 4 1 2 1  \n"
+		"  255  4   4 4 \n"
+		"4 2 5 3215 6 5 \n"
+		" 4    5 451 34 \n"
+		"3 1331 2 1145  \n"
+		"  3622 47 22 34\n"
+		"57 5 3323145  3\n"
+		" 4       44542 \n"
+		"442     332  22\n"
+	));
+	*/
 	
 	//enable these once the old solver is gone
 	/*

@@ -37,10 +37,6 @@ extern const char * const game_maps[] = {
 
 //*
 
-" 42\n"
-"231\n"
-"442\n"
-,
 
 		"33\n"
 		"22\n",
@@ -374,5 +370,17 @@ extern const char * const game_maps[] = {
 " 3 1 3 2  \n"
 "  2 5 2 g<\n"
 "        >^\n",
+
+
+//hard but playable
+"11      \n"
+"254 4 22\n"
+"      1 \n"
+" 2   153\n"
+"        \n"
+"   26 5 \n"
+"    1 3 \n"
+" 34   1 \n",
+
 
 };

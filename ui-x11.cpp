@@ -156,10 +156,25 @@ int main(int argc, char** argv)
 				int maxislands = side*side/2;
 				int islands = minislands + rand()%(maxislands+1-minislands);
 				string map = map_generate(side, side, islands);
+//if(side==5&&i==2017)puts("##########\n"+map+"##########");
 				
 				int result;
 				int steps;
 				map_solve(map, &result, 3, &steps);
+				
+				//gamemap map2;
+				//map2.init(map);
+				//int result2 = 0;
+				//if (solver_solve(map2))
+				//{
+				//	result2 = 1;
+				//	if (solver_solve_another(map2)) result2 = 2;
+				//}
+				//
+				//if (result != result2 && (result!=-1 || result2!=2))
+				//{
+				//	printf("%i:%i: solv1=%i solv2=%i\n###\n%s###\n", side, i, result, result2, (const char*)map);
+				//}
 				
 				if (result == 1 && steps >= 3)
 				//if (steps >= 5)
@@ -197,12 +212,12 @@ int main(int argc, char** argv)
 		{
 			for (int i=0;i<(vg ? 1000 : 10000);i++)
 			{
-				if (i%(vg ? 1 : 1) == 0) { printf("%i %i     \r", side, i); fflush(stdout); }
+				if (i%(vg ? 10 : 100) == 0) { printf("%i %i     \r", side, i); fflush(stdout); }
 				int minislands = side*2;
 				int maxislands = side*side/2;
 				int islands = minislands + rand()%(maxislands+1-minislands);
 				string map = map_generate(side, side, islands);
-if(i==1256)puts("##########\n"+map+"\n##########");
+//if(side==15&&i>=6700)puts("##########\n"+map+"\n##########");
 				
 				gamemap map2;
 				map2.init(map);
