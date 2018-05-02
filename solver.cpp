@@ -2,6 +2,13 @@
 
 namespace {
 
+#if 1
+#define verify(...)
+#if 0
+#define abort() // oddly enough, these assertions don't slow anything down
+#endif
+#endif
+
 class linker {
 	//This is similar to union-find, but not exactly. The operations I need are slightly different.
 	struct link_t {
@@ -235,18 +242,25 @@ class solver {
 	
 	linker link;
 	
-	uint32_t difficulty;
+public:
+	uint32_t accumulator; // used for difficulty/hint counting
+private:
+	
+	//this increases the difficulty score for incorrect guesses; this is intentional
+	__attribute__((always_inline)) void add_difficulty(uint32_t n) { if (op==op_difficulty) accumulator += n; }
 	
 	
 	//Can only block possibilities, never allow anything new.
 	//Returns false if the map is now known unsolvable. If so, 'possibilities' is unspecified.
-	//TODO: should add fill_simple calls to some FILO stack, rather than recursing
+	//TODO: should add fill_simple calls to towalk, rather than recursing
 	bool set_state(uint16_t index, uint16_t newstate)
 	{
+verify();
 		uint16_t prevstate = possibilities[index];
 //printf("SET(%.3i):%.4X->%.4X\n",index,prevstate,newstate);
 		
 		if (newstate & ~prevstate) abort();
+		if (newstate == prevstate) abort();
 		
 		uint16_t tmp = newstate;
 		tmp |= tmp>>4;
@@ -265,12 +279,17 @@ class solver {
 				uint16_t ix2 = index;
 				do
 				{
+verify(false);
 					possibilities[ix2] ^= src_bits;
+					if (possibilities[ix2] & src_bits) abort();
 					ix2 += offset;
 					possibilities[ix2] ^= dst_bits;
+					if (possibilities[ix2] & dst_bits) abort();
+verify(false);
 				} while (map.get(ix2).population < 0);
 			}
 		}
+verify();
 		
 		for (int dir=0;dir<4;dir++)
 		{
@@ -330,7 +349,6 @@ class solver {
 			
 			//check how many bridges exit from each tile
 			//keep only the lowest and highest bits
-			// (the <<8s would be unneeded if '0 or 2 but not 1' was impossible, but I don't think it is)
 			uint16_t flags_min = (flags & ~(flags<<4 | flags<<8));
 			uint16_t flags_max = flags;
 			
@@ -338,7 +356,7 @@ class solver {
 			max += popcount_mid(flags_max | flags_max>>4);
 			has_doubles |= (flags & (flags>>8));
 			
-			ni = nextjoined[index];
+			ni = nextjoined[ni];
 		} while (ni != index);
 	}
 	
@@ -355,10 +373,16 @@ class solver {
 			
 			//ocean tile with mandatory vertical bridge and allowed horizontal -> require zero horizontal
 			if ((flags & 0x0550) != 0 && (flags & 0x000A) == 0)
+			{
+				add_difficulty(1);
 				if (!set_state(index, flags & 0x0AAF)) return false;
+			}
 			//mandatory horizontal -> ban vertical
 			if ((flags & 0x0AA0) != 0 && (flags & 0x0005) == 0)
+			{
+				add_difficulty(1);
 				if (!set_state(index, flags & 0x055F)) return false;
+			}
 			
 			//if (!(flags&0x1111) || !(flags&0x2222) || !(flags&0x4444) || !(flags&0x8888)) return false;
 			return true;
@@ -380,9 +404,13 @@ class solver {
 			do {
 				uint16_t flags = possibilities[ni];
 				uint16_t flags_min = (flags & ~(flags<<4 | flags<<8));
-				if (!set_state(ni, flags_min)) return false;;
+				if (flags != flags_min)
+				{
+					add_difficulty(1);
+					if (!set_state(ni, flags_min)) return false;
+				}
 				
-				ni = nextjoined[index];
+				ni = nextjoined[ni];
 			} while (ni != index);
 			
 			return true;
@@ -395,9 +423,13 @@ class solver {
 			do {
 				uint16_t flags = possibilities[ni];
 				uint16_t flags_max = (flags & ~(flags>>4 | flags>>8));
-				if (!set_state(ni, flags_max)) return false;
+				if (flags != flags_max)
+				{
+					add_difficulty(1);
+					if (!set_state(ni, flags_max)) return false;
+				}
 				
-				ni = nextjoined[index];
+				ni = nextjoined[ni];
 			} while (ni != index);
 			
 			return true;
@@ -412,9 +444,13 @@ class solver {
 			do {
 				uint16_t flags = possibilities[ni];
 				uint16_t flags_min_minus1 = (flags & ~(flags<<8));
-				if (!set_state(ni, flags_min_minus1)) return false;
+				if (flags != flags_min_minus1)
+				{
+					add_difficulty(2);
+					if (!set_state(ni, flags_min_minus1)) return false;
+				}
 				
-				ni = nextjoined[index];
+				ni = nextjoined[ni];
 			} while (ni != index);
 		}
 		if (here.population+1 == max)
@@ -423,9 +459,13 @@ class solver {
 			do {
 				uint16_t flags = possibilities[ni];
 				uint16_t flags_max_minus1 = (flags & ~(flags>>8));
-				if (!set_state(ni, flags_max_minus1)) return false;
+				if (flags != flags_max_minus1)
+				{
+					add_difficulty(2);
+					if (!set_state(ni, flags_max_minus1)) return false;
+				}
 				
-				ni = nextjoined[index];
+				ni = nextjoined[ni];
 			} while (ni != index);
 		}
 		
@@ -433,43 +473,7 @@ class solver {
 	}
 	
 public:
-	solver(gamemap& map) : map(map)
-	{
-		possibilities = possibilities_buf[0];
-		
-		//make sure that existing bridges are labeled as such on all tiles they're on
-		//'map' is known correct, but anything other than that should use set_state
-		
-		for (int y=0;y<map.height;y++)
-		for (int x=0;x<map.width;x++)
-		{
-			nextjoined[y*100+x] = y*100+x;
-		}
-		
-		for (int y=0;y<map.height;y++)
-		for (int x=0;x<map.width;x++)
-		{
-			gamemap::island& here = map.map[y][x];
-			int index = y*100+x;
-			
-			if (here.rootnode != index)
-			{
-				int tmp = nextjoined[here.rootnode];
-				nextjoined[here.rootnode] = nextjoined[index];
-				nextjoined[index] = tmp;
-			}
-			
-			uint16_t flags = 0x000F;
-			for (int dir=0;dir<4;dir++)
-			{
-				if (here.bridgelen[dir] != -1) flags |= 0x0110<<dir;
-				if (op!=op_another && here.bridges[dir] == 1) flags &= ~(0x0001<<dir);
-				if (op!=op_another && here.bridges[dir] == 2) flags &= ~(0x0011<<dir);
-				if (here.bridges[dir] == 3) { flags &= ~(0x0111<<dir); flags |= 0x1000<<dir; }
-			}
-			possibilities[index] = flags;
-		}
-	}
+	solver(gamemap& map) : map(map) {}
 	
 	bool do_isolation_rule()
 	{
@@ -552,8 +556,12 @@ public:
 					link.lookback(map, index2, index2p, topleft, down);
 //printf("FORCEJOIN=%.3i(%.3i) - join %.3i dir %i\n", index2, index2p, topleft, down*3);
 					link.join(index2, index2p);
-					if (!set_state(topleft, possibilities[topleft] & ~(down ? 0x0008 : 0x0001))) return false;
-					link_did_any = true;
+					if (possibilities[topleft] & (down ? 0x0008 : 0x0001))
+					{
+						add_difficulty(10);
+						if (!set_state(topleft, possibilities[topleft] & ~(down ? 0x0008 : 0x0001))) return false;
+						link_did_any = true;
+					}
 					goto link_again;
 				}
 			} while (index1 != index2);
@@ -606,6 +614,9 @@ public:
 	
 	bool solve_rec(uint16_t layer)
 	{
+//static int n=0;if(layer>n){n=layer;printf("MAXDEPTH=%i\n",n);}
+		add_difficulty(20*layer);
+		
 		if (layer < sizeof(possibilities_buf)/sizeof(possibilities_buf[0]))
 		{
 			if (!do_isolation_rule()) return false;
@@ -619,7 +630,8 @@ public:
 				//gamemap::island& here = map.map[y][x];
 				uint16_t flags = possibilities[index];
 				uint16_t multidir_flags = (flags & (flags>>4 | flags>>8));
-				if (!multidir_flags) continue;
+				if (!multidir_flags) continue; // no guess possible? skip this tile
+				if (map.map[y][x].population < 0) continue; // don't guess on ocean tiles
 				
 				//right and up (ignore left/down, they'd only find duplicates)
 				for (int dir=0;dir<2;dir++)
@@ -664,6 +676,8 @@ public:
 									
 									if (!do_isolation_rule()) return false;
 									flags = possibilities[index];
+									multidir_flags = (flags & (flags>>4 | flags>>8));
+									if (!(multidir_flags & (0x0111<<dir))) break;
 								}
 							}
 						}
@@ -674,7 +688,8 @@ public:
 		else
 		{
 			//if out of memory, report it's unsolvable I guess?
-			puts("EEE");
+			puts("Out of memory");
+			puts(map.serialize());
 			abort();
 			return false;
 		}
@@ -685,13 +700,53 @@ public:
 		return true;
 	}
 	
+	//Returns an unspecified value for op_difficulty and op_hint.
 	bool solve()
 	{
-//puts("SOLVEBEGIN");
+		possibilities = possibilities_buf[0];
+		
+		int num_roots = 0;
+		
+		//make sure that existing bridges are labeled as such on all tiles they're on
+		//'map' is known correct, but anything other than that should use set_state
+		
+		for (int y=0;y<map.height;y++)
+		for (int x=0;x<map.width;x++)
+		{
+			nextjoined[y*100+x] = y*100+x;
+		}
+		
+		for (int y=0;y<map.height;y++)
+		for (int x=0;x<map.width;x++)
+		{
+			gamemap::island& here = map.map[y][x];
+			int index = y*100+x;
+			
+			if (here.rootnode != index)
+			{
+				int tmp = nextjoined[here.rootnode];
+				nextjoined[here.rootnode] = nextjoined[index];
+				nextjoined[index] = tmp;
+			}
+			
+			if (here.rootnode == index && here.population > 0) num_roots++;
+			
+			uint16_t flags = 0x000F;
+			for (int dir=0;dir<4;dir++)
+			{
+				if (here.bridgelen[dir] != -1) flags |= 0x0110<<dir;
+				if (op!=op_another && op!=op_difficulty && here.bridges[dir] == 1) flags &= ~(0x0001<<dir);
+				if (op!=op_another && op!=op_difficulty && here.bridges[dir] == 2) flags &= ~(0x0011<<dir);
+				if (here.bridges[dir] == 3) { flags &= ~(0x0111<<dir); flags |= 0x1000<<dir; }
+			}
+			possibilities[index] = flags;
+		}
+		
 		if (map.numislands == 0) return (op!=op_another);
+		if (op==op_hint || op==op_difficulty) accumulator=0;
 		
 		//block 1s and 2s from using both of their bindings towards each other
-		if (map.numislands > 2) // except if that's the only two islands, those maps are valid
+		if (num_roots > 2) // except if that's the only two islands
 		{
 			for (int y=0;y<map.height;y++)
 			for (int x=0;x<map.width;x++)
@@ -700,6 +755,7 @@ public:
 				uint16_t flags = possibilities[y*100+x];
 				uint16_t newflags = flags;
 				
+				//keep the pointless flags&0x1234 checks, here.bridgelen[0] is undefined if the relevant flag isn't set
 				if (here.population == 2 && (flags&0x0100) && map.map[y][x+here.bridgelen[0]].population == 2)
 					newflags &= ~0x0100;
 				if (here.population == 1 && (flags&0x0010) && map.map[y][x+here.bridgelen[0]].population == 1)
@@ -712,6 +768,7 @@ public:
 				
 				if (flags != newflags)
 				{
+//printf("%.3i(%.3i) %.4X->%.4X\n",y*100+x,here.population,flags,newflags);
 					if (!set_state(y*100+x, newflags)) return false;
 				}
 			}
@@ -724,8 +781,18 @@ public:
 			if (!fill_simple(y*100+x)) return false;
 		}
 		
+		if (op==op_hint && accumulator) return false;
+		
 		if (!solve_rec(0)) return false;
 		
+		if (op==op_hint || op==op_difficulty) return false;
+		
+		assign();
+		return true;
+	}
+	
+	void assign()
+	{
 		for (int y=0;y<map.height;y++)
 		for (int x=0;x<map.width;x++)
 		{
@@ -740,15 +807,43 @@ public:
 		}
 		
 		if (!map.finished()) abort();
-		return true;
 	}
+
+#ifndef verify
+void verify(bool strict=true)
+{
+	for (int y=0;y<map.height-1;y++)
+	for (int x=0;x<map.width-1;x++)
+	{
+		uint16_t flags = possibilities[y*100+x];
+		uint16_t flagsr = possibilities[y*100+x+1];
+		uint16_t flagsd = possibilities[y*100+x+100];
+		if (((flagsr>>2)^flags)&0x1111) abort();
+		if (((flagsd<<2)^flags)&0x8888) abort();
+		
+		if (strict && map.map[y][x].population<0 && (flags^(flags>>2))&0x3333) abort();
+	}
+}
+#endif
+
+void print()
+{
+	for (int y=0;y<map.height;y++)
+	for (int x=0;x<map.width;x++)
+	{
+		uint16_t flags = possibilities[y*100+x];
+		if(x==0)puts("");printf("%.4X ",flags);
+	}
+	puts("");
+}
 };
 }
 
-bool solver_solve(gamemap& map) { solver<op_solve> s(map); return s.solve(); }
-bool solver_solve_another(gamemap& map) { solver<op_another> s(map); return s.solve(); }
-//int16_t solver_hint(const gamemap& map, int skip) { solver s; return s.hint(map, skip); }
-//int solver_difficulty(const gamemap& map) { solver s; return s.difficulty(map); }
+bool gamemap::solve() { solver<op_solve> s(*this); return s.solve(); }
+bool gamemap::solve_another() { solver<op_another> s(*this); return s.solve(); }
+//void gamemap::hint() { solver<op_hint> s(*this); s.solve(); return s.accumulator; }
+uint32_t gamemap::difficulty() { solver<op_difficulty> s(*this); s.solve(); return s.accumulator; }
+uint32_t gamemap::solve_difficulty() { solver<op_difficulty> s(*this); if (s.solve()) s.assign(); return s.accumulator; }
 
 static void test_split(cstring in, string& map, string& solution)
 {
@@ -769,7 +864,7 @@ static void test_one(cstring test)
 	
 	gamemap m;
 	m.init(map);
-	assert(solver_solve(m));
+	assert(m.solve());
 	assert(m.finished());
 	for (int y=0;y<m.height;y++)
 	for (int x=0;x<m.width;x++)
@@ -780,28 +875,29 @@ static void test_one(cstring test)
 			assert_eq(m.map[y][x].bridges[0], exp-'0');
 		}
 	}
-	assert(!solver_solve_another(m));
+	assert(!m.solve_another());
 }
 
 static void test_unsolv(cstring map)
 {
 	gamemap m;
 	m.init(map.c_str());
-	assert(!solver_solve(m));
+	assert(!m.solve());
 }
 
 static void test_multi(cstring map)
 {
 	gamemap m;
 	m.init(map.c_str());
-	assert(solver_solve(m));
+	assert(m.solve());
 	assert(m.finished());
-	assert(solver_solve_another(m));
+	assert(m.solve_another());
 	assert(m.finished());
 }
 
 test("solver", "", "solver")
 {
+	//many of these no longer test anything useful, but they're kept anyways
 	testcall(test_one( // the outer islands only connect to one island each, so the map is trivial
 		" 2 \n" /* */ " 0 \n"
 		"271\n" /* */ "210\n"
@@ -838,22 +934,22 @@ test("solver", "", "solver")
 		"2 2\n" /* */ "0 0\n"
 		" 2 \n" /* */ " 0 \n"
 	));
-	testcall(test_one( // requires guessing (or using the 2s-may-not-double-bind rule)
+	testcall(test_one( // 2s may not double bind
 		"2 2\n" /* */ "1 0\n"
 		"222\n" /* */ "110\n"
 	));
-	testcall(test_one( // all islands must be connected
+	testcall(test_one( // another one
 		"22\n" /* */ "10\n"
 		"22\n" /* */ "10\n"
 	));
-	testcall(test_one( // doesn't enter the must-be-connected function, but it has caught a few bugs
+	testcall(test_one( // this one has caught a few bugs
 		"1 2  \n" /* */ "1 0  \n"
 		" 1 1 \n" /* */ " 0 0 \n"
 		"14441\n" /* */ "11110\n"
 		" 1 1 \n" /* */ " 0 0 \n"
 		"  2 1\n" /* */ "  1 0\n"
 	));
-	testcall(test_one( // bigger and nastier
+	testcall(test_one( // lots of cycles, though fairly trivial
 		"4    4 \n" /* */ "2    0 \n"
 		"  4 4  \n" /* */ "  2 0  \n"
 		"    682\n" /* */ "    220\n"
@@ -861,14 +957,14 @@ test("solver", "", "solver")
 		"  4 4  \n" /* */ "  2 0  \n"
 		"4    4 \n" /* */ "2    0 \n"
 	));
-	testcall(test_one( // also requires guessing, multiple times (or the 2s-may-not-double-bind rule)
+	testcall(test_one(
 		"2  2\n" /* */ "1  0\n"
 		" 22 \n" /* */ " 10 \n"
 		"  33\n" /* */ "  10\n"
 		" 22 \n" /* */ " 10 \n"
 		"2  2\n" /* */ "1  0\n"
 	));
-	testcall(test_one( // nasty amount of cycles because must annoy island tracker
+	testcall(test_one( // there are too many loops of 2s, they made sense a while ago
 		"2          2\n" /* */ "1          0\n"
 		" 2        2 \n" /* */ " 1        0 \n"
 		"  2  3   2  \n" /* */ "  1  1   0  \n"
@@ -882,15 +978,13 @@ test("solver", "", "solver")
 		" 2    3   2 \n" /* */ " 1    1   0 \n"
 		"2     3    2\n" /* */ "1     1    0\n"
 	));
-	testcall(test_one( // all islands must be connected (exercises the new solver too)
+	testcall(test_one( // all islands must be connected (the no-double-binding-2s rule doesn't solve this one)
 		" 1 \n" /* */ " 0 \n"
 		" 32\n" /* */ " 10\n"
 		"2 1\n" /* */ "0 0\n"
 		"32 \n" /* */ "10 \n"
 	));
-	
-	// these require nested guesses (created by the game generator)
-	// (humans can solve them all without nested guesses, by knowing that 1s can't connect two islands)
+	//from the game generator
 	testcall(test_one(
 		"2  1\n" /* */ "0  0\n"
 		"3233\n" /* */ "1110\n"
@@ -915,9 +1009,8 @@ test("solver", "", "solver")
 		"32 3\n" /* */ "11 0\n"
 		"2  1\n" /* */ "1  0\n"
 	));
-	//these require guessing, even with the advanced solver
-	//the cycle detector doesn't know about the population rules
-	//(extra 1s to avoid the 2s-don't-double-bind special case)
+	//requires guessing
+	//(extra 1s to avoid the 2s-don't-double-bind rule)
 	testcall(test_one(
 		"1 \n" /* */ "0 \n"
 		"32\n" /* */ "10\n"
@@ -930,6 +1023,7 @@ test("solver", "", "solver")
 		"1441\n" /* */ "1110\n"
 		" 11 \n" /* */ " 00 \n"
 	));
+	//a few failed attempts at mandatory guesses
 	testcall(test_one(
 		"1    1\n" /* */ "0    0\n"
 		"3    3\n" /* */ "1    0\n"
@@ -944,26 +1038,22 @@ test("solver", "", "solver")
 		"1 2  2\n" /* */ "1 1  0\n"
 	));
 	
-	//the new solver tried connecting a few impossible bridges to this one
-	testcall(test_one(
+	testcall(test_one( // solver tried connecting a few impossible bridges in this one
 		" 42\n" /* */ " 20\n"
 		"231\n" /* */ "000\n"
 		"442\n" /* */ "210\n"
 	));
-	//crashed after making an incorrect assumption
-	testcall(test_one(
+	testcall(test_one( // crashed after making an incorrect assumption
 		"222\n" /* */ "110\n"
 		"3 4\n" /* */ "1 0\n"
 		"212\n" /* */ "100\n"
 	));
-	//didn't catch a 'no, that's impossible' from set_state on an ocean tile
-	testcall(test_one(
+	testcall(test_one( // didn't catch a 'no, that's impossible' from set_state on an ocean tile
 		"2 21\n" /* */ "1 00\n"
 		"32 3\n" /* */ "20 0\n"
 		"  23\n" /* */ "  10\n"
 	));
-	//the old solver made a silly assumption and violated a population limit on this map
-	testcall(test_one(
+	testcall(test_one( // made a silly assumption and violated a population limit on this map
 		"1     \n" /* */ "0     \n"
 		"244422\n" /* */ "121110\n"
 		"    1 \n" /* */ "    0 \n"
@@ -1011,21 +1101,22 @@ test("solver", "", "solver")
 		"2332\n"
 	));
 	
-	//'are they joined' walk went 'A B C D B A' before noticing it's a loop, then couldn't follow the path back to 'B'
+	//'are they joined' walk went 'A B C D B A' before noticing it's a loop, then couldn't follow the path back to B
 	testcall(test_multi(
 		"331  \n"
 		"22  2\n"
 		"   13\n"
 		"  232\n"
 	));
-	//I don't remember what this caught, probably something assumption-related again
+	//I don't remember what this one caught, probably something assumption-related again
 	testcall(test_multi(
 		"3322\n" /* */ "3322\n"
 		"3   \n" /* */ "3   \n"
 		"353 \n" /* */ "353 \n"
 		"25 3\n" /* */ "25 3\n"
 	));
-	//if an assumption is false, it could claim the opposite is a valid solution, even if it's disjoint
+	//if an assumption is false, and the opposite (plus fill_simple) satisfies all populations,
+	// it that's a valid solution, even if it's disjoint
 	testcall(test_multi(
 		"2 12 \n"
 		"4  52\n"
@@ -1034,8 +1125,70 @@ test("solver", "", "solver")
 		"   1 \n"
 	));
 	
-	//this map is requires a solver depth of 37
-	/*
+	//large islands
+	testcall(test_one(
+		"v<\n" /* */ "30\n"
+		"0<\n" /* */ "30\n"
+	));
+	//the no-double-binding-2s doesn't like large islands
+	testcall(test_one(
+		"v  \n" /* */ "0  \n"
+		"2 2\n" /* */ "2 0\n"
+		"  ^\n" /* */ "  0\n"
+	));
+	testcall(test_one(
+		"1< \n" /* */ "30 \n"
+		"   \n" /* */ "   \n"
+		" >1\n" /* */ " 30\n"
+	));
+	testcall(test_one(
+		"v4\n" /* */ "20\n"
+		"4^\n" /* */ "20\n"
+	));
+	testcall(test_unsolv(
+		"v2\n" /* */ "20\n"
+		"4^\n" /* */ "20\n"
+	));
+	testcall(test_multi(
+		"v2\n"
+		"2^\n"
+	));
+	//this map somehow made guesser engine place a guess on an ocean tile,
+	// making it allow different flags up vs down, then explode horribly
+	testcall(test_multi(
+		"44<  3<<1\n"
+		"59<< 7< 5\n"
+		"^  2 5  7\n"
+		"4 5 >A< ^\n"
+		"v    3 5<\n"
+		"37< 5^  3\n"
+		"^8^>^ 6 1\n"
+		"3^   4< ^\n"
+		"^^  3  2 \n"
+	));
+	
+	//castles
+	testcall(test_one(
+		"g<  \n" /* */ "30  \n"
+		"^^ 2\n" /* */ "32 0\n"
+	));
+	testcall(test_one(
+		"b< y<\n" /* */ "30 30\n"
+		"^^ ^^\n" /* */ "30 30\n"
+	));
+	testcall(test_multi(
+		"b< b<\n"
+		"^^ ^^\n"
+	));
+	testcall(test_unsolv( // unsolvable, but falsely reported solvable if an_island[0] points to a corner and it walks from there
+		"2  2\n"
+		" r< \n"
+		" ^^ \n"
+		"2  2\n"
+	));
+	
+	//this map requires a solver depth of 27 and takes 2.67s on TESTRUNNER=, 61 seconds on Valgrind
+	if(0)
 	testcall(test_multi(
 		"23  3 6  4  52 \n"
 		"2 3   5    45 3\n"
@@ -1053,15 +1206,48 @@ test("solver", "", "solver")
 		" 4       44542 \n"
 		"442     332  22\n"
 	));
-	*/
-	
-	//enable these once the solver handles castles
-	/*
-	testcall(test_unsolv( // unsolvable, but falsely reported solvable if an_island[0] points to a corner and it walks from there
-		"2  2\n"
-		" r< \n"
-		" ^^ \n"
-		"2  2\n"
+	//this one requires a solver depth of 35
+	if(0)
+	testcall(test_multi(
+		"335 5  34 4243342\n"
+		"31   3 3 26   543\n"
+		"5231 4  7 33 2 45\n"
+		"44  5   5     663\n"
+		"34456442 21133  1\n"
+		"    32 1 34 55  2\n"
+		" 3  3 6 5   45  2\n"
+		" 45  2 2 3   3   \n"
+		"    44       1   \n"
+		"     3 4 5   3   \n"
+		" 3    35 43 2    \n"
+		" 2  4512    1    \n"
+		"4 55    5    4   \n"
+		"43   33 4    3   \n"
+		"   21253 21 31 34\n"
+		"2 25 5 135  6 62 \n"
+		"25   45     4 3 3\n"
 	));
-	*/
+}
+
+test("difficulty", "generator", "")
+{
+return;
+	assert_eq((cstring)game_maps[0],
+	          "  2  \n"
+	          "     \n"
+	          "2 7 1\n"
+	          "     \n"
+	          "  2  \n");
+	
+	uint32_t diff[30];
+	puts("");
+	for (int i=0;i<30;i++)
+	{
+		gamemap m;
+		m.init(game_maps[i]);
+		m.solve();
+		diff[i] = m.difficulty();
+		
+		printf("[%i]=%i\n",i,diff[i]);
+	}
 }

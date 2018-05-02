@@ -1,14 +1,3 @@
-//map rules:
-//- the map must be rectangular, and 100 tiles or less in both directions
-//- large islands must eventually terminate, no loops allowed
-//- large islands must end with an island tile, no oceans or reefs
-//- for performance reasons, large islands should use the shortest possible path to the roots
-//- if 10 bridges is possible, the root must be joined to the tile below or right; it may not be on the bottom-right edge
-//    for simplicity, better to completely avoid large islands with roots at bottom-right
-//- castles must be joined with the tile below, right, AND below-right
-//- placing zero bridges must not be a solution
-//- the above rules are not properly enforced, violations may yield arbitrary absurd results
-
 extern const char * const game_maps[] = {
 // test maps
 
@@ -35,7 +24,111 @@ extern const char * const game_maps[] = {
 //"^^^     \n",
 
 
-//*
+/*
+
+
+"14 52 2\n"
+"1 4422 \n"
+"356   5\n"
+"  4  3 \n"
+"   13  \n"
+"  2 3  \n"
+"25   54\n",
+
+
+
+
+
+"1223 225 2\n" // 220
+"45 544  2 \n"
+"   3      \n"
+"  43  3   \n"
+"   43   33\n"
+" 24  674 5\n"
+"45 33  22 \n"
+"    1   4 \n"
+"1  344374 \n"
+" 44    4 3\n",
+
+" 21       \n" // 416
+"1         \n"
+"364 4  4  \n"
+"   2   2  \n"
+"   4      \n"
+"          \n"
+" 3       1\n"
+"32244    2\n"
+"          \n"
+"23  1     \n",
+
+"1 11  4443\n" // 216
+"2 52    4 \n"
+"    1 2 33\n"
+"4 7    4  \n"
+"     1 2 3\n"
+"53  3 32  \n"
+"31 48   63\n"
+"2    22   \n"
+"   3564  1\n"
+"2 4     3 \n",
+
+"        21\n" // 432
+"212  22 5 \n"
+"5 3214 2  \n"
+"          \n"
+"   1      \n"
+" 1 4 364  \n"
+"          \n"
+"   2  2   \n"
+"5       6 \n"
+"124     52\n",
+
+"11 4  23 3\n" // 209
+"5  8   664\n"
+"3  5 2  4 \n"
+"4     3  2\n"
+"3 23 4  3 \n"
+" 23  2    \n"
+" 4 52    2\n"
+" 32      3\n"
+"4454  54 2\n"
+"3 6  44 2 \n",
+
+"     3   2\n" // 206
+"   4434 53\n"
+" 21  3    \n"
+"  34   1  \n"
+"         1\n"
+" 3   2  2 \n"
+"   2    1 \n"
+" 36 5 63 1\n"
+"  4 1     \n"
+"  213 4   \n",
+   
+"22 5 6 422\n" // 214
+"4 2 2 2  3\n"
+"576   54  \n"
+"      454 \n"
+"    35   4\n"
+"3   2 123 \n"
+"4 4 456 6 \n"
+"          \n"
+"653 2 3 3 \n"
+"4  5 3   2\n",
+
+" 12 2  5 2\n" // 221
+" 2      2 \n"
+"   4 32   \n"
+"   5 22   \n"
+"1376   76 \n"
+"2 5 441 2 \n"
+"3 4  11223\n"
+"  358  4 3\n"
+"    5  3  \n"
+"2 5454 4 1\n",
+
+
+
 
 
 		"33\n"

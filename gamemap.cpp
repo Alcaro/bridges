@@ -236,3 +236,62 @@ bool gamemap::finished()
 	
 	return (foundislands == numislands);
 }
+
+static void serialize_fill(gamemap& map, char * ret, int width, int x, int y)
+{
+	if (map.map[y][x].bridges[0] == 3 && ret[(width+1)*y+(x+1)] == '\0')
+	{
+		ret[(width+1)*y+(x+1)] = '<';
+		serialize_fill(map, ret, width, x+1, y);
+	}
+	if (map.map[y][x].bridges[1] == 3 && ret[(width+1)*(y-1)+x] == '\0')
+	{
+		ret[(width+1)*(y-1)+x] = 'v';
+		serialize_fill(map, ret, width, x, y-1);
+	}
+	if (map.map[y][x].bridges[2] == 3 && ret[(width+1)*y+(x-1)] == '\0')
+	{
+		ret[(width+1)*y+(x-1)] = '>';
+		serialize_fill(map, ret, width, x-1, y);
+	}
+	if (map.map[y][x].bridges[3] == 3 && ret[(width+1)*(y+1)+x] == '\0')
+	{
+		ret[(width+1)*(y+1)+x] = '^';
+		serialize_fill(map, ret, width, x, y+1);
+	}
+}
+
+string gamemap::serialize()
+{
+	char ret[100*101+1];
+	memset(ret, 0, (width+1)*height+1);
+	
+	for (int y=0;y<height;y++)
+	{
+		for (int x=0;x<width;x++)
+		{
+			island& here = map[y][x];
+			
+			if (here.rootnode != y*100+x) continue;
+			
+			char ch = -1; // populations other than the listed ones are impossible, but gcc won't realize that
+			
+			if(0);
+			else if (here.population == -1) ch = ' ';
+			else if (here.population == -2) ch = '#';
+			else if (here.population <  10) ch = '0'+here.population;
+			else if (here.population <  36) ch = 'A'+here.population-10;
+			else if (here.population == 80) ch = 'r';
+			else if (here.population == 81) ch = 'b';
+			else if (here.population == 82) ch = 'y';
+			else if (here.population == 83) ch = 'g';
+			
+			serialize_fill(*this, ret, width, x, y);
+			
+			ret[(width+1)*y + x] = ch;
+		}
+		ret[(width+1)*y + width] = '\n';
+	}
+	
+	return ret;
+}

@@ -6,37 +6,13 @@
 //- end game screen
 //- better selection icon for keyboard gameplay
 //- better reef graphics
-//- compressed UI, where islands are half size so maps can be up to 26x20
 //- design some levels containing the new objects
-//    is the randomizer good enough, or do I make a map editor?
+//    is the generator good enough, or do I make a map editor?
 //    make sure to introduce the new objects in a reasonable way
-//- make a new solver
-//    - faster than the current one
-//    - can return a single hint, rather than the full solution
-//    - supports the new objects
-//    see solver.cpp for planning
-//- if possible, create difficulty estimator
-//    at any point, how many bridges can be proven to exist or not exist? are they close to the edge?
-//    does it involve the must-be-connected rule?
-//    does it require guessing? how many tiles need to be considered to prove which is the case?
-//    the solver can represent seven possible states for each possible bridge (plus unsolvable), humans can't; does this make it easier?
-//- integrate game generator (requires solver)
-//- lava background must move down-left at arbitrarily slow pace (30px/s?)
-//- level select: everything except starts out at 2x size, shrinking over ~.3s
-
-//map structure for the new objects:
-//- reef: #
-//- large island: > ^ < v, ultimately pointing to a character defining the population (loops not allowed)
-//- island with more than 9 pop: A=10, B=11, etc, up to Z=36 (above 36 would just be annoying)
-//- castle: rbyg (red, blue, yellow, green, respectively)
-
-//internal representation:
-//- reef: population -2, bridgelen is -1 across the area
-//- castles:
-//    population is 80 plus color*1
-//    index to one castle of each color is stored in the gamemap (-1 if none)
-//    flood fill starts from them, one at the time; coloring an incorrect castle aborts the operation, correct is ignored
-//    finding if all are connected is done via island counting
+//- teach solver about castles
+//- make difficulty estimator use BFS
+//- make map generator emit reef
+//- add UI for game generator
 
 namespace {
 class birds {
@@ -546,8 +522,8 @@ public:
 		
 		image& fg = (tileset==0 ? res.fg0 : tileset==1 ? res.fg1 : res.fg2);
 		
-		int sx = (320 - 24*map.width);
-		int sy = (240 - 24*map.height);
+		int sx = (320 - 24*map.width + 4); // +4 to center it
+		int sy = (240 - 24*map.height + 4);
 		
 		//must draw islands before islands themselves, to allow pop/pri and 'finished' borders to spread out
 		for (int ty=0;ty<map.height;ty++)
@@ -732,8 +708,8 @@ public:
 			}
 		}
 		
-		int tx = (in.mousex - sx + 48)/48 - 1; // +48-1 to avoid -1/48=0 (-49/48=-2 is fine, all negative values are equal)
-		int ty = (in.mousey - sy + 48)/48 - 1;
+		int tx = (in.mousex - (sx-4) + 48)/48 - 1; // +48-1 to avoid -1/48=0 (-49/48=-2 is fine, all negative values are equal)
+		int ty = (in.mousey - (sy-4) + 48)/48 - 1; // -4 to center it
 		
 		//put this before bridge builder, to make sure menu wins if there's a possible bridge down there
 		if (in_press & 1<<k_click && in.mousex >= 595 && in.mousex < 637 && in.mousey >= 455 && in.mousey < 477)
@@ -752,8 +728,8 @@ public:
 			//find which direction to build the bridge
 			gamemap::island& here = map.map[ty][tx];
 			
-			int msx = (in.mousex - sx)%48;
-			int msy = (in.mousey - sy)%48;
+			int msx = (in.mousex - (sx-4) + 48)%48;
+			int msy = (in.mousey - (sy-4) + 48)%48;
 			
 			//this cuts the island into 8 slices, numbered as follows:
 			// 02
@@ -931,6 +907,7 @@ public:
 		}
 		if (game_kb_state != 0)
 		{
+			//TODO: better image
 			out.insert(sx + game_kb_x*48 + game_kb_state*10, sy + game_kb_y*48, res.kbfocus);
 		}
 		
@@ -996,12 +973,28 @@ public:
 				return clicked;
 			};
 			item(0, 15, "Level "+tostring(map_id+1));
-			if (item(1, 120, "How to Play"))
-			{
-				popup_id = pop_tutor1;
-				popup_frame = 0;
-				game_menu = false;
-			}
+			//if (item(1, 120, "How to Play"))
+			//{
+			//	popup_id = pop_tutor1;
+			//	popup_frame = 0;
+			//	game_menu = false;
+			//}
+if (item(1, 120, "Random"))
+{
+//TODO: make this unlockable instead
+//srand(0);
+gamemap::genparams p = {};
+p.width=9;
+p.height=9;
+p.density=0.5;
+p.difficulty=1.0;
+p.quality=100;
+p.max_brilen=4;
+p.use_reef=true;
+p.use_large=true;
+map.generate(p);
+map.reset();
+}
 			if (item(2, 280, "Reset"))
 			{
 				map.reset();
@@ -1009,7 +1002,9 @@ public:
 			}
 			if (item(3, 375, "Level Select")) to_menu(in_press & 1<<k_confirm);
 			if (item(4, 545, "Hint"))
-solver_solve(map); // TODO
+{
+if(map.finished())map.solve_another();else map.solve();
+}
 			
 			out.insert(600, game_menu_pos+18, res_menuclose);
 			if (in_press & 1<<k_click && in.mousex >= 595 && in.mousex < 637 &&
@@ -1205,7 +1200,7 @@ to_title(); //TODO
 					out.insert_text(140-1, 60+1, res.smallfont, "WELL DONE!", 6);
 					out.insert_text(140+1, 60+1, res.smallfont, "WELL DONE!", 6);
 					res.smallfont.color = 0xFF0000;
-					out.insert_text(140, 60, res.smallfont, "WELL DONE!", 6);
+					out.insert_text(140,   60,   res.smallfont, "WELL DONE!", 6);
 					res.smallfont.scale = 2;
 				}
 				

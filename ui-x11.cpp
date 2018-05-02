@@ -81,25 +81,38 @@ int main(int argc, char** argv)
 			for (int i=0;i<(vg ? 1000 : 10000);i++)
 			{
 				if (i%(vg ? 10 : 100) == 0) { printf("%i %i     \r", side, i); fflush(stdout); }
-				int minislands = side*2;
-				int maxislands = side*side/2;
-				int islands = minislands + rand()%(maxislands+1-minislands);
-				string map = map_generate(side, side, islands);
-//if(side==15&&i>=6700)puts("##########\n"+map+"\n##########");
+				//int minislands = side*2;
+				//int maxislands = side*side/2;
+				//int islands = minislands + rand()%(maxislands+1-minislands);
+				//string map = map_generate(side, side, islands);
 				
-				gamemap map2;
-				map2.init(map);
+				gamemap::genparams par = {};
+				par.width = side;
+				par.height = side;
+				par.density = 0.4;
+				par.allow_dense = true;
+				par.max_brilen = (side+2)/2.5;
+				par.use_reef = false;
+				par.use_large = false;
+				par.use_castle = false;
+				par.allow_multi = true;
+				par.difficulty = 0;
+				par.quality = 1;
+				
+				gamemap map;
+				map.generate(par);
+				map.reset();
 				int result = 0;
-				if (solver_solve(map2))
+				if (map.solve())
 				{
 					result = 1;
-					if (solver_solve_another(map2)) result = 2;
+					if (map.solve_another()) result = 2;
 				}
 				
 				if (result == 0)
 				{
 					puts("ERROR");
-					puts(map);
+					puts(map.serialize());
 					exit(1);
 				}
 				if (result == -1) nunsolv++;
@@ -109,6 +122,8 @@ int main(int argc, char** argv)
 			}
 		}
 		uint64_t end = time_ms_ne();
+		//expected (with side = 3..9, i = 0..9999, generate.cpp md5 94940171e4f1b91ccedf683c90a95930):
+		//32161 solvable, 0 unsolvable, 37839 multiple solutions, took 4062 ms
 		printf("%i solvable, %i unsolvable, %i multiple solutions, took %u ms\n",
 		       nsolv, nunsolv, nmultisolv, (unsigned)(end-start));
 		
@@ -144,7 +159,7 @@ int main(int argc, char** argv)
 		end = start;
 		while (end < start+5000)
 		{
-			for (int i=0;i<100;i++) // only checking timer every 100 frames boosts framerate from 1220 to 1418
+			for (int i=0;i<100;i++)
 			{
 				g->run(in, out);
 				frames++;
@@ -153,6 +168,22 @@ int main(int argc, char** argv)
 		}
 		
 		printf("level select: %i frames in %u ms = %ffps\n", frames, (unsigned)(end-start), frames/(float)(end-start)*1000);
+		
+		g->run(in_press, out);
+		
+		start = time_ms_ne();
+		end = start;
+		while (end < start+5000)
+		{
+			for (int i=0;i<100;i++)
+			{
+				g->run(in, out);
+				frames++;
+			}
+			end = time_ms_ne();
+		}
+		
+		printf("ingame: %i frames in %u ms = %ffps\n", frames, (unsigned)(end-start), frames/(float)(end-start)*1000);
 		
 		return 0;
 	}
