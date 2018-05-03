@@ -80,6 +80,7 @@ public:
 	// There must be a root, and the root must be an island (not ocean or reef); loops are not allowed.
 	// If 10 bridges is possible, the root must be joined to the tile below or right; it may not be on the bottom-right edge.
 	//  For simplicity, it's better to always avoid large islands with roots at the bottom-right.
+	// An island may not be able to connect to itself. Stick in a reef if necessary.
 	// For performance reasons, large islands should use reasonably short paths to the root. Don't create too silly patterns.
 	//For islands with population 10 to 35, use A (10) to Z (35). Population above 35 is not allowed, it'd be too annoying to play.
 	//Castles are 'rbyg' (lowercase), red, blue, yellow and green, respectively.
@@ -128,7 +129,8 @@ public:
 		
 		bool use_reef; // Include reefs in the returned map.
 		bool use_large; // Include large islands in the returned map.
-		bool use_castle; // Include castles in the returned map. If use_large is false, includes castles too.
+		bool use_castle; // Include castles in the returned map. If use_large is false, castles are the only large islands.
+		                 // If set, size must be at least 3x3.
 		
 		bool allow_multi; // Allow returning a map with multiple valid solutions. Not recommended.
 		float difficulty; // Use a value between 0.0 and 1.0. Higher is harder.

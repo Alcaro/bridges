@@ -11,6 +11,7 @@
 //    make sure to introduce the new objects in a reasonable way
 //- make difficulty estimator use BFS
 //- make map generator emit reef
+//- make map generator emit castle
 //- add UI for game generator
 
 namespace {
@@ -815,7 +816,7 @@ public:
 		}
 	no_phantom: ;
 		
-		if (in_press&~(1<<k_cancel | 1<<k_click) && game_kb_state==0)
+		if (in_press&~(1<<k_cancel | 1<<k_click) && game_kb_state==0 && !game_menu)
 		{
 			game_kb_state = 1;
 			game_kb_x = 0;
@@ -985,14 +986,15 @@ if (item(1, 120, "Random"))
 gamemap::genparams p = {};
 p.width=9;
 p.height=9;
-p.density=0.5;
+p.density=0.6;
 p.difficulty=1.0;
 p.quality=100;
 p.max_brilen=4;
 p.use_reef=true;
 p.use_large=true;
+p.use_castle=true;
 map.generate(p);
-map.reset();
+if(map.finished())map.reset();
 }
 			if (item(2, 280, "Reset"))
 			{

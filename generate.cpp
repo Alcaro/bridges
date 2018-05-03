@@ -5,10 +5,11 @@
 // 0 if there can't be any island here because it wouldn't connect to anything (or would be too long)
 // 1 if it may be possible to place an island here
 // 2 if that's right beside an island and allow_dense is false
-// 3 if that's a reef, or island or bridge not connected to a castle
-// 80..83 if that's an island or bridge connected to a castle of the given color
+// 3 if that's an island or bridge
+// 80..83 if that's an island or bridge, and it's connected to a castle of the given color
 
-//TODO: to add multiple castles of the same color, try to grow islands
+//TODO: to add castles, put them on the initial map
+//TODO: to add multiple castles of the same color, try to grow islands at some random point
 
 static uint16_t valid_bridges_from(gamemap& map, const gamemap::genparams& par, int x, int y, bool doit)
 {
@@ -16,54 +17,76 @@ static uint16_t valid_bridges_from(gamemap& map, const gamemap::genparams& par, 
 	
 	int valid_dirs = 0;
 	uint16_t myroot = map.map[y][x].rootnode;
+	int8_t bridgemark;
 	
 	//right
+	bridgemark = (doit ? 5 : 0);
 	for (int xx=x+1;xx<map.width && xx<=x+maxbrilen;xx++)
 	{
-		if (doit && map.towalk[y*100 + xx] == 0)
-			map.towalk[y*100 + xx] = 1;
-		if (map.towalk[y*100 + xx] >= 3)
+		uint16_t index = y*100 + xx;
+		if ((bridgemark-- > 0) && map.towalk[index] == 0)
+			map.towalk[index] = 1;
+		if (map.towalk[index] >= 3)
 		{
-			if (map.map[y][xx].population >= 0 && map.map[y][xx].rootnode != myroot) valid_dirs |= 1<<0;
+			if (map.map[y][xx].rootnode == myroot) break; // can't connect to self
+			if (map.map[y][xx].population < 0) break; // can't connect to crossing bridge or reef
+			
+			valid_dirs |= 1<<0;
 			break;
 		}
 	}
 	
 	//up
+	bridgemark = (doit ? 5 : 0);
 	for (int yy=y-1;yy>=0 && yy>=y-maxbrilen;yy--)
 	{
-		if (doit && map.towalk[yy*100 + x] == 0)
-			map.towalk[yy*100 + x] = 1;
-		if (map.towalk[yy*100 + x] >= 3)
+		uint16_t index = yy*100 + x;
+		if ((bridgemark-- > 0) && map.towalk[index] == 0)
+			map.towalk[index] = 1;
+		if (map.towalk[index] >= 3)
 		{
-			if (map.map[yy][x].population >= 0 && map.map[yy][x].rootnode != myroot) valid_dirs |= 1<<1;
+			if (map.map[yy][x].rootnode == myroot) break;
+			if (map.map[yy][x].population < 0) break;
+			
+			valid_dirs |= 1<<1;
 			break;
 		}
 	}
 	
 	//left
+	bridgemark = (doit ? 5 : 0);
 	for (int xx=x-1;xx>=0 && xx>=x-maxbrilen;xx--)
 	{
-		if (doit && map.towalk[y*100 + xx] == 0)
-			map.towalk[y*100 + xx] = 1;
-		if (map.towalk[y*100 + xx] >= 3)
+		uint16_t index = y*100 + xx;
+		if ((bridgemark-- > 0) && map.towalk[index] == 0)
+			map.towalk[index] = 1;
+		if (map.towalk[index] >= 3)
 		{
-			if (map.map[y][xx].population >= 0 && map.map[y][xx].rootnode != myroot) valid_dirs |= 1<<2;
+			if (map.map[y][xx].rootnode == myroot) break;
+			if (map.map[y][xx].population < 0) break;
+			
+			valid_dirs |= 1<<2;
 			break;
 		}
 	}
 	
 	//down
+	bridgemark = (doit ? 5 : 0);
 	for (int yy=y+1;yy<map.height && yy<=y+maxbrilen;yy++)
 	{
-		if (doit && map.towalk[yy*100 + x] == 0)
-			map.towalk[yy*100 + x] = 1;
-		if (map.towalk[yy*100 + x] >= 3)
+		uint16_t index = yy*100 + x;
+		if ((bridgemark-- > 0) && map.towalk[index] == 0)
+			map.towalk[index] = 1;
+		if (map.towalk[index] >= 3)
 		{
-			if (map.map[yy][x].population >= 0 && map.map[yy][x].rootnode != myroot) valid_dirs |= 1<<3;
+			if (map.map[yy][x].rootnode == myroot) break;
+			if (map.map[yy][x].population < 0) break;
+			
+			valid_dirs |= 1<<3;
 			break;
 		}
 	}
+//printf("VALIDFROM[%.3i]=%X\n",y*100+x,valid_dirs);
 	
 	return valid_dirs;
 }
@@ -80,13 +103,14 @@ static bool add_island_sub(gamemap& map, const gamemap::genparams& par, int x, i
 	
 	int valid_dirs = valid_bridges_from(map, par, x, y, true);
 	
-	static const int offsets[4] = { 1, -100, -1, 100 };
-	
 	bool any = false;
 	do {
 		for (int dir=0;dir<4;dir++)
 		{
-			if (valid_dirs & (1<<dir) && rand()%100 < 50)
+			uint8_t len = map.map[y][x].bridgelen[dir];
+			
+			//reduce probability for long bridges
+			if (valid_dirs & (1<<dir) && rand()%100 < 50 && rand()%(len*100) < 250)
 			{
 				int nbri = rand()%2 + 1;
 				map.get(root).population += nbri;
@@ -94,6 +118,7 @@ static bool add_island_sub(gamemap& map, const gamemap::genparams& par, int x, i
 				
 				int idx = y*100+x;
 				do {
+					static const int offsets[4] = { 1, -100, -1, 100 };
 					idx += offsets[dir];
 					map.towalk[idx] = 3;
 				} while (map.get(idx).population < 0);
@@ -134,7 +159,7 @@ static bool try_add_island(gamemap& map, const gamemap::genparams& par, int x, i
 	add_island_sub(map, par, x, y, root, true);
 	
 	//all two- and three-tile large islands are valid, as are 2x2 squares
-	if (par.use_large && rand()%100<150)
+	if (par.use_large && rand()%100<50)
 	{
 		switch (rand()%10)
 		{
@@ -235,6 +260,44 @@ static void generate_one(gamemap& map, const gamemap::genparams& par)
 	
 	add_island_sub(map, par, startx, starty, starty*100+startx, false);
 	
+	if (par.use_castle && false)
+	{
+		int ncastle = rand()%3 + 2;
+		uint8_t colors[4] = {80,81,82,83};
+		arrayvieww<uint8_t>(colors).shuffle();
+		
+		//minimum sizes with 2 castles, such that there's always a place to put the last castle,
+		// no matter where the first ones ended up, even with allow_dense false:
+		//2x? - 2x7
+		//3x? - 3x7
+		//4x? - 4x7
+		//5x? - 5x5
+		//6x? - 6x5
+		//
+		//minimum sizes with 3 castles:
+		//2x? - 2x12
+		//3x? - 3x12
+		//4x? - 4x12
+		//5x? - 5x9
+		//6x? - 6x8
+		//7x? - 7x7
+		//
+		//minimum sizes with 4 castles:
+		//2x? - 2x17
+		//3x? - 3x17
+		//4x? - 4x17
+		//5x? - 5x13
+		//6x? - 6x11
+		//7x? - 7x7
+		
+		//-> allow 3 or 4 castles on 7x7 maps, but anything smaller gets 2
+		if (par.width < 7 || par.height < 7) ncastle = 2;
+		if (par.width < 3 || par.height < 3) ncastle = 1; // tiny maps get only one castle
+		if (par.width < 5 && par.height < 5) ncastle = 1;
+		
+		// TODO
+	}
+	
 	int totislands = par.width*par.height*par.density;
 	while (map.numislands < totislands)
 	{
@@ -251,16 +314,43 @@ static void generate_one(gamemap& map, const gamemap::genparams& par)
 			
 			//uint16_t idx = y*100+x;
 			if (try_add_island(map, par, x, y)) break;
-			else map.towalk[y*100+x] = 0;
+			else if (map.towalk[y*100+x] == 1) map.towalk[y*100+x] = 0;
 			
 			pidx = (pidx+pidx_skip) % (par.width*par.height);
 			if (pidx == pidx_start) goto done; // all possibilities taken already?
 		}
+//for (int y=0;y<map.height;y++)
+//for (int x=0;x<map.width;x++)
+//{
+//if(y&&!x)puts("");
+//printf("%i",map.towalk[y*100+x]);
+//}
+//puts("\n");
+//for (int y=0;y<map.height;y++)
+//for (int x=0;x<map.width;x++)
+//{
+//if(y&&!x)puts("");
+//char ch=map.map[y][x].population;
+//if(ch<0)ch='?';
+//if(ch<10)ch='0'+ch;
+//if(ch<20)ch='A'+ch-10;
+//printf("%c",ch);
+//}
+//puts("\n\n");
 	}
-	
 done: ;
 	
-	//to fix large islands' roots, without the root's location being a clue:
+	if (par.use_reef)
+	{
+		for (int y=0;y<map.height;y++)
+		for (int x=0;x<map.width;x++)
+		{
+			if (map.towalk[y*100+x] < 3 && rand()%100<10)
+				map.map[y][x].population = -2;
+		}
+	}
+	
+	//to make large islands' roots not be at bottom right, and ensure its location is not a clue:
 	//- set towalk on each island to point to itself
 	//- for every tile, swap towalk with its root; this creates linked lists
 	//- for each large island, pick a random valid root, then use it
@@ -280,7 +370,7 @@ done: ;
 		map.towalk[y*100+x] = map.towalk[here.rootnode];
 		map.towalk[here.rootnode] = swap;
 		
-		//also repair bridgelen, bridges==3, non-root population, and bridge counters for oceans
+		//also repair bridgelen, bridges==3, non-root population, and bridge counts for oceans
 		here.population = map.get(here.rootnode).population;
 		here.totbridges = here.population;
 		
@@ -366,6 +456,8 @@ done: ;
 
 void gamemap::generate(const genparams& par)
 {
+//static int i;srand(++i);printf("SEED=%i\n",i);
+//srand(2);
 	if (!par.max_brilen)
 	{
 		genparams newpar = par;

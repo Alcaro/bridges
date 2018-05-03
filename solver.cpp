@@ -936,7 +936,7 @@ public:
 			while (map.map[y][x].bridges[3] != ndown)  map.toggle(x, y, 3);
 		}
 		
-		if (!map.finished()) abort();
+		if (!map.finished()) { puts(map.serialize()); abort(); }
 	}
 
 void verify(bool strict=true)
@@ -1295,6 +1295,18 @@ test("solver", "gamemap", "solver")
 		"^8^>^ 6 1\n"
 		"3^   4< ^\n"
 		"^^  3  2 \n"
+	));
+	//another solver crash (probably due to solve_another with invalid solution as input, which isn't allowed anyways)
+	testcall(test_multi(
+		"         \n"
+		"         \n"
+		" 3<      \n"
+		" ^       \n"
+		"    2<<  \n"
+		" 5<      \n"
+		" ^  4 3  \n"
+		"        1\n"
+		"    2 2 ^\n"
 	));
 	
 	//castles
