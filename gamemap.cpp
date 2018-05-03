@@ -203,8 +203,7 @@ bool gamemap::finished()
 	int foundislands = 0;
 	memset(visited, 0, sizeof(visited));
 	
-	//TODO: >=has_castles once tests are confirmed to catch it
-	for (int castletype=4;castletype>=0;castletype--)
+	for (int castletype=4;castletype>=has_castles;castletype--)
 	{
 		if (an_island[castletype] == -1) continue;
 		
@@ -294,4 +293,20 @@ string gamemap::serialize()
 	}
 	
 	return ret;
+}
+
+test("gamemap","","gamemap")
+{
+	gamemap m;
+	m.init(
+		"2  2\n"
+		" r< \n"
+		" ^^ \n"
+		"2  2\n"
+	);
+	m.toggle(0,0, 0); // build a circle around the castle
+	m.toggle(0,0, 3); // falsely reported solved if an_island[0] points to a corner and it walks from there
+	m.toggle(3,0, 3);
+	m.toggle(0,3, 0);
+	assert(!m.finished());
 }

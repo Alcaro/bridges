@@ -91,7 +91,6 @@ int main(int argc, char** argv)
 				par.height = side;
 				par.density = 0.4;
 				par.allow_dense = true;
-				par.max_brilen = (side+2)/2.5;
 				par.use_reef = false;
 				par.use_large = false;
 				par.use_castle = false;

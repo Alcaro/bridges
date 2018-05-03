@@ -9,7 +9,6 @@
 //- design some levels containing the new objects
 //    is the generator good enough, or do I make a map editor?
 //    make sure to introduce the new objects in a reasonable way
-//- teach solver about castles
 //- make difficulty estimator use BFS
 //- make map generator emit reef
 //- add UI for game generator
@@ -981,7 +980,7 @@ public:
 			//}
 if (item(1, 120, "Random"))
 {
-//TODO: make this unlockable instead
+//TODO: move this to level select screen
 //srand(0);
 gamemap::genparams p = {};
 p.width=9;

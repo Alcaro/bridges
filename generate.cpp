@@ -18,7 +18,7 @@ static uint16_t valid_bridges_from(gamemap& map, const gamemap::genparams& par, 
 	uint16_t myroot = map.map[y][x].rootnode;
 	
 	//right
-	for (int xx=x+1;xx<map.width && xx<x+maxbrilen;xx++)
+	for (int xx=x+1;xx<map.width && xx<=x+maxbrilen;xx++)
 	{
 		if (doit && map.towalk[y*100 + xx] == 0)
 			map.towalk[y*100 + xx] = 1;
@@ -30,7 +30,7 @@ static uint16_t valid_bridges_from(gamemap& map, const gamemap::genparams& par, 
 	}
 	
 	//up
-	for (int yy=y-1;yy>=0 && yy>y-maxbrilen;yy--)
+	for (int yy=y-1;yy>=0 && yy>=y-maxbrilen;yy--)
 	{
 		if (doit && map.towalk[yy*100 + x] == 0)
 			map.towalk[yy*100 + x] = 1;
@@ -42,7 +42,7 @@ static uint16_t valid_bridges_from(gamemap& map, const gamemap::genparams& par, 
 	}
 	
 	//left
-	for (int xx=x-1;xx>=0 && xx>x-maxbrilen;xx--)
+	for (int xx=x-1;xx>=0 && xx>=x-maxbrilen;xx--)
 	{
 		if (doit && map.towalk[y*100 + xx] == 0)
 			map.towalk[y*100 + xx] = 1;
@@ -54,7 +54,7 @@ static uint16_t valid_bridges_from(gamemap& map, const gamemap::genparams& par, 
 	}
 	
 	//down
-	for (int yy=y+1;yy<map.height && yy<y+maxbrilen;yy++)
+	for (int yy=y+1;yy<map.height && yy<=y+maxbrilen;yy++)
 	{
 		if (doit && map.towalk[yy*100 + x] == 0)
 			map.towalk[yy*100 + x] = 1;
@@ -108,10 +108,10 @@ static bool add_island_sub(gamemap& map, const gamemap::genparams& par, int x, i
 	
 	if (!par.allow_dense)
 	{
-		if (x<map.width-1  && map.towalk[y*100+x-1  ]<=1) map.towalk[y*100+x-1  ]=2;
-		if (y<map.height-1 && map.towalk[y*100+x-100]<=1) map.towalk[y*100+x-100]=2;
-		if (x>0            && map.towalk[y*100+x+1  ]<=1) map.towalk[y*100+x+1  ]=2;
-		if (y>0            && map.towalk[y*100+x+100]<=1) map.towalk[y*100+x+100]=2;
+		if (x<map.width-1  && map.towalk[y*100+x+1  ]<=1) map.towalk[y*100+x+1  ]=2;
+		if (y<map.height-1 && map.towalk[y*100+x+100]<=1) map.towalk[y*100+x+100]=2;
+		if (x>0            && map.towalk[y*100+x-1  ]<=1) map.towalk[y*100+x-1  ]=2;
+		if (y>0            && map.towalk[y*100+x-100]<=1) map.towalk[y*100+x-100]=2;
 	}
 	
 	return true;
@@ -251,7 +251,7 @@ static void generate_one(gamemap& map, const gamemap::genparams& par)
 			
 			//uint16_t idx = y*100+x;
 			if (try_add_island(map, par, x, y)) break;
-			//else map.towalk[idx] = 0;
+			else map.towalk[y*100+x] = 0;
 			
 			pidx = (pidx+pidx_skip) % (par.width*par.height);
 			if (pidx == pidx_start) goto done; // all possibilities taken already?
@@ -366,6 +366,13 @@ done: ;
 
 void gamemap::generate(const genparams& par)
 {
+	if (!par.max_brilen)
+	{
+		genparams newpar = par;
+		newpar.max_brilen = (max(par.width, par.height)+2)/2.5;
+		return generate(newpar);
+	}
+	
 	int diff_min = 999999;
 	int diff_max = 0;
 	
@@ -378,7 +385,6 @@ void gamemap::generate(const genparams& par)
 		gamemap tmp;
 		generate_one(tmp, par);
 		
-if (!tmp.finished()){printf("NUMISLANDS=%i\n",tmp.numislands);*this=tmp; break;}
 		if (!tmp.finished()) abort();
 		if (par.allow_multi || !tmp.solve_another())
 		{
@@ -405,7 +411,7 @@ test("generator","solver","generator")
 	{
 //srand(i);
 //printf("EEE=%i\n",i);
-		if (i == 100) assert(!"game generator needs to contain loops in its intended solutions");
+		if (i == 1000) assert(!"game generator needs to contain loops in its intended solutions");
 		gamemap m;
 		gamemap::genparams p = {};
 		p.width=2;
@@ -414,14 +420,13 @@ test("generator","solver","generator")
 		p.density=1.0;
 		p.quality=1;
 		m.generate(p);
+		assert(m.finished());
 		
-		string game = m.serialize();
-		if (game == "22\n22\n") break;
-		if (game == "44\n44\n") break;
-		if (game == "33\n44\n") break;
-		if (game == "44\n33\n") break;
-		if (game == "34\n34\n") break;
-		if (game == "43\n43\n") break;
+		if (m.map[0][0].bridges[0] && m.map[0][0].bridges[3] &&
+		    m.map[1][0].bridges[0] && m.map[0][1].bridges[3])
+		{
+			break;
+		}
 	}
 	
 	{
