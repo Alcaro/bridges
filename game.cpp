@@ -10,8 +10,7 @@
 //    is the generator good enough, or do I make a map editor?
 //    make sure to introduce the new objects in a reasonable way
 //- make difficulty estimator use BFS
-//- make map generator emit reef
-//- make map generator emit castle
+//- add hint system
 //- add UI for game generator
 
 namespace {

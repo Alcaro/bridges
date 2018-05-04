@@ -78,15 +78,18 @@ public:
 	//# is a reef; can't build anything across that.
 	//Large islands are > ^ < v, ultimately pointing to a character defining the population (the 'root').
 	// There must be a root, and the root must be an island (not ocean or reef); loops are not allowed.
-	// If 10 bridges is possible, the root must be joined to the tile below or right; it may not be on the bottom-right edge.
-	//  For simplicity, it's better to always avoid large islands with roots at the bottom-right.
-	// An island may not be able to connect to itself. Stick in a reef if necessary.
+	// The root must be joined to the tile below or right; it may not be on the bottom-right edge.
+	// An island may not be able to connect to itself. Stick a reef in the hole if necessary.
 	// For performance reasons, large islands should use reasonably short paths to the root. Don't create too silly patterns.
 	//For islands with population 10 to 35, use A (10) to Z (35). Population above 35 is not allowed, it'd be too annoying to play.
 	//Castles are 'rbyg' (lowercase), red, blue, yellow and green, respectively.
 	// Castles must be joined with the tile below, right, AND below-right.
 	//  This applies even if you don't intend to render the map; the solver requires that too.
-	//For human playable maps, placing zero bridges must not be a solution.
+	//Placing zero bridges must not be a solution.
+	//
+	//Some of these rules can be broken in carefully controlled circumstances. For example,
+	// the solver test suite contains several maps where zero bridges is correct.
+	//However, all such things are subject to change at any point.
 	void init(const char * inmap);
 	
 	void toggle(int x, int y, int dir);

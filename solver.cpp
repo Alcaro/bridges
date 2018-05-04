@@ -13,8 +13,7 @@ class linker {
 		uint16_t join_next; // This creates a linked list of joined nodes. The last one points to the root.
 		uint16_t join_last; // For the root node, points to the last node in the linked list. For others, unused.
 		
-		// including this speeds up the system a bit for some reason. simpler address calculation for size-16 objects than 14?
-		uint16_t padding;
+		uint16_t castlecolor;
 	};
 	link_t links[100*100];
 	uint16_t a_linkable_island; // Points to any one island that does not have population 1.
@@ -45,8 +44,7 @@ links[i].join_root,links[i].join_next);}
 				lhere.join_next = index;
 				lhere.join_last = index;
 				
-				// including this speeds up the system a bit for some reason. write combining so it doesn't have to read the cacheline?
-				lhere.padding = 0;
+				lhere.castlecolor = here.population;
 			}
 			//else the island will never be touched by these functions
 		}
@@ -122,12 +120,14 @@ links[i].join_root,links[i].join_next);}
 	{
 		return links[index].links[dir] != (uint16_t)-1;
 	}
-	void join(uint16_t a, uint16_t b) // If 'a' is a root, it will remain the root. 'b' won't be.
+	// The root of 'a' becomes the new root.
+	// Returns false if that connects different-color castles. This can be ignored after the setup stage.
+	bool join(uint16_t a, uint16_t b)
 	{
 		uint16_t r1 = root(a);
 		uint16_t r2 = root(b);
 		
-		if (r1 == r2) return;
+		if (r1 == r2) return true;
 		
 		link_t& lr1 = links[r1];
 		link_t& lr2 = links[r2];
@@ -136,6 +136,14 @@ links[i].join_root,links[i].join_next);}
 		links[lr2.join_last].join_next = r1;
 		lr1.join_last = lr2.join_last;
 		lr2.join_root = r1;
+		
+		if (lr1.castlecolor >= 80 || lr2.castlecolor >= 80)
+		{
+			if (lr1.castlecolor == lr2.castlecolor) return true;
+			if (lr1.castlecolor >= 80 && lr2.castlecolor >= 80) return false;
+			if (lr1.castlecolor < lr2.castlecolor) lr1.castlecolor = lr2.castlecolor;
+		}
+		return true;
 	}
 	//Returns any link from 'index', except the first link leading to 'other' is excluded.
 	//If there are two links to 'other', the other one can be returned.
@@ -242,6 +250,8 @@ links[i].join_root,links[i].join_next);}
 		
 		abort(); // unreachable
 	}
+	
+	link_t& unsafe(uint16_t index) { return links[index]; }
 };
 
 enum op_t { op_solve, op_another, op_hint, op_difficulty };
@@ -301,7 +311,7 @@ private:
 		tmp |= tmp>>8;
 		if ((tmp&0x000F) != 0x000F) return false;
 		
-		int16_t offsets[4] = { 1, -100, -1, 100 };
+		static const int16_t offsets[4] = { 1, -100, -1, 100 };
 		
 		for (int dir=0;dir<4;dir++)
 		{
@@ -526,11 +536,11 @@ public:
 			uint16_t flags = possibilities[index];
 			if (here.population>0 && !(flags & 0x0001) && link.can_join(index, 0))
 			{
-				link.join(index, index+here.bridgelen[0]);
+				if (!link.join(index, index+here.bridgelen[0])) return false;
 			}
 			if (here.population>0 && !(flags & 0x0008) && link.can_join(index, 3))
 			{
-				link.join(index, index+here.bridgelen[3]*100);
+				if (!link.join(index, index+here.bridgelen[3]*100)) return false;
 			}
 //if(x==0&&y!=0)puts("");printf("%.4X ",flags);
 		}
@@ -540,122 +550,119 @@ public:
 		
 		if (map.has_castles)
 		{
-			//if any two castles are beside each other, ban their bridges
-			uint16_t roots[4];
-			for (int i=1;i<=4;i++)
+			//if map has castles, enforce that they don't touch each other
+			for (int y=0;y<map.height;y++)
+			for (int x=0;x<map.width;x++)
 			{
-				roots[i-1] = (map.an_island[i]==-1 ? -i : link.root(map.an_island[i]));
+				uint16_t index = y*100+x;
+				gamemap::island& here = map.map[y][x];
+				if (here.population < 0) continue;
+				
+				uint16_t flags = possibilities[index];
+				uint16_t newflags = flags;
+				//test all four links, to ensure the offending bridge is always caught
+				for (int dir=0;dir<4;dir++)
+				{
+					if (!(flags & (0x0110<<dir))) continue;
+					
+					static const int16_t offsets[4] = { 1, -100, -1, 100 };
+					uint16_t other = index + offsets[dir]*here.bridgelen[dir];
+					
+					uint16_t mycolor = link.unsafe(link.root(index)).castlecolor;
+					uint16_t othercolor = link.unsafe(link.root(other)).castlecolor;
+					
+					if (mycolor != othercolor && mycolor >= 80 && othercolor >= 80)
+					{
+						newflags &= ~(0x0110<<dir);
+					}
+				}
+				if (newflags != flags)
+				{
+					if (!set_state(index, newflags)) return false;
+					link_did_any = true;
+				}
+//if(x==0&&y!=0)puts("");printf("%.4X ",flags);
 			}
+			if (link_did_any) goto link_again_top; // to ensure it doesn't try to create the bridges we just removed
 			
+			//then create fake links between the castles, so the solver won't say
+			// 'okay, only one path, it must exist' when reaching another castle
+			
+			uint16_t prevcastle = -1;
 			for (int castletype=1;castletype<=4;castletype++)
 			{
 				if (map.an_island[castletype] == -1) continue;
-				uint16_t state1 = -1;
-				uint16_t state2 = -1;
-				uint16_t source = link.root(map.an_island[castletype]);
 				
-				uint16_t iter;
-				while (true)
+				uint16_t newcastle = map.an_island[castletype];
+				if (prevcastle != (uint16_t)-1)
 				{
-					iter = link.query_all(source, state1, state2);
-					if (iter == (uint16_t)-1) break;
-					
-					uint16_t iterroot = link.root(iter);
-					
-					if ((castletype != 1 && iterroot == roots[1-1]) ||
-					    (castletype != 2 && iterroot == roots[2-1]) ||
-					    (castletype != 3 && iterroot == roots[3-1]) ||
-					    (castletype != 4 && iterroot == roots[4-1]))
-					{
-						uint16_t topleft;
-						bool down;
-						link.lookback(map, iter, source, topleft, down);
-//printf("FORCEUNJOIN=%.3i(%.3i) - unjoin %.3i dir %i\n", iter, source, topleft, down*3);
-						//link.join(index2, index2p);
-						if (possibilities[topleft] & (down ? 0x0880 : 0x0110))
-						{
-							add_difficulty(10);
-//puts("D");
-							if (!set_state(topleft, possibilities[topleft] & ~(down ? 0x0880 : 0x0110))) return false;
-//puts("D+");
-							link_did_any = true;
-						}
-					}
+					link.unsafe(prevcastle).links[0] = newcastle+1;
+					link.unsafe(newcastle+1).links[2] = prevcastle;
 				}
+				prevcastle = newcastle;
 			}
-			
-			if (link_did_any) goto link_again_top; // to ensure it doesn't try to create the bridges we just removed
 		}
+		
 		
 //puts("HELLO");
 		if (link.count() != 0)
 		{
 	link_again: ;
-			for (int castletype=4;castletype>=map.has_castles;castletype--)
+			uint16_t index1 = link.any();
+			uint16_t index2 = index1;
+			uint16_t index1p = -1;
+			uint16_t index2p = -1;
+			
+			//TODO: this can go 1,2,3,4,5,3,2 and consider 2 part of the loop,
+			// rather than enforcing the existence of that bridge
+			
+			do
 			{
-				if (false)
-				{
-			link_done:
-					continue;
-				}
+				uint16_t next;
 				
-				uint16_t index1 = link.any();
-				if (castletype != 0)
-				{
-					index1 = map.an_island[castletype];
-					if (index1 == (uint16_t)-1) continue;
-				}
-				
-				uint16_t index2 = index1;
-				uint16_t index1p = -1;
-				uint16_t index2p = -1;
-				
-				do
-				{
-					uint16_t next;
-					
 //printf("1:%.3i(...),%.3i(...),...\n",index1,index1p);
 //printf("1:%.3i(%.3i),%.3i(%.3i),...\n",
 //index1,link.root(index1),
 //index1p,(index1p==65535)?-1:link.root(index1p));
-					next = link.query(index1, index1p);
+				next = link.query(index1, index1p);
 //printf("1:%.3i(%.3i),%.3i(%.3i),%.3i(%.3i)\n",
 //index1,link.root(index1),
 //index1p,(index1p==65535)?-1:link.root(index1p),
 //next,(next==65535)?-1:link.root(next));
-					index1p = index1;
-					index1 = next;
-					if (next == (uint16_t)-1) goto link_done; // only a single island left? then we're done here, try the other castles
-					
-					next = link.query(index2, index2p);
+				index1p = index1;
+				index1 = next;
+				if (next == (uint16_t)-1) goto link_done; // only a single island left? then we're done here, try the other castles
+				
+				next = link.query(index2, index2p);
 //printf("2:%.3i(%.3i),%.3i(%.3i),%.3i(%.3i)\n",
 //index2,link.root(index2),
 //index2p,(index2p==65535)?-1:link.root(index2p),
 //next,(next==65535)?-1:link.root(next));
-					if (next != (uint16_t)-1)
-					{
-						index2p = index2;
-						index2 = next;
-						
-						next = link.query(index2, index2p);
+				if (next != (uint16_t)-1)
+				{
+					index2p = index2;
+					index2 = next;
+					
+					next = link.query(index2, index2p);
 //printf("3:%.3i(%.3i),%.3i(%.3i),%.3i(%.3i)\n",
 //index2,link.root(index2),
 //index2p,(index2p==65535)?-1:link.root(index2p),
 //next,(next==65535)?-1:link.root(next));
-					}
-					if (next != (uint16_t)-1)
-					{
-						index2p = index2;
-						index2 = next;
-					}
-					
-					if (next == (uint16_t)-1)
+				}
+				if (next != (uint16_t)-1)
+				{
+					index2p = index2;
+					index2 = next;
+				}
+				
+				if (next == (uint16_t)-1)
+				{
+					//if (map.get(index2).population < 80 && map.get(index2p).population < 80)
 					{
 						uint16_t topleft;
 						bool down;
 						link.lookback(map, index2, index2p, topleft, down);
 //printf("FORCEJOIN=%.3i(%.3i) - join %.3i dir %i\n", index2, index2p, topleft, down*3);
-						link.join(index2, index2p);
 						if (possibilities[topleft] & (down ? 0x0008 : 0x0001))
 						{
 							add_difficulty(10);
@@ -664,76 +671,52 @@ public:
 //puts("A+");
 							link_did_any = true;
 						}
-						goto link_again;
 					}
-				} while (index1 != index2);
-				
+//else printf("FORCEJOINCASTLE=%.3i,%.3i\n",index2,index2p);
+					link.join(index2, index2p);
+					goto link_again;
+				}
+			} while (index1 != index2);
+			
 //printf("LOOP=%.3i\n",index1);
-				int numvisited = 0;
-				do {
-					map.towalk[numvisited++] = index1;
-					
-					uint16_t next = link.query(index1, index1p);
+			int numvisited = 0;
+			do {
+				map.towalk[numvisited++] = index1;
+				
+				uint16_t next = link.query(index1, index1p);
 //printf("LOOPWALK:%.3i(%.3i),%.3i(%.3i),%.3i(%.3i)\n",
 //index1,link.root(index1),
 //index1p,(index1p==65535)?-1:link.root(index1p),
 //next,(next==65535)?-1:link.root(next));
-					index1p = index1;
-					index1 = next;
-				} while (index1 != index2);
-				
-				for (int i=1;i<numvisited;i++)
-				{
+				index1p = index1;
+				index1 = next;
+			} while (index1 != index2);
+			
+			for (int i=1;i<numvisited;i++)
+			{
 //printf("JOINLOOP:%.3i,%.3i\n",index1,map.towalk[i]);
-					link.join(index1, map.towalk[i]);
-				}
-				goto link_again;
+				link.join(index1, map.towalk[i]);
 			}
+			goto link_again;
 		}
+		link_done:
 		// if a set_state from a forced join helped, perhaps that set_state blocked some other bridges,
 		// so let's check if we can prove anything new
 		if (link_did_any) goto link_again_top;
 		
-		
-		if (map.has_castles)
-		{
-			//if any two castles are under the same root, wrong solution
-			uint16_t roots[4];
-			for (int i=1;i<=4;i++)
-			{
-				roots[i-1] = (map.an_island[i]==-1 ? -i : link.root(map.an_island[i]));
-			}
-//puts("B");
-			if (roots[0]==roots[3] || roots[0]==roots[2] || roots[0]==roots[1] ||
-			    roots[1]==roots[3] || roots[1]==roots[2] || 
-			    roots[2]==roots[3])
-			{
-				return false;
-			}
-//puts("B+");
-		}
 		
 		if (link.count() != 0)
 		{
 			//iterate everything joined with a_linkable_island; if not equal to n_linkable_islands, it's disjoint, so return false
 			uint16_t n_linked_islands = 0;
 			
-			for (int castletype=4;castletype>=map.has_castles;castletype--)
-			{
-				uint16_t index = link.any();
-				if (castletype != 0)
-				{
-					index = map.an_island[castletype];
-					if (index == (uint16_t)-1) continue;
-				}
-				
-				uint16_t indexstart = index;
-				do {
+			uint16_t index = link.any();
+			uint16_t indexstart = index;
+			do {
 //printf("LINK::%.3i\n",index);
-					n_linked_islands++;
-					index = link.iter(index);
-				} while (index != indexstart);
-			}
+				n_linked_islands++;
+				index = link.iter(index);
+			} while (index != indexstart);
 			
 //printf("LINKS=%i,%i\n",n_linked_islands,link.count());
 			if (n_linked_islands != link.count()) return false;
@@ -778,8 +761,8 @@ public:
 							if (flags & dirbit)
 							{
 //printf("GUESS:BEGIN(%.3i:%.4X->%.4X)\n",index,flags,(flags & (set_mask | dirbit)));
-								//if looking for another solution, only make contrary assumptions
-								if (op==op_another && map.get(index).bridges[dir] == n)
+								//if looking for another solution, only make contrary assumptions (but only for first layer, deeper ones can do this)
+								if (op==op_another && map.get(index).bridges[dir] == n /*&& layer==0*/)
 								{
 //puts("GUESS:NOTSAME");
 									continue;
@@ -936,7 +919,9 @@ public:
 			while (map.map[y][x].bridges[3] != ndown)  map.toggle(x, y, 3);
 		}
 		
-		if (!map.finished()) { puts(map.serialize()); abort(); }
+#ifndef abort
+		if (!map.finished()) { puts("ERROR: solver returned bad solution"); puts(map.serialize()); abort(); }
+#endif
 	}
 
 void verify(bool strict=true)
@@ -960,7 +945,8 @@ void print()
 	for (int x=0;x<map.width;x++)
 	{
 		uint16_t flags = possibilities[y*100+x];
-		if(x==0)puts("");printf("%.4X ",flags);
+		if(y&&!x)puts("");
+		printf("%.4X ",flags);
 	}
 	puts("");
 }
@@ -1324,9 +1310,43 @@ test("solver", "gamemap", "solver")
 		"   r<     \n" /* */ "   30     \n"
 		"   ^^     \n" /* */ "   30     \n"
 	));
+	testcall(test_one( // same-color castles must be connected, different may not
+		"r< 2 2 b<\n" /* */ "32 0 2 30\n"
+		"^^     ^^\n" /* */ "30     30\n"
+	));
+	testcall(test_one( // like above, repeated a few times to ensure an_island-based optimizations don't do anything strange
+		"r< 2 2 b<\n" /* */ "32 0 2 30\n"
+		"^^     ^^\n" /* */ "30     30\n"
+		"2#######2\n" /* */ "0       0\n"
+		"r< 2 2 b<\n" /* */ "32 0 2 30\n"
+		"^^     ^^\n" /* */ "30     30\n"
+		"2#######2\n" /* */ "0       0\n"
+		"r< 2 2 b<\n" /* */ "32 0 2 30\n"
+		"^^     ^^\n" /* */ "30     30\n"
+		"2#######2\n" /* */ "0       0\n"
+		"r< 2 2 b<\n" /* */ "32 0 2 30\n"
+		"^^     ^^\n" /* */ "30     30\n"
+	));
 	testcall(test_multi( // 8 different solutions to a 2x5 map
 		"b< b<\n"
 		"^^ ^^\n"
+	));
+	testcall(test_multi( // starts at green, follows the path to the blue, joins it,
+		"2 b<\n"           // notices there's only 1 path from there, enforces it,
+		"  ^<\n"           // notices the castles are joined, and deems it unsolvable
+		"g<  \n"
+		"^<  \n"
+	));
+	testcall(test_multi( // another missed set_state return value
+		"   y< 3 v\n"
+		"   ^<  4<\n"
+		"g<       \n"
+		"^<  4< v \n"
+		"       5<\n"
+		"1  6< 2  \n"
+		"^    2 5<\n"
+		"   b< 4 2\n"
+		"   ^<    \n"
 	));
 	testcall(test_unsolv( // different-color castles may not be connected
 		"4 g<\n"
@@ -1334,11 +1354,17 @@ test("solver", "gamemap", "solver")
 		"r<  \n"
 		"^^  \n"
 	));
-	testcall(test_unsolv( // unsolvable, but falsely reported solvable if an_island[0] points to a corner and it walks from there
+	testcall(test_unsolv( // falsely reported solvable if an_island[0] points to a corner and it walks from there
 		"2  2\n"
 		" r< \n"
 		" ^^ \n"
 		"2  2\n"
+	));
+	testcall(test_unsolv( // same-color castles must be connected
+		"g<b<\n"
+		"^^^^\n"
+		"b<g<\n"
+		"^^^^\n"
 	));
 	
 	//this map requires a solver depth of 27 and takes 2.67s on TESTRUNNER=, 61 seconds on Valgrind
