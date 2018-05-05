@@ -2,7 +2,10 @@
 
 namespace {
 
-//#define abort() // oddly enough, these assertions don't slow anything down
+//TODO: once hint and BFS-difficulty exist, make this thing not a template; instead, use multiple functions
+// that way, the identical functions can be combined (also some of the errors suck)
+
+//#define abort() // oddly enough, these assertions don't slow anything down noticably, just ~1%
 
 class linker {
 	//This is similar to union-find, but not exactly. The operations I need are slightly different.
@@ -13,7 +16,7 @@ class linker {
 		uint16_t join_next; // This creates a linked list of joined nodes. The last one points to the root.
 		uint16_t join_last; // For the root node, points to the last node in the linked list. For others, unused.
 		
-		uint16_t castlecolor;
+		uint16_t castlecolor; // kinda doesn't fit here, but it works and anything else would be way worse
 	};
 	link_t links[100*100];
 	uint16_t a_linkable_island; // Points to any one island that does not have population 1.
@@ -120,7 +123,7 @@ links[i].join_root,links[i].join_next);}
 	{
 		return links[index].links[dir] != (uint16_t)-1;
 	}
-	// The root of 'a' becomes the new root.
+	// The root of 'a' becomes the new root. It's fine if the two islands don't touch.
 	// Returns false if that connects different-color castles. This can be ignored after the setup stage.
 	bool join(uint16_t a, uint16_t b)
 	{
@@ -251,7 +254,7 @@ links[i].join_root,links[i].join_next);}
 		abort(); // unreachable
 	}
 	
-	link_t& unsafe(uint16_t index) { return links[index]; }
+	uint16_t color(uint16_t index) { return links[root(index)].castlecolor; }
 };
 
 enum op_t { op_solve, op_another, op_hint, op_difficulty };
@@ -568,8 +571,8 @@ public:
 					static const int16_t offsets[4] = { 1, -100, -1, 100 };
 					uint16_t other = index + offsets[dir]*here.bridgelen[dir];
 					
-					uint16_t mycolor = link.unsafe(link.root(index)).castlecolor;
-					uint16_t othercolor = link.unsafe(link.root(other)).castlecolor;
+					uint16_t mycolor = link.color(index);
+					uint16_t othercolor = link.color(other);
 					
 					if (mycolor != othercolor && mycolor >= 80 && othercolor >= 80)
 					{
@@ -595,10 +598,7 @@ public:
 				
 				uint16_t newcastle = map.an_island[castletype];
 				if (prevcastle != (uint16_t)-1)
-				{
-					link.unsafe(prevcastle).links[0] = newcastle+1;
-					link.unsafe(newcastle+1).links[2] = prevcastle;
-				}
+					link.join(prevcastle, newcastle);
 				prevcastle = newcastle;
 			}
 		}
@@ -761,15 +761,18 @@ public:
 							if (flags & dirbit)
 							{
 //printf("GUESS:BEGIN(%.3i:%.4X->%.4X)\n",index,flags,(flags & (set_mask | dirbit)));
-								//if looking for another solution, only make contrary assumptions (but only for first layer, deeper ones can do this)
-								if (op==op_another && map.get(index).bridges[dir] == n /*&& layer==0*/)
+								//if looking for another solution, only make contrary assumptions
+								// (but only for first layer, deeper ones can do whatever)
+								if (op==op_another && layer==0 && map.get(index).bridges[dir] == n)
 								{
 //puts("GUESS:NOTSAME");
 									continue;
 								}
 								
+								size_t bufsize = sizeof(possibilities_buf[0])/100*map.height;
+								
 								int newflags = (flags & (set_mask | dirbit));
-								memcpy(possibilities_buf[layer+1], possibilities_buf[layer], sizeof(possibilities_buf[0]));
+								memcpy(possibilities_buf[layer+1], possibilities_buf[layer], bufsize);
 								possibilities = possibilities_buf[layer+1];
 								
 								if (set_state(index, newflags) && solve_rec(layer+1))
@@ -778,7 +781,7 @@ public:
 									//if that's a valid solution, return it
 									//otherwise, mark the map unsolvable
 									possibilities = possibilities_buf[layer];
-									memcpy(possibilities_buf[layer], possibilities_buf[layer+1], sizeof(possibilities_buf[0]));
+									memcpy(possibilities_buf[layer], possibilities_buf[layer+1], bufsize);
 									return true;
 								}
 								else
@@ -786,7 +789,9 @@ public:
 //puts("GUESS:BAD");
 									//if that can't be a valid solution, mark it as such
 									possibilities = possibilities_buf[layer];
-									if (!set_state(index, flags & ~dirbit)) return false; // it's possible that both yes and no are impossible
+									
+									//it's possible that both yes and no are impossible
+									if (!set_state(index, flags & ~dirbit)) return false;
 									
 									if (!do_isolation_rule()) return false;
 									flags = possibilities[index];
@@ -1348,6 +1353,17 @@ test("solver", "gamemap", "solver")
 		"   b< 4 2\n"
 		"   ^<    \n"
 	));
+	testcall(test_multi( // another missed set_state return value
+		" 4<3  3<1\n"
+		"1 ^ r<  5\n"
+		"    ^<b<^\n"
+		"48<<  ^< \n"
+		"6<<  r<  \n"
+		"b<  2^< 3\n"
+		"^<  ^ r< \n"
+		"  3b<1^< \n"
+		"  1^<   2\n"
+	));
 	testcall(test_unsolv( // different-color castles may not be connected
 		"4 g<\n"
 		"  ^^\n"
@@ -1367,7 +1383,7 @@ test("solver", "gamemap", "solver")
 		"^^^^\n"
 	));
 	
-	//this map requires a solver depth of 27 and takes 2.67s on TESTRUNNER=, 61 seconds on Valgrind
+	//this map requires a solver depth of 27 and takes 39 seconds on Valgrind
 	if(0)
 	testcall(test_multi(
 		"23  3 6  4  52 \n"

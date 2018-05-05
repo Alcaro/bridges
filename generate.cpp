@@ -22,7 +22,7 @@ static uint16_t valid_bridges_from(gamemap& map, const gamemap::genparams& par, 
 	int n_colors = 0;
 	
 	//right
-	bridgemark = (doit ? 5 : 0);
+	bridgemark = (doit ? maxbrilen : 0);
 	for (int xx=x+1;xx<map.width && xx<=x+maxbrilen;xx++)
 	{
 		uint16_t index = y*100 + xx;
@@ -41,7 +41,7 @@ static uint16_t valid_bridges_from(gamemap& map, const gamemap::genparams& par, 
 	}
 	
 	//up
-	bridgemark = (doit ? 5 : 0);
+	bridgemark = (doit ? maxbrilen : 0);
 	for (int yy=y-1;yy>=0 && yy>=y-maxbrilen;yy--)
 	{
 		uint16_t index = yy*100 + x;
@@ -60,7 +60,7 @@ static uint16_t valid_bridges_from(gamemap& map, const gamemap::genparams& par, 
 	}
 	
 	//left
-	bridgemark = (doit ? 5 : 0);
+	bridgemark = (doit ? maxbrilen : 0);
 	for (int xx=x-1;xx>=0 && xx>=x-maxbrilen;xx--)
 	{
 		uint16_t index = y*100 + xx;
@@ -79,7 +79,7 @@ static uint16_t valid_bridges_from(gamemap& map, const gamemap::genparams& par, 
 	}
 	
 	//down
-	bridgemark = (doit ? 5 : 0);
+	bridgemark = (doit ? maxbrilen : 0);
 	for (int yy=y+1;yy<map.height && yy<=y+maxbrilen;yy++)
 	{
 		uint16_t index = yy*100 + x;
@@ -122,12 +122,12 @@ static bool add_island_sub(gamemap& map, const gamemap::genparams& par, int x, i
 			
 			static const int offsets[4] = { 1, -100, -1, 100 };
 			
-			//reduce probability for long bridges
 			int8_t len = 0;
 			while (map.get(y*100+x + (++len)*offsets[dir]).population < 0) {}
-			if (rand()%(len*100) >= 250) continue;
+			if (rand()%(len*100) >= 250) continue; // reduce probability of long bridges
 			
-			if (map.towalk[y*100+x + len*offsets[dir]] != color) continue;
+//printf("MAKE: SRC=[%.3i]=%i, DST=[%.3i]=%.3i\n", y*100+x,color,y*100+x + len*offsets[dir],map.towalk[y*100+x + len*offsets[dir]]);
+			if (map.towalk[y*100+x + len*offsets[dir]] != color) abort(); // valid_bridges_from should ban this
 			
 			int nbri = rand()%2 + 1;
 			
@@ -287,9 +287,11 @@ static void generate_one(gamemap& map, const gamemap::genparams& par)
 		
 		map.has_castles = false;
 	}
+	int ncastle = 0;
+	int ncastleeach = 1;
 	if (par.use_castle)
 	{
-		int ncastle = rand()%3 + 2;
+		ncastle = rand()%3 + 2;
 		uint8_t colors[4] = {80,81,82,83};
 		arrayvieww<uint8_t>(colors).shuffle();
 		map.has_castles = true;
@@ -367,18 +369,126 @@ static void generate_one(gamemap& map, const gamemap::genparams& par)
 			uint16_t y = pidx / par.width;
 			uint16_t x = pidx % par.width;
 			
-			//uint16_t idx = y*100+x;
 			if (try_add_island(map, par, x, y)) break;
 			else if (map.towalk[y*100+x] == 1) map.towalk[y*100+x] = 0;
 			
 			pidx = (pidx+pidx_skip) % (par.width*par.height);
 			if (pidx == pidx_start) goto done; // all possibilities taken already?
 		}
+		
+		//try to create more castles
+		if (par.use_castle && ncastle*ncastleeach <= 4)
+		{
+//puts(".");
+			uint16_t numoptions[4] = { 0,0,0,0 };
+			uint16_t newcastle[4];
+			uint16_t newroot[4];
+			
+			for (int y=0;y<par.height-1;y++)
+			for (int x=0;x<par.width-1;x++)
+			{
+				//if
+				//- at least one tile is island
+				//- all four tiles are available (towalk < 3, or rootnode same)
+				//   (towalk=2 is always true somewhere unless the island initially was a 2x2, which is super rare, so it must be allowed)
+				//- none of the eight surrounding tiles has the same root node
+				//then a castle can be placed here
+				
+				uint16_t index = y*100+x;
+				
+				uint16_t root = -1;
+				if (map.get(index    ).population >= 0) root = index    ;
+				if (map.get(index+  1).population >= 0) root = index+  1;
+				if (map.get(index+100).population >= 0) root = index+100;
+				if (map.get(index+101).population >= 0) root = index+101;
+				
+				if (root == (uint16_t)-1) continue;
+				root = map.get(root).rootnode;
+				if (map.get(root).population >= 80) continue;
+				
+				if (map.towalk[index    ] >= 3 && map.get(index    ).rootnode != root) continue;
+				if (map.towalk[index+  1] >= 3 && map.get(index+  1).rootnode != root) continue;
+				if (map.towalk[index+100] >= 3 && map.get(index+100).rootnode != root) continue;
+				if (map.towalk[index+101] >= 3 && map.get(index+101).rootnode != root) continue;
+				
+				if (map.get(index    ).population >= 0 && map.get(index    ).rootnode != root) continue;
+				if (map.get(index+  1).population >= 0 && map.get(index+  1).rootnode != root) continue;
+				if (map.get(index+100).population >= 0 && map.get(index+100).rootnode != root) continue;
+				if (map.get(index+101).population >= 0 && map.get(index+101).rootnode != root) continue;
+				
+				if (x > 0 && map.get(index    -1).population >= 0 && map.get(index    -1).rootnode == root) continue;
+				if (x > 0 && map.get(index+100-1).population >= 0 && map.get(index+100-1).rootnode == root) continue;
+				if (y > 0 && map.get(index-100  ).population >= 0 && map.get(index-100  ).rootnode == root) continue;
+				if (y > 0 && map.get(index-100+1).population >= 0 && map.get(index-100+1).rootnode == root) continue;
+				
+				if (x < map.width-1  && map.get(index+  2).population >= 0 && map.get(index+  2).rootnode == root) continue;
+				if (x < map.width-1  && map.get(index+102).population >= 0 && map.get(index+102).rootnode == root) continue;
+				if (y < map.height-1 && map.get(index+200).population >= 0 && map.get(index+200).rootnode == root) continue;
+				if (y < map.height-1 && map.get(index+201).population >= 0 && map.get(index+201).rootnode == root) continue;
+				
+				uint16_t color = map.towalk[root];
+//printf("CASTLEVALID[%i]:%.3i,%.3i\n",color,root,index);
+				if (rand()%(++numoptions[color-80]) != 0) continue;
+				
+				newcastle[color-80] = index;
+				newroot[color-80] = root;
+			}
+			
+			if (!!numoptions[0] + !!numoptions[1] + !!numoptions[2] + !!numoptions[3] == ncastle)
+			{
+				//make sure the new islands don't overlap
+				for (int i=0;i<4;i++)
+				{
+					for (int j=0;j<4;j++)
+					{
+						if (numoptions[i] == 0) continue;
+						if (numoptions[j] == 0) continue;
+						
+						uint16_t pos1 = newcastle[i];
+						uint16_t pos2 = newcastle[j];
+						
+						if (pos1 == pos2 + 001) goto skip_new_castles;
+						if (pos1 == pos2 + 101) goto skip_new_castles;
+						if (pos1 == pos2 + 100) goto skip_new_castles;
+						if (pos1 == pos2 +  99) goto skip_new_castles;
+						//these four checks are enough; if they overlap in other directions, it'll be one of those for the other one
+						//equal position can be ignored, it'd just x
+					}
+				}
+				
+				ncastleeach++;
+				for (int i=0;i<4;i++)
+				{
+					uint16_t pos = newcastle[i];
+//printf("CASTLE[%i]=%.3i\n",i,pos);
+					if (numoptions[i] == 0) continue;
+					
+					map.towalk[pos    ] = 80+i; // preallocate these so it won't try to build bridges across them
+					map.towalk[pos+  1] = 80+i;
+					map.towalk[pos+100] = 80+i;
+					map.towalk[pos+101] = 80+i;
+				}
+				for (int i=0;i<4;i++)
+				{
+					uint16_t pos = newcastle[i];
+					if (numoptions[i] == 0) continue;
+					
+					if (map.get(pos    ).population < 0) add_island_sub(map, par, pos%100  , pos/100  , newroot[i], false, 80+i);
+					if (map.get(pos+  1).population < 0) add_island_sub(map, par, pos%100+1, pos/100  , newroot[i], false, 80+i);
+					if (map.get(pos+100).population < 0) add_island_sub(map, par, pos%100  , pos/100+1, newroot[i], false, 80+i);
+					if (map.get(pos+101).population < 0) add_island_sub(map, par, pos%100+1, pos/100+1, newroot[i], false, 80+i);
+					
+					map.get(newroot[i]).population = 80+i;
+				}
+			skip_new_castles: ;
+			}
+//puts(".");
+		}
 //for (int y=0;y<map.height;y++)
 //for (int x=0;x<map.width;x++)
 //{
 //if(y&&!x)puts("");
-//printf("%i",map.towalk[y*100+x]);
+//printf("%i",map.towalk[y*100+x]%(80-6));
 //}
 //puts("\n");
 //for (int y=0;y<map.height;y++)
@@ -386,9 +496,11 @@ static void generate_one(gamemap& map, const gamemap::genparams& par)
 //{
 //if(y&&!x)puts("");
 //char ch=map.map[y][x].population;
-//if(ch<0)ch='?';
-//if(ch<10)ch='0'+ch;
-//if(ch<20)ch='A'+ch-10;
+//if(0);
+//else if(ch<0)ch='?';
+//else if(ch<10)ch='0'+ch;
+//else if(ch<20)ch='A'+ch-10;
+//else ch="rbyg"[ch-80];
 //printf("%c",ch);
 //}
 //puts("\n\n");
@@ -405,7 +517,7 @@ done: ;
 		}
 	}
 	
-	//to make large islands' roots not be at bottom right, and ensure its location is not a clue:
+	//to ensure large islands' roots are not at bottom right, and its location is not a clue:
 	//- set towalk on each island to point to itself
 	//- for every tile, swap towalk with its root; this creates linked lists
 	//- for each large island, pick a random valid root, then use it
@@ -539,17 +651,20 @@ void gamemap::generate(const genparams& par)
 	int best_diff = -1;
 	
 	unsigned iter = 0;
+unsigned itervalid = 0;
 	bool any_valid = false;
 	do {
 		iter++;
+//if(iter%100==0){printf("generator: %i attempts, %i valid\r", iter, itervalid); fflush(stdout);}
 		gamemap tmp;
 		generate_one(tmp, par);
 		
 //if(!tmp.finished()){*this=tmp;return;}
 		if (!tmp.finished()) abort();
-tmp.reset();if(!tmp.solve())abort();
+//tmp.reset();if(!tmp.solve())abort();
 		if (par.allow_multi || !tmp.solve_another())
 		{
+itervalid++;
 			int diff = tmp.difficulty();
 			
 			if (diff > diff_max) diff_max = diff;

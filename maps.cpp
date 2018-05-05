@@ -24,6 +24,8 @@ extern const char * const game_maps[] = {
 //"^^^     \n",
 
 
+
+
 /*
 
 
@@ -223,13 +225,13 @@ extern const char * const game_maps[] = {
 	"       \n"
 	"3     4\n",
 	
-	" 1    2\n" // 6
-	"3   1  \n"
-	" 3    4\n"
+	"3   4 2\n" // 6, but flipped upside down so the hint box doesn't cover the relevant islands
 	"       \n"
 	" 1  2  \n"
 	"       \n"
-	"3   4 2\n",
+	" 3    4\n"
+	"3   1  \n"
+	" 1    2\n",
 	
 	"4     4\n" // 7
 	" 2     \n"

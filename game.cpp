@@ -12,6 +12,9 @@
 //- make difficulty estimator use BFS
 //- add hint system
 //- add UI for game generator
+//- for large maps, generator yields REALLY few non-multiple solutions
+//    with 9x9, use_castle and allow_dense true, and density=0.6, I've seen 30000 attempts with 0 valid
+//- restrict keyboard cursor position to the middle if the outermost parts have no possible bridges, I'll need it for mainlands
 
 namespace {
 class birds {
@@ -983,15 +986,17 @@ if (item(1, 120, "Random"))
 //TODO: move this to level select screen
 //srand(0);
 gamemap::genparams p = {};
-p.width=9;
-p.height=9;
+p.width=7;
+p.height=7;
 p.density=0.6;
 p.difficulty=1.0;
-p.quality=100;
-p.max_brilen=4;
+p.quality=2000;
+//p.max_brilen=4;
 p.use_reef=true;
 p.use_large=true;
-p.use_castle=true;
+//p.use_castle=true;
+//p.allow_multi=true;
+//p.allow_dense=true;
 map.generate(p);
 if(map.finished())map.reset();
 }
@@ -1108,10 +1113,10 @@ to_title(); //TODO
 					"second rule of the game: \1a bridge MUST NOT "
 					"CROSS another bridge.\2",
 					
-					"\1For example, the Pop. 3 island at the top left " // pop_lv6b
-					"must have a bridge to the right; therefore, the "
-					"nearby Pop. 1 island cannot have a bridge "
-					"downwards.",
+					"\1For example, the Pop. 3 islands at the bottom " // pop_lv6b
+					"left must have bridges to the right; therefore, "
+					"the nearby Pop. 1 island cannot have a bridge "
+					"upwards.",
 					
 					
 					"\0Well done! This puzzle needs the third rule of " // pop_lv11
