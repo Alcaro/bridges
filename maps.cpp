@@ -477,5 +477,41 @@ extern const char * const game_maps[] = {
 "    1 3 \n"
 " 34   1 \n",
 
+//these took me several attempts to solve
+"2< # 2 \n"
+"^ 3 2 2\n"
+"  ^    \n"
+"3 ^ A<<\n"
+" 2     \n"
+"3 1   2\n"
+"^4  2  \n",
+
+//TODO: double check that the upper one (with reefs moved) is equally solvable to the lower (original)
+"2< 3< 3\n"
+" >6< 2 \n"
+"2   3 5\n"
+" 4 2 # \n"
+" ^4 5 4\n"
+"2      \n"
+"^<# 4 3\n",
+
+"2< 3< 3\n"
+" >6< 2 \n"
+"2   3 5\n"
+" 4 2   \n"
+" ^4 5 4\n"
+"2  #   \n"
+"^< #4 3\n",
+
+//except maximizing difficulty isn't fun, it just gets tedious after a while. better stick to interesting patterns instead
+//for example:
+//- one where the correct solution is only vertical bridges,
+//    but the islands' varying sizes still make it nontrivial to find where the bridges go
+//    (horizontal should be possible and hard to rule out, of course)
+//- one with a long bridge crossing the entire map
+//- one very similar to above, but that bridge is now incorrect
+//- something that turns into a spiral
+//- various other forms of symmetry
+//- mainlands (will always be castles, will never have population)
 
 };

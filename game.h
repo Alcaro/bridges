@@ -121,14 +121,13 @@ public:
 	void hint();
 	
 	struct genparams {
-		uint8_t width; // Size must be at least 1x1.
+		uint8_t width; // Size must be at least 1x1, though larger is needed to create actually useful maps
 		uint8_t height;
 		
 		float density; // Use a value between 0.0 and 1.0; it will attempt to fill that fraction of the map with islands.
-		               // Since some tiles will be taken by bridges, the highest possible values will act badly. 0.2 to 0.5 is recommended.
-		bool allow_dense; // Allow returning a map where two islands are exactly beside each other.
-		                  // Disable it if you have trouble seeing so short bridges.
-		uint8_t max_brilen; // Maximum allowed bridge length. If zero, the generator will automatically pick one based on size and density.
+		               // Since some tiles will be taken by bridges, the highest possible values will act identical.
+		               // 0.2 to 0.5 is recommended.
+		bool allow_dense; // Don't try to avoid maps where two islands are exactly beside each other.
 		
 		bool use_reef; // Include reefs in the returned map.
 		bool use_large; // Include large islands in the returned map.
@@ -136,11 +135,22 @@ public:
 		                 // If set, size must be at least 3x3.
 		
 		bool allow_multi; // Allow returning a map with multiple valid solutions. Not recommended.
-		float difficulty; // Use a value between 0.0 and 1.0. Higher is harder.
-		unsigned quality; // Higher quality takes longer to generate, but better matches the requested parameters. 1000 to 5000 is recommended.
-		function<bool(int iter)> quality_stop; // If quality is 0, this function will be repeatedly called instead. Return true to stop.
+		float difficulty; // Use a value between 0.0 and 1.0. Higher is harder. The lowest possible values are mostly
+		                  // silly maps with only two islands because all possibilities were taken by reefs.
+		unsigned quality; // Higher quality takes longer to generate, but better matches
+		                  // the requested parameters. 1000 to 5000 is recommended.
+		function<bool(unsigned iter)> progress; // Will be called with 'iter' increasing until it reaches 'quality'.
+		                                        // Not guaranteed to increase monotonically.
+		                                        // Can be called with iter > quality if the requested parameters
+		                                        //   make it hard to find non-ambiguous maps.
+		                                        // Return false to stop before iter reaches quality.
+		                                        // To create arbitrarily many maps, using only this to stop it,
+		                                        //   set quality to UINT_MAX.
 	};
-	void generate(const genparams& par); // Replaces the map. The returned map will be solved.
+	// Replaces the map. The returned map will be solved.
+	// If return value is false, the generation was terminated by progress() before any map matching the specification was found.
+	//TODO: create generate_start function that spawns a few threads, then returns immediately and lets you collect the result later
+	bool generate(const genparams& par);
 	
 	string serialize(); // Passing this return value to init() will recreate the map (minus placed bridges).
 };

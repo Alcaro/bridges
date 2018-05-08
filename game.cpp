@@ -9,12 +9,20 @@
 //- design some levels containing the new objects
 //    is the generator good enough, or do I make a map editor?
 //    make sure to introduce the new objects in a reasonable way
-//- make difficulty estimator use BFS
 //- add hint system
 //- add UI for game generator
 //- for large maps, generator yields REALLY few non-multiple solutions
 //    with 9x9, use_castle and allow_dense true, and density=0.6, I've seen 30000 attempts with 0 valid
 //- restrict keyboard cursor position to the middle if the outermost parts have no possible bridges, I'll need it for mainlands
+//- make solver consider maps unambiguous if all solutions have the same number of bridges between islands A and B,
+//    to avoid handing out "this one is either 0 or 4" hints to people who know how generator works
+//    for example, this map should be unambiguous
+//      2 2
+//      ^ ^
+//    to do that, make solver always move same-island-pair bridges up/left, if possible
+//      and if both edges are straight (to avoid issues with L-shaped islands where the bridge in the hole must go the other way)
+//    alternatively, ban generator from creating maps where the situation shows up
+//    alternatively, just leave it like this, generator will never be perfect
 
 namespace {
 class birds {
@@ -990,7 +998,7 @@ p.width=7;
 p.height=7;
 p.density=0.6;
 p.difficulty=1.0;
-p.quality=2000;
+p.quality=20000;
 //p.max_brilen=4;
 p.use_reef=true;
 p.use_large=true;

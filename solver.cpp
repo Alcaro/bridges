@@ -725,13 +725,18 @@ public:
 		return true;
 	}
 	
-	bool solve_rec(uint16_t layer)
+	//1 - solved
+	//0 - unsolvable
+	//-1 - requires higher max depth to prove solvability
+	int solve_rec(uint16_t layer, uint16_t maxlayer)
 	{
 //static int n=0;if(layer>n){n=layer;printf("MAXDEPTH=%i\n",n);}
 //printf("LAYER=%i\n",layer);
-		add_difficulty(20*layer);
+		add_difficulty(3*layer*layer);
 		
-		if (layer < sizeof(possibilities_buf)/sizeof(possibilities_buf[0]))
+		uint16_t maxlayer2 = sizeof(possibilities_buf)/sizeof(possibilities_buf[0]);
+		if (op != op_hint && op != op_difficulty) maxlayer = maxlayer2; // discard the argument and hope inliner deletes it
+		if (layer < maxlayer && layer < maxlayer2)
 		{
 			if (!do_isolation_rule()) return false;
 			
@@ -775,7 +780,9 @@ public:
 								memcpy(possibilities_buf[layer+1], possibilities_buf[layer], bufsize);
 								possibilities = possibilities_buf[layer+1];
 								
-								if (set_state(index, newflags) && solve_rec(layer+1))
+								int ret = set_state(index, newflags);
+								if (ret) ret = solve_rec(layer+1, maxlayer);
+								if (ret == 1)
 								{
 //puts("GUESS:GOOD");
 									//if that's a valid solution, return it
@@ -784,7 +791,7 @@ public:
 									memcpy(possibilities_buf[layer], possibilities_buf[layer+1], bufsize);
 									return true;
 								}
-								else
+								if (ret == 0)
 								{
 //puts("GUESS:BAD");
 									//if that can't be a valid solution, mark it as such
@@ -804,13 +811,16 @@ public:
 				}
 			}
 		}
+		else if (layer < maxlayer2)
+		{
+			return -1;
+		}
 		else
 		{
-			//if out of memory, report it's unsolvable I guess?
 			puts("Out of memory");
 			puts(map.serialize());
 			abort();
-			return false;
+			return -1;
 		}
 		
 		if (op==op_another && layer==0) return false;
@@ -901,9 +911,23 @@ public:
 		
 		if (op==op_hint && accumulator) return false;
 		
-		if (!solve_rec(0)) return false;
+		if (op == op_hint || op == op_difficulty)
+		{
+			int maxdepth = 1;
+		again: ;
+			int ret = solve_rec(0, maxdepth);
+			if (ret == 0) return false;
+			if (ret == -1) { maxdepth++; goto again; }
+			maxdepth--; // needs at least depth 1, or it won't notice that it's finished. this should not contribute to difficulty
+			add_difficulty(100*maxdepth*maxdepth*maxdepth);
+if(maxdepth>=2)puts("#######"),puts(map.serialize()),puts("#######");
+		}
+		else
+		{
+			if (solve_rec(0, 0) <= 0) return false;
+		}
 		
-		if (op==op_hint || op==op_difficulty) return false;
+		if (op==op_hint || op==op_difficulty) return false; // return value for these operations is irrelevant
 		
 		assign();
 		return true;

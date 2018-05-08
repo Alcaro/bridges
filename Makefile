@@ -1,19 +1,16 @@
 PROGRAM = bridges
+#GUI and GL are only used for the UI; if you replace it, you can disable these
 ARGUI = 1
 AROPENGL = 1
-ARTHREAD = 0
+#threads can safely be disabled if you don't want them; they speed up the map generator, nothing else
+ARTHREAD = 1
 ARWUTF = 0
 ARSOCKET = 0
-#valid values: openssl (default), gnutls, tlse, bearssl, no
-ARSOCKET_SSL = openssl
-#valid values: schannel (default), bearssl, no (others may work, not tested)
-ARSOCKET_SSL_WINDOWS = schannel
 ARSANDBOX = 0
 
 SOURCES += resources.cpp
 include arlib/Makefile
 
-#OBJMANGLE usage is kinda ugly...
 $(call OBJMANGLE,DEFAULT,game.cpp): resources.cpp
 resources.cpp: rescompile.py resources/ resources/*
 	$(ECHOQ) rescompile.py

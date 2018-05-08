@@ -5,15 +5,25 @@
 // 0 if there can't be any island here because it wouldn't connect to anything (or would be too long)
 // 1 if it may be possible to place an island here
 // 2 if that's right beside an island and allow_dense is false
-// 3 if that's an island or bridge
+// 3 if that's an island, bridge or reef
 // 80..83 if that's an island or bridge, and it's connected to a castle of the given color
 
-//TODO: to add multiple castles of the same color, try to grow islands at some random point
-//       make sure new castles don't overlap, even if two islands have to grow towards each other
+namespace {
+class generator {
+public:
 
-static uint16_t valid_bridges_from(gamemap& map, const gamemap::genparams& par, int x, int y, bool doit, uint16_t& color)
+gamemap& map;
+const gamemap::genparams& par;
+
+//use a per-thread RNG, to avoid thread safety issues (or, if rand() is mutexed, avoid the associated cacheline bouncing)
+//I could've used rand_r instead, but that'd require an ifdef on windows and I'd rather not.
+random_t rand;
+
+generator(gamemap& map, const gamemap::genparams& par) : map(map), par(par) {}
+
+uint16_t valid_bridges_from(int x, int y, bool doit, uint16_t& color)
 {
-	int maxbrilen = par.max_brilen;
+	int maxbrilen = 4;
 	
 	int valid_dirs = 0;
 	uint16_t myroot = map.map[y][x].rootnode;
@@ -103,14 +113,14 @@ static uint16_t valid_bridges_from(gamemap& map, const gamemap::genparams& par, 
 
 //joined, if nonzero, will try to make a large island containing up to 'joined' additional tiles
 //may make a smaller one, and may choose to not make a large island at all
-static bool add_island_sub(gamemap& map, const gamemap::genparams& par, int x, int y, uint16_t root, bool force, uint16_t color)
+bool add_island_sub(int x, int y, uint16_t root, bool force, uint16_t color)
 {
 	gamemap::island& here = map.map[y][x];
 	here.population = 0;
 	here.rootnode = root;
 	map.numislands++;
 	
-	int valid_dirs = valid_bridges_from(map, par, x, y, true, color);
+	int valid_dirs = valid_bridges_from(x, y, true, color);
 	map.towalk[y*100+x] = color;
 	
 	bool any = false;
@@ -164,30 +174,30 @@ static bool add_island_sub(gamemap& map, const gamemap::genparams& par, int x, i
 	return true;
 }
 
-static bool try_add_island_sub(gamemap& map, const gamemap::genparams& par, int x, int y, uint16_t root, bool force, uint16_t color)
+bool try_add_island_sub(int x, int y, uint16_t root, bool force, uint16_t color)
 {
 	if (x<0 || y<0 || x>=map.width || y>=map.height || map.towalk[y*100+x] >= 3) return false;
-	return add_island_sub(map, par, x, y, root, force, color);
+	return add_island_sub(x, y, root, force, color);
 }
 
-static bool try_add_island(gamemap& map, const gamemap::genparams& par, int x, int y)
+bool try_add_island(int x, int y)
 {
 	uint16_t root = y*100+x;
 	if (map.towalk[root] != 1) return false; // can be removed for debugging, but never remove the next one
 	if (map.towalk[root] > 1) return false;
 	
 	uint16_t color = -1;
-	if (!valid_bridges_from(map, par, x, y, false, color)) return false;
+	if (!valid_bridges_from(x, y, false, color)) return false;
 	
 	//int forcedir = valid_bridges_from(map, par, x, y);
-	add_island_sub(map, par, x, y, root, true, color);
+	add_island_sub(x, y, root, true, color);
 	
 	//all two- and three-tile large islands are valid, as are 2x2 squares
 	if (par.use_large && rand()%100<50)
 	{
 		switch (rand()%10)
 		{
-#define X(xx,yy) try_add_island_sub(map, par, x+xx, y+yy, root, false, color)
+#define X(xx,yy) try_add_island_sub(x+xx, y+yy, root, false, color)
 		case 0: // right
 			X(+1,0) && X(+2,0);
 			break;
@@ -233,7 +243,7 @@ static uint32_t gcd(uint32_t a, uint32_t b)
 
 //from https://stackoverflow.com/questions/6822628/random-number-relatively-prime-to-an-input
 //probably doesn't give all valid answers with equal probability, but good enough
-static uint32_t rand_coprime(uint32_t to)
+uint32_t rand_coprime(uint32_t to)
 {
 	uint32_t ret = rand()%(to-1) + 1;
 	uint32_t tmp;
@@ -245,8 +255,10 @@ static uint32_t rand_coprime(uint32_t to)
 }
 
 //Ignores allow_multi, difficulty and quality.
-static void generate_one(gamemap& map, const gamemap::genparams& par)
+void generate_one(uint64_t seed)
 {
+	rand.seed(seed);
+	
 	map.width = par.width;
 	map.height = par.height;
 	map.numislands = 0;
@@ -283,7 +295,7 @@ static void generate_one(gamemap& map, const gamemap::genparams& par)
 		int startx = rand() % par.width;
 		int starty = rand() % par.height;
 		map.an_island[0] = starty*100 + startx;
-		add_island_sub(map, par, startx, starty, starty*100+startx, false, 3);
+		add_island_sub(startx, starty, starty*100+startx, false, 3);
 		
 		map.has_castles = false;
 	}
@@ -338,10 +350,10 @@ static void generate_one(gamemap& map, const gamemap::genparams& par)
 				    map.towalk[y*100+x+100] <= 1 &&
 				    map.towalk[y*100+x+101] <= 1)
 				{
-					add_island_sub(map, par, x,   y,   y*100+x, false, colors[i]);
-					add_island_sub(map, par, x+1, y,   y*100+x, false, colors[i]);
-					add_island_sub(map, par, x,   y+1, y*100+x, false, colors[i]);
-					add_island_sub(map, par, x+1, y+1, y*100+x, false, colors[i]);
+					add_island_sub(x,   y,   y*100+x, false, colors[i]);
+					add_island_sub(x+1, y,   y*100+x, false, colors[i]);
+					add_island_sub(x,   y+1, y*100+x, false, colors[i]);
+					add_island_sub(x+1, y+1, y*100+x, false, colors[i]);
 					
 					map.map[y][x].population = colors[i];
 					map.towalk[y*100+x] = colors[i];
@@ -355,7 +367,23 @@ static void generate_one(gamemap& map, const gamemap::genparams& par)
 		}
 	}
 	
+	if (par.use_reef)
+	{
+		for (int y=0;y<map.height;y++)
+		for (int x=0;x<map.width;x++)
+		{
+			if (rand()%100 > 3) continue;
+			if (map.towalk[y*100+x] >= 3) continue;
+			
+			map.towalk[y*100+x] = 3;
+			map.map[y][x].population = -2;
+		}
+	}
+	
 	int totislands = par.width*par.height*par.density;
+	totislands = totislands * (rand()%100+50) / 100; // multiply by 50%..150%
+	//make sure it doesn't loop forever saying "here's a map with density 0" "don't give me maps with only one island!"
+	if (totislands < 4) totislands = 4;
 	while (map.numislands < totislands)
 	{
 		//packed index - equal to y*width+x, as opposed to normal index (y*100+x)
@@ -369,7 +397,7 @@ static void generate_one(gamemap& map, const gamemap::genparams& par)
 			uint16_t y = pidx / par.width;
 			uint16_t x = pidx % par.width;
 			
-			if (try_add_island(map, par, x, y)) break;
+			if (try_add_island(x, y)) break;
 			else if (map.towalk[y*100+x] == 1) map.towalk[y*100+x] = 0;
 			
 			pidx = (pidx+pidx_skip) % (par.width*par.height);
@@ -390,7 +418,8 @@ static void generate_one(gamemap& map, const gamemap::genparams& par)
 				//if
 				//- at least one tile is island
 				//- all four tiles are available (towalk < 3, or rootnode same)
-				//   (towalk=2 is always true somewhere unless the island initially was a 2x2, which is super rare, so it must be allowed)
+				//   (towalk=2 is always true somewhere unless the island initially was a 2x2,
+				//     which is super rare, so it must be allowed)
 				//- none of the eight surrounding tiles has the same root node
 				//then a castle can be placed here
 				
@@ -473,10 +502,10 @@ static void generate_one(gamemap& map, const gamemap::genparams& par)
 					uint16_t pos = newcastle[i];
 					if (numoptions[i] == 0) continue;
 					
-					if (map.get(pos    ).population < 0) add_island_sub(map, par, pos%100  , pos/100  , newroot[i], false, 80+i);
-					if (map.get(pos+  1).population < 0) add_island_sub(map, par, pos%100+1, pos/100  , newroot[i], false, 80+i);
-					if (map.get(pos+100).population < 0) add_island_sub(map, par, pos%100  , pos/100+1, newroot[i], false, 80+i);
-					if (map.get(pos+101).population < 0) add_island_sub(map, par, pos%100+1, pos/100+1, newroot[i], false, 80+i);
+					if (map.get(pos    ).population < 0) add_island_sub(pos%100  , pos/100  , newroot[i], false, 80+i);
+					if (map.get(pos+  1).population < 0) add_island_sub(pos%100+1, pos/100  , newroot[i], false, 80+i);
+					if (map.get(pos+100).population < 0) add_island_sub(pos%100  , pos/100+1, newroot[i], false, 80+i);
+					if (map.get(pos+101).population < 0) add_island_sub(pos%100+1, pos/100+1, newroot[i], false, 80+i);
 					
 					map.get(newroot[i]).population = 80+i;
 				}
@@ -506,16 +535,6 @@ static void generate_one(gamemap& map, const gamemap::genparams& par)
 //puts("\n\n");
 	}
 done: ;
-	
-	if (par.use_reef)
-	{
-		for (int y=0;y<map.height;y++)
-		for (int x=0;x<map.width;x++)
-		{
-			if (map.towalk[y*100+x] < 3 && rand()%100<10)
-				map.map[y][x].population = -2;
-		}
-	}
 	
 	//to ensure large islands' roots are not at bottom right, and its location is not a clue:
 	//- set towalk on each island to point to itself
@@ -600,6 +619,8 @@ done: ;
 		if (map.map[y][x].population < 0) continue;  // ignore oceans
 		if (map.towalk[idx]==idx) continue;          // ignore small islands
 		// I could ignore non-roots, but then I'd rerandomize the root if it moved down. I'd rather not bias it.
+		// TODO: examine whether there's some interesting mathematical property on anything in towalk,
+		//  for example if the linked lists are strictly increasing except when it loops back to the lowest
 		//if (map.map[y][x].rootnode != idx) continue;
 		
 		int newroot = -1; // a valid root is known to exist, but gcc won't realize that
@@ -633,54 +654,139 @@ done: ;
 		} while (idx != y*100+x);
 	}
 }
+};
 
-void gamemap::generate(const genparams& par)
+class generatormanager {
+public:
+
+gamemap& out;
+const gamemap::genparams& par;
+
+mutex mut;
+semaphore sem;
+
+uint64_t randseed;
+unsigned n_started = 0;
+unsigned n_valid = 0;
+unsigned n_finished = 0;
+
+unsigned diff_min = 999999;
+unsigned diff_max = 0;
+unsigned best_diff;
+
+bool stop = false;
+
+generatormanager(gamemap& out, const gamemap::genparams& par) : out(out), par(par) {}
+
+void run(bool is_main)
 {
+	bool first = true;
+	gamemap map;
+	generator gen(map, par);
+	
+	bool map_valid;
+	unsigned diff;
+	
+	bool local_stop = false;
+	unsigned local_started;
+	
+	while (true)
+	{
+		synchronized(mut)
+		{
+			if (!first)
+			{
+				n_finished++;
+				
+				if (map_valid)
+				{
+					n_valid++;
+					
+					if (diff > diff_max) diff_max = diff;
+					if (diff < diff_min) diff_min = diff;
+					
+					float diff_scale = (diff-diff_min) / (float)(diff_max-diff_min);
+					float best_diff_scale = (best_diff-diff_min) / (float)(diff_max-diff_min);
+					if (diff_max==diff_min || fabs(diff_scale - par.difficulty) <= fabs(best_diff_scale - par.difficulty))
+					{
+						best_diff = diff;
+						out = map;
+					}
+				}
+			}
+			
+			if (local_stop || stop)
+			{
+				stop = true;
+				if (n_finished == n_started)
+					sem.release();
+				if (n_finished > n_started)
+					abort();
+				return;
+			}
+			
+			//to avoid races if the threads decide to terminate before all have entered the mutex at least once,
+			// n_started is set to the number of threads when creating the object
+			if (!first)
+				n_started++;
+			first = false;
+			
+			if (n_valid && n_started >= par.quality) stop = true;
+			local_started = n_started;
+		}
+		
+		gen.generate_one(randseed+local_started);
+		
+		map_valid = false;
+		if (!map.finished()) abort();
+//tmp.reset();if(!tmp.solve())abort();
+		if (map.numislands <= 1 && par.width*par.height >= 3) continue; 
+		if (!par.allow_multi && map.solve_another()) continue;
+		
+		map_valid = true;
+		diff = map.difficulty();
+		
+		if (is_main && par.progress && !par.progress(local_started)) local_stop = true;
+	}
+}
+void threadproc() { run(false); }
+};
+}
+
+bool gamemap::generate(const genparams& par)
+{
+	generatormanager mgr(*this, par);
+	//WARNING: Even if this one is constant, output will still be nondeterministic,
+	//due to threads finishing their work items in unpredictable order, giving varying diff_min/max,
+	// or finding the same difficulty multiple times.
+	mgr.randseed = (uint64_t)rand()<<32;
+	
+	unsigned n_threads = thread_num_cores();
+	// don't spin up too many shortlived threads
+	if (n_threads > par.quality / 3000) n_threads = par.quality / 3000;
+	if (n_threads < 1) n_threads = 1;
+	
 //static int i;srand(++i);printf("SEED=%i\n",i);
 //srand(2);
-	if (!par.max_brilen)
+uint64_t start = time_ms_ne();
+	
+	mgr.n_started = n_threads;
+	for (unsigned i=1;i<n_threads;i++)
 	{
-		genparams newpar = par;
-		newpar.max_brilen = (max(par.width, par.height)+2)/2.5;
-		return generate(newpar);
+		thread_create(bind_ptr(&generatormanager::threadproc, &mgr));
 	}
+	mgr.run(true);
 	
-	int diff_min = 999999;
-	int diff_max = 0;
+	mgr.sem.wait();
+	if (mgr.n_finished != mgr.n_started) abort();
 	
-	int best_diff = -1;
-	
-	unsigned iter = 0;
-unsigned itervalid = 0;
-	bool any_valid = false;
-	do {
-		iter++;
-//if(iter%100==0){printf("generator: %i attempts, %i valid\r", iter, itervalid); fflush(stdout);}
-		gamemap tmp;
-		generate_one(tmp, par);
-		
-//if(!tmp.finished()){*this=tmp;return;}
-		if (!tmp.finished()) abort();
-//tmp.reset();if(!tmp.solve())abort();
-		if (par.allow_multi || !tmp.solve_another())
-		{
-itervalid++;
-			int diff = tmp.difficulty();
-			
-			if (diff > diff_max) diff_max = diff;
-			if (diff < diff_min) diff_min = diff;
-			
-			float diff_scale = (diff-diff_min) / (float)(diff_max-diff_min);
-			float best_diff_scale = (best_diff-diff_min) / (float)(diff_max-diff_min);
-			if (diff_max==diff_min || fabs(diff_scale - par.difficulty) <= fabs(best_diff_scale - par.difficulty))
-			{
-				best_diff = diff;
-				any_valid = true;
-				*this = tmp;
-			}
-		}
-	} while (!any_valid || (par.quality && iter<par.quality) || (!par.quality && !par.quality_stop(iter)));
+uint64_t end = time_ms_ne();
+printf("Generated %u maps (%u usable) in %ums\n", mgr.n_finished, mgr.n_valid, (unsigned)(end-start));
+printf("Difficulty: %i (%f, desired %f), range %i-%i\n", mgr.best_diff,
+(mgr.best_diff-mgr.diff_min) / (float)(mgr.diff_max-mgr.diff_min), par.difficulty, mgr.diff_min, mgr.diff_max);
 //puts(serialize());
+
+	return mgr.n_valid;
 }
 
 test("generator","solver","generator")
