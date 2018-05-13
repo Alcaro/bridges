@@ -18,7 +18,13 @@
 #endif
 #endif
 
-class aropengl : nocopy {
+//This isn't the object you want. Use aropengl instead, it contains all OpenGL functions as function pointer members so you can do
+//aropengl gl;
+//gl.create(widget_viewport*, aropengl::t_ver_3_3);
+//gl.ClearColor(0,0,0,0);
+//gl.Clear(GL_COLOR_BUFFER_BIT);
+//All members on this object are available as well.
+class aropengl_base : nocopy {
 public:
 	enum {
 		t_ver_1_0 = 100, t_ver_1_1 = 110, t_ver_1_2 = 120, t_ver_1_3 = 130, t_ver_1_4 = 140, t_ver_1_5 = 150,
@@ -86,37 +92,38 @@ public:
 		virtual ~context() {}
 	};
 	
-	bool create(context* core);
+	//These functions exist, public and without symNames/symDest parameters, on aropengl objects.
+	//Constructors also exist, taking the same parameters.
+protected:
+	bool create(context* core, const char * symNames, funcptr* symDest);
 	
-	bool create(uintptr_t parent, uintptr_t* window, uint32_t flags)
+	bool create(uintptr_t parent, uintptr_t* window, uint32_t flags, const char * symNames, funcptr* symDest)
 	{
-		return create(context::create(parent, window, flags));
+		return create(context::create(parent, window, flags), symNames, symDest);
 	}
 	
-	bool create(widget_viewport* port, uint32_t flags)
+	bool create(widget_viewport* port, uint32_t flags, const char * symNames, funcptr* symDest)
 	{
 		uintptr_t newwindow;
-		if (!create(port->get_parent(), &newwindow, flags)) return false;
+		if (!create(port->get_parent(), &newwindow, flags, symNames, symDest)) return false;
 		this->port = port;
 		port->set_child(newwindow,
-		                bind_ptr(&aropengl::context::notifyResize, this->core),
-		                bind_ptr(&aropengl::destroy, this));
+		                bind_ptr(&aropengl_base::context::notifyResize, this->core),
+		                bind_ptr(&aropengl_base::destroy, this));
 		return true;
 	}
 	
+public:
 	//Must be called after the window is resized. If created from a viewport, this is configured automatically.
 	void notifyResize(unsigned int width, unsigned int height)
 	{
 		core->notifyResize(width, height);
 	}
 	
-	aropengl() { create(NULL); }
-	aropengl(context* core) { create(core); }
-	aropengl(uintptr_t parent, uintptr_t* window, uint32_t flags) { create(parent, window, flags); }
-	aropengl(widget_viewport* port, uint32_t flags) { create(port, flags); }
+	aropengl_base() { core = NULL; port = NULL; }
 	explicit operator bool() { return core != NULL; }
 	
-	~aropengl()
+	~aropengl_base()
 	{
 		destroy();
 	}
@@ -151,20 +158,15 @@ public:
 		core = NULL;
 	}
 	
-	//contents:
-	//void (GLAPIENTRY * ClearColor)(GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha);
-	//void (GLAPIENTRY * Clear)(GLbitfield mask);
-	//etc
-#define AROPENGL_GEN_HEADER
-#include "generated.c"
-#undef AROPENGL_GEN_HEADER
-	//It's intended that this object is named 'gl', resulting in gl.Clear(GL_etc), somewhat like WebGLRenderingContext.
-	//It is not guaranteed that a non-NULL function will work, or even successfully return. Check gl.hasExtension.
-	
-	bool hasExtension(const char * ext);
-	void enableDefaultDebugger(FILE* out = NULL); //Use only if the context was created with the debug flag.
+	//TODO: reenable these
+	//bool hasExtension(const char * ext);
+	//void enableDefaultDebugger(FILE* out = NULL); //Use only if the context was created with the debug flag.
 	
 private:
 	context* core;
 	widget_viewport* port;
 };
+
+#ifndef AROPENGL_SLIM
+#include "glsym-all.h"
+#endif

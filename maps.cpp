@@ -513,5 +513,15 @@ extern const char * const game_maps[] = {
 //- something that turns into a spiral
 //- various other forms of symmetry
 //- mainlands (will always be castles, will never have population)
+//- one where there's only 1s
+
+//evilest one I've ever seen
+"2>5< 4<\n"
+"^   1  \n"
+"  2  2 \n"
+"4  1  4\n"
+" 2  5< \n"
+"3 2 ^ 2\n"
+"2< 3 2 \n",
 
 };

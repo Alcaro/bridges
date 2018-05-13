@@ -126,7 +126,7 @@ public:
 		
 		float density; // Use a value between 0.0 and 1.0; it will attempt to fill that fraction of the map with islands.
 		               // Since some tiles will be taken by bridges, the highest possible values will act identical.
-		               // 0.2 to 0.5 is recommended.
+		               // However, too low will be too easy. 0.6 is recommended.
 		bool allow_dense; // Don't try to avoid maps where two islands are exactly beside each other.
 		
 		bool use_reef; // Include reefs in the returned map.
@@ -135,8 +135,9 @@ public:
 		                 // If set, size must be at least 3x3.
 		
 		bool allow_multi; // Allow returning a map with multiple valid solutions. Not recommended.
-		float difficulty; // Use a value between 0.0 and 1.0. Higher is harder. The lowest possible values are mostly
-		                  // silly maps with only two islands because all possibilities were taken by reefs.
+		float difficulty; // Use a value between 0.0 and 1.0. Higher is harder.
+		                  // The lowest possible values are mostly silly maps with only two islands,
+		                  // because all possible slots nearby are taken by reefs.
 		unsigned quality; // Higher quality takes longer to generate, but better matches
 		                  // the requested parameters. 1000 to 5000 is recommended.
 		function<bool(unsigned iter)> progress; // Will be called with 'iter' increasing until it reaches 'quality'.

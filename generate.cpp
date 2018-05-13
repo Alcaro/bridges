@@ -763,7 +763,7 @@ bool gamemap::generate(const genparams& par)
 	
 	unsigned n_threads = thread_num_cores();
 	// don't spin up too many shortlived threads
-	if (n_threads > par.quality / 3000) n_threads = par.quality / 3000;
+	if (n_threads > par.quality / 500) n_threads = par.quality / 500;
 	if (n_threads < 1) n_threads = 1;
 	
 //static int i;srand(++i);printf("SEED=%i\n",i);
@@ -781,7 +781,7 @@ uint64_t start = time_ms_ne();
 	if (mgr.n_finished != mgr.n_started) abort();
 	
 uint64_t end = time_ms_ne();
-printf("Generated %u maps (%u usable) in %ums\n", mgr.n_finished, mgr.n_valid, (unsigned)(end-start));
+printf("Generated %u maps (%u usable) in %ums (%u threads)\n", mgr.n_finished, mgr.n_valid, (unsigned)(end-start), n_threads);
 printf("Difficulty: %i (%f, desired %f), range %i-%i\n", mgr.best_diff,
 (mgr.best_diff-mgr.diff_min) / (float)(mgr.diff_max-mgr.diff_min), par.difficulty, mgr.diff_min, mgr.diff_max);
 //puts(serialize());
