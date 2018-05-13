@@ -3,9 +3,9 @@
 #include "arlib/image.h"
 struct resources {
 resources();
-static const uint8_t arrowh_raw[141];
+static const uint8_t arrowh_raw[142];
 image arrowh;
-static const uint8_t arrowv_raw[138];
+static const uint8_t arrowv_raw[134];
 image arrowv;
 static const uint8_t bg0_raw[217];
 image bg0;
