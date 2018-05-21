@@ -7,7 +7,7 @@ Enhanced remake of http://www.notdoppler.com/kingofbridges.php
 ```
 sudo apt-get install build-essential g++ libgtk-3-dev mesa-common-dev
 git clone
-make
+make OPT=1
 ```
 
 ## Compilation - Anything else

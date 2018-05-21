@@ -79,6 +79,7 @@ test("TCP client, disconnecting server", "runloop,dns", "tcp")
 	
 	//need to provoke Shitty Server into actually dropping the connections
 	autoptr<socket> sock2;
+	//TODO: this seems to never get removed
 	loop->set_timer_rel(5000, bind_lambda([&]()->bool { sock2 = socket::create("floating.muncher.se", 9, loop); return true; }));
 	
 	autoptr<socket> sock = socket::create("floating.muncher.se", 9, loop);
@@ -106,6 +107,19 @@ test("TCP client, disconnecting server", "runloop,dns", "tcp")
 test("SSL client, bad root", "tcp", "ssl") { clienttest("superfish.badssl.com", 443, true, true); }
 test("SSL client, bad name", "tcp", "ssl") { clienttest("wrong.host.badssl.com", 443, true, true); }
 test("SSL client, expired",  "tcp", "ssl") { clienttest("expired.badssl.com", 443, true, true); }
+
+test("SSL renegotiation", "tcp", "ssl")
+{
+	test_skip("too slow");
+	assert(!"find or create a renegotiating server, then use it");
+	// perhaps BoarSSL could help, or maybe I should add server support to some SSL engines and do some lamehack to renegotiate
+}
+
+test("","","")
+{
+	test_skip("too slow");
+	assert(!"allow switching SSL engines at runtime");
+}
 
 #ifdef ARLIB_SSL_BEARSSL
 /*

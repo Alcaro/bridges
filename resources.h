@@ -41,8 +41,6 @@ static const uint8_t levelbox_raw[112];
 image levelbox;
 static const uint8_t levelboxactive_raw[452];
 image levelboxactive;
-static const uint8_t levelboxgold_raw[201];
-image levelboxgold;
 static const uint8_t menuchoice_raw[151];
 image menuchoice;
 static const uint8_t menuopen_raw[112];

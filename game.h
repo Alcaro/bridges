@@ -17,6 +17,7 @@ public:
 	
 	struct savedat {
 		uint8_t unlocked;
+		bool seen_random_tutorial;
 	};
 	
 	//'out' should be a 640x480 image. 0rgb8888 or xrgb8888 is recommended, xrgb is slightly faster.

@@ -142,11 +142,15 @@ public:
 		pop_tutor3b,
 		pop_tutor3c,
 		
+		pop_tutorrandom1,
+		pop_tutorrandom2,
+		
 		//TODO: tutorials for the new objects
 	};
 	int popup_id;
 	int popup_frame;
 	bool popup_closed_with_kb;
+	bool seen_random_tutorial = false;
 	
 	
 	void init()
@@ -275,23 +279,29 @@ public:
 		if (in_press & 1<<k_left)
 		{
 			if (menu_focus == -1) menu_focus = 0;
+			else if (menu_focus >= 100) menu_focus = (menu_focus-100)*10 + 9;
 			else if (menu_focus%5 > 0) menu_focus--;
 		}
 		if (in_press & 1<<k_right)
 		{
 			if (menu_focus == -1) menu_focus = 0;
-			else if (menu_focus%5 < 4) menu_focus++;
+			else if (menu_focus < 100 && menu_focus%5 < 4) menu_focus++;
+			else if (menu_focus%10 == 9 && unlocked >= menu_focus) menu_focus = 100 + (menu_focus/10);
 		}
 		if (in_press & 1<<k_up)
 		{
 			if (menu_focus == -1) menu_focus = 0;
+			else if (menu_focus >= 100) menu_focus = (menu_focus-100)*10 + 4;
 			else if (menu_focus/5 > 0) menu_focus -= 5;
 		}
 		if (in_press & 1<<k_down)
 		{
 			if (menu_focus == -1) menu_focus = 0;
+			else if (menu_focus >= 100) menu_focus = (menu_focus-100)*10 + 14;
 			else if (menu_focus/5 < unlocked-1) menu_focus += 5;
 		}
+		if (menu_focus < 100 && menu_focus > unlocked-1) menu_focus = unlocked-1;
+		
 		if (in_press & 1<<k_confirm)
 		{
 			if (menu_focus != -1) to_game(menu_focus, true);
@@ -312,72 +322,93 @@ public:
 			"Silverstone - 9x9 Map (Hard)",
 		};
 		
+		auto draw_level = [this](int x, int y, int n){
+			out.insert(x, y, res.levelbox);
+			
+			if (n < 100)
+			{
+				int d1 = (n+1)/10;
+				int d2 = (n+1)%10;
+				if (d1)
+				{
+					out.insert_text(x+6    + 2*(d1==1), y+8, res.smallfont, tostring(d1));
+					out.insert_text(x+6+12 + 2*(d2==1), y+8, res.smallfont, tostring(d2));
+				}
+				else
+				{
+					out.insert_text(x+6+6  + 2*(d2==1), y+8, res.smallfont, tostring(d2));
+				}
+			}
+			else
+			{
+				out.insert_text(x+6+6+1, y+8, res.smallfont, "?");
+			}
+			
+			bool highlight = false;
+			bool unlocked = (this->unlocked > n);
+			if (n >= 100) unlocked = (this->unlocked >= (n-100)*5 + 11);
+			if (unlocked && in.mousex >= x && in.mousex < x+35 && in.mousey >= y && in.mousey < y+35)
+			{
+				highlight = true;
+				if (in_press & 1<<k_click)
+				{
+					to_game(n, false);
+				}
+			}
+			if (menu_focus == n)
+			{
+				highlight = true;
+			}
+			if (highlight) // as a variable to make sure the box isn't drawn twice, that'd be ugly
+			{
+				out.insert(x-10, y-10, res.levelboxactive);
+			}
+		};
 		for (int y=0;y<6;y++)
 		{
 			int oy = 38+y*75;
 			
+			bool has_randoms = (y&1);
+			
 			bool b = (y>=4); // the rock tile contains a repeating pattern, better follow its size
-			out.insert_tile_with_border(150, oy-8, 340, 50,
+			out.insert_tile_with_border(150 - 30*has_randoms, oy-8, 340 + 60*has_randoms, 50,
 			                            (y<2 ? res.fg0 : y<4 ? res.fg1menu : res.fg2),
 			                            3+b, 37-b-b, 4+b, 36-b-b);
 			
-			for (int x=0;x<5;x++)
+			for (int x=0;x<5+has_randoms;x++)
 			{
-				int ox = 182+60*x;
-				
-				int n = y*5 + x + 1;
-				int d1 = n/10;
-				int d2 = n%10;
-				
-				out.insert(ox, oy, res.levelbox);
-				if (x == 4 && y!=5) out.insert(ox, oy, res.levelboxgold);
-				
-				if (d1)
-				{
-					out.insert_text(ox+6    + 2*(d1==1), oy+8, res.smallfont, tostring(d1));
-					out.insert_text(ox+6+12 + 2*(d2==1), oy+8, res.smallfont, tostring(d2));
-				}
-				else
-				{
-					out.insert_text(ox+6+6  + 2*(d2==1), oy+8, res.smallfont, tostring(d2));
-				}
-				
-				bool highlight = false;
-				if (unlocked >= y+1 && in.mousex >= ox && in.mousex < ox+35 && in.mousey >= oy && in.mousey < oy+35)
-				{
-					highlight = true;
-					if (in_press & 1<<k_click)
-					{
-						to_game(y*5 + x, false);
-					}
-				}
-				if (menu_focus == y*5 + x)
-				{
-					highlight = true;
-				}
-				if (highlight) // as a variable to make sure the box isn't drawn twice, that'd be ugly
-				{
-					out.insert(ox-10, oy-10, res.levelboxactive);
-				}
+				int ox = 182+60*x - 30*has_randoms;
+				if (x==5) draw_level(ox, oy, 100 + y/2);
+				else draw_level(ox, oy, y*5 + x);
 			}
 			
-			if (unlocked < y+1)
+			if (unlocked <= (y+1)*5)
 			{
-				out.insert_tile_with_border(150, 30+y*75, 340, 50,
-				                            (y<2 ? res.fg0mask : y<4 ? res.fg1mask : res.fg0mask),
-				                            3+b, 37-b, 4+b, 36-b);
+				image outcrop;
+				outcrop.init_ref(out);
+				int hidefrom = 0;
+				if (unlocked > y*5)
+				{
+					hidefrom = 170 + (unlocked - y*5)*60 - 30*has_randoms;
+					outcrop.init_ref_sub(out, hidefrom,0, 640-hidefrom,480);
+				}
+				if (unlocked == (y+1)*5 && !has_randoms) hidefrom = 640;
+				outcrop.insert_tile_with_border(150-hidefrom - 30*has_randoms, 30+y*75, 340 + 60*has_randoms, 50,
+				                                (y<2 ? res.fg0mask : y<4 ? res.fg1mask : res.fg0mask),
+				                                3+b, 37-b, 4+b, 36-b);
 			}
 			
 			uint32_t textwidth = res.smallfont.measure(names[y]);
 			out.insert_text(320-textwidth/2, oy-22, res.smallfont, names[y]);
 		}
 		
-		res.smallfont.scale = 1;
-		uint32_t textwidth = res.smallfont.measure("Solve the golden puzzles to unlock the next set of puzzles!");
-		out.insert_text(320-textwidth/2, 460, res.smallfont, "Solve the golden puzzles to unlock the next set of puzzles!");
-		res.smallfont.scale = 2;
+		//res.smallfont.scale = 1;
+		//uint32_t textwidth = res.smallfont.measure("Solve the golden puzzles to unlock the next set of puzzles!");
+		//out.insert_text(320-textwidth/2, 460, res.smallfont, "Solve the golden puzzles to unlock the next set of puzzles!");
+		//res.smallfont.scale = 2;
 		
 		//no birds on the menu
+if (in_press & 1<<k_click)unlocked++;
 	}
 	
 	
@@ -393,14 +424,54 @@ public:
 	void game_load(int id, bool use_kb)
 	{
 		map_id = id;
-		map.init(game_maps[id]);
-		tileset = id/10;
+		if (id < 30)
+		{
+			map.init(game_maps[id]);
+			tileset = id/10;
+		}
+		else
+		{
+			gamemap::genparams p = {};
+			p.width = 7;
+			p.height = 7;
+			p.density = 0.6;
+			p.quality = 20000;
+			p.use_reef = true;
+			p.use_large = true;
+			//p.use_castle = true;
+			//p.allow_multi = true;
+			//p.allow_dense = true;
+			
+			if (id == 100)
+			{
+				p.difficulty = 0.4;
+				tileset = 0;
+			}
+			if (id == 101)
+			{
+				p.difficulty = 0.7;
+				tileset = 1;
+			}
+			if (id == 102)
+			{
+				p.difficulty = 1.0;
+				tileset = 2;
+			}
+			
+			map.generate(p);
+			map.reset();
+		}
 		
 		popup_id = pop_none;
 		popup_frame = 0;
 		if (id == 0) popup_id = pop_tutor1;
 		if (id == 5) popup_id = pop_lv6p1;
 		if (id == 10) popup_id = pop_lv11;
+		if (id >= 100 && !seen_random_tutorial)
+		{
+			seen_random_tutorial = true;
+			popup_id = pop_tutorrandom1;
+		}
 		
 		birdfg.reset(false);
 		
@@ -535,7 +606,7 @@ public:
 		int sx = (320 - 24*map.width + 4); // +4 to center it
 		int sy = (240 - 24*map.height + 4);
 		
-		//must draw islands before islands themselves, to allow pop/pri and 'finished' borders to spread out
+		//must draw islands before pop/bri/etc, to allow it to spread out
 		for (int ty=0;ty<map.height;ty++)
 		for (int tx=0;tx<map.width;tx++)
 		{
@@ -564,7 +635,7 @@ public:
 			}
 			if (here.population == -2)
 			{
-				out.insert(x, y, res.levelboxgold);
+				out.insert(x, y, res.fg0mask);
 			}
 		}
 		
@@ -576,145 +647,143 @@ public:
 			
 			gamemap::island& here = map.map[ty][tx];
 			
-			if (here.population >= 0)
+			if (here.population < 0) continue;
+			
+			bool joinr = (here.bridges[0]==3);
+			bool joinu = (here.bridges[1]==3);
+			bool joinl = (here.bridges[2]==3);
+			bool joind = (here.bridges[3]==3);
+			
+			bool isroot = (here.rootnode == ty*100+tx);
+			
+			if (isroot && here.population >= 80)
 			{
-				bool joinr = (here.bridges[0]==3);
-				bool joinu = (here.bridges[1]==3);
-				bool joinl = (here.bridges[2]==3);
-				bool joind = (here.bridges[3]==3);
+				out.insert_sub(x+12, y+12, res.castle, 64*(here.population-80), 0, 64, 64);
 				
-				//bool large = (joinr || joinu || joinl || joind);
-				bool isroot = (here.rootnode == ty*100+tx);
+				int flagx1 = 0; // these values won't be used, but gcc doesn't know that
+				int flagx2 = 0;
+				int flagy = 0;
 				
-				if (isroot && here.population >= 80)
+				if (here.population == 80) { flagx1=14; flagx2=51; flagy=0; }
+				if (here.population == 81) { flagx1=28; flagx2=28; flagy=3; }
+				if (here.population == 82) { flagx1=20; flagx2=48; flagy=2; }
+				if (here.population == 83) { flagx1=32; flagx2=32; flagy=2; }
+				
+				
+				int waveframe = (x + y + bgpos/3)%30;
+				
+				bool upleft = (waveframe>=15);
+				int cut = waveframe%15 * 2;
+				if (cut > 16) cut = 16;
+				//else cut = 0;
+				
+				out.insert_sub(x+12+flagx1,     y+12+flagy+  upleft, res.flags, 16*(here.population-80),     0, cut,    12);
+				out.insert_sub(x+12+flagx1+cut, y+12+flagy+1-upleft, res.flags, 16*(here.population-80)+cut, 0, 16-cut, 12);
+				out.insert_sub(x+12+flagx2,     y+12+flagy+  upleft, res.flags, 16*(here.population-80),     0, cut,    12);
+				out.insert_sub(x+12+flagx2+cut, y+12+flagy+1-upleft, res.flags, 16*(here.population-80)+cut, 0, 16-cut, 12);
+			}
+			else if (isroot)
+			{
+				int plx; // population label x
+				int ply;
+				int blx;
+				int bly;
+				int px;
+				int py;
+				int bx;
+				int by;
+				
+				if (joinr)
 				{
-					out.insert_sub(x+12, y+12, res.castle, 64*(here.population-80), 0, 64, 64);
+					plx = 16;
+					ply = 6;
+					blx = 55;
+					bly = 25;
 					
-					int flagx1 = 0; // these values won't be used, but gcc doesn't know that
-					int flagx2 = 0;
-					int flagy = 0;
-					
-					if (here.population == 80) { flagx1=14; flagx2=51; flagy=0; }
-					if (here.population == 81) { flagx1=28; flagx2=28; flagy=3; }
-					if (here.population == 82) { flagx1=20; flagx2=48; flagy=2; }
-					if (here.population == 83) { flagx1=32; flagx2=32; flagy=2; }
-					
-					
-					int waveframe = (x + y + bgpos/3)%30;
-					
-					bool upleft = (waveframe>=15);
-					int cut = waveframe%15 * 2;
-					if (cut > 16) cut = 16;
-					//else cut = 0;
-					
-					out.insert_sub(x+12+flagx1,     y+12+flagy+  upleft, res.flags, 16*(here.population-80),     0, cut,    12);
-					out.insert_sub(x+12+flagx1+cut, y+12+flagy+1-upleft, res.flags, 16*(here.population-80)+cut, 0, 16-cut, 12);
-					out.insert_sub(x+12+flagx2,     y+12+flagy+  upleft, res.flags, 16*(here.population-80),     0, cut,    12);
-					out.insert_sub(x+12+flagx2+cut, y+12+flagy+1-upleft, res.flags, 16*(here.population-80)+cut, 0, 16-cut, 12);
+					px = 16;
+					py = 16;
+					bx = 55;
+					by = 6;
+					goto align_popbri;
 				}
-				else if (isroot)
+				else if (joind)
 				{
-					int plx; // population label x
-					int ply;
-					int blx;
-					int bly;
-					int px;
-					int py;
-					int bx;
-					int by;
+					plx = 10;
+					ply = 13;
+					blx = 10;
+					bly = 67;
 					
-					if (joinr)
-					{
-						plx = 16;
-						ply = 6;
-						blx = 55;
-						bly = 25;
-						
-						px = 16;
-						py = 16;
-						bx = 55;
-						by = 6;
-						goto align_popbri;
-					}
-					else if (joind)
-					{
-						plx = 10;
-						ply = 13;
-						blx = 10;
-						bly = 67;
-						
-						px = 10;
-						py = 23;
-						bx = 10;
-						by = 48;
-						
-					align_popbri:
-						if (here.population==1) px += 2;
-						if (here.population<=9) px += 4;
-						if (here.population==11) px += 2;
-						if (here.totbridges==1) bx += 2;
-						if (here.totbridges<=9) bx += 4;
-						if (here.totbridges==11) bx += 2;
-					}
-					else
-					{
-						//else island is known small, so pop/bri>=10 won't happen
-						
-						plx = 4;
-						ply = 4;
-						blx = 18;
-						bly = 26;
-						
-						px = 25 + (here.population==1)*3;
-						py = 3;
-						bx = 4 + (here.totbridges==1)*2;
-						by = 18;
-					}
+					px = 10;
+					py = 23;
+					bx = 10;
+					by = 48;
 					
-					res.smallfont.scale = 1;
-					res.smallfont.color = 0xFFFF00;
-					out.insert_text(x+plx, y+ply, res.smallfont, "Pop.");
-					res.smallfont.color = 0xFFFFFF;
-					out.insert_text(x+blx, y+bly, res.smallfont, "Bri.");
-					res.smallfont.scale = 2;
+				align_popbri:
+					if (here.population==1) px += 2;
+					if (here.population<=9) px += 4;
+					if (here.population==11) px += 2;
+					if (here.totbridges==1) bx += 2;
+					if (here.totbridges<=9) bx += 4;
+					if (here.totbridges==11) bx += 2;
+				}
+				else
+				{
+					//else island is known small, so pop/bri>=10 won't happen
 					
-					res.smallfont.color = 0x000000;
-					out.insert_text(x+px+1, y+py, res.smallfont, tostring(here.population));
-					out.insert_text(x+px, y+py+1, res.smallfont, tostring(here.population));
-					out.insert_text(x+bx+1, y+by, res.smallfont, tostring(here.totbridges));
-					out.insert_text(x+bx, y+by+1, res.smallfont, tostring(here.totbridges));
-					res.smallfont.color = 0xFFFF00;
-					out.insert_text(x+px, y+py, res.smallfont, tostring(here.population));
-					res.smallfont.color = 0xFFFFFF;
-					out.insert_text(x+bx, y+by, res.smallfont, tostring(here.totbridges));
+					plx = 4;
+					ply = 4;
+					blx = 18;
+					bly = 26;
+					
+					px = 25 + (here.population==1)*3;
+					py = 3;
+					bx = 4 + (here.totbridges==1)*2;
+					by = 18;
 				}
 				
-				int totbridges = map.get(here.rootnode).totbridges;
-				int population = map.get(here.rootnode).population;
-				uint32_t border = (totbridges < population ? -1 : totbridges == population ? 0xFFFF00 : 0xFF0000);
-				if (totbridges >= population)
-				{
-					draw_island_fragment_border(x, y, joinr, joinu, joinl, joind, border);
-				}
+				res.smallfont.scale = 1;
+				res.smallfont.color = 0xFFFF00;
+				out.insert_text(x+plx, y+ply, res.smallfont, "Pop.");
+				res.smallfont.color = 0xFFFFFF;
+				out.insert_text(x+blx, y+bly, res.smallfont, "Bri.");
+				res.smallfont.scale = 2;
 				
-				if (here.bridges[1] == 1)
-				{
-					out.insert_tile(x+14, y - here.bridgelen[1]*48 + 37, 11, here.bridgelen[1]*48-34, res.bridgev);
-				}
-				if (here.bridges[1] == 2)
-				{
-					out.insert_tile(x+6,  y - here.bridgelen[1]*48 + 37, 11, here.bridgelen[1]*48-34, res.bridgev);
-					out.insert_tile(x+24, y - here.bridgelen[1]*48 + 37, 11, here.bridgelen[1]*48-34, res.bridgev);
-				}
-				if (here.bridges[2] == 1)
-				{
-					out.insert_tile(x - here.bridgelen[2]*48 + 37, y+13, here.bridgelen[2]*48-34, 11, res.bridgeh);
-				}
-				if (here.bridges[2] == 2)
-				{
-					out.insert_tile(x - here.bridgelen[2]*48 + 37, y+6,  here.bridgelen[2]*48-34, 11, res.bridgeh);
-					out.insert_tile(x - here.bridgelen[2]*48 + 37, y+24, here.bridgelen[2]*48-34, 11, res.bridgeh);
-				}
+				res.smallfont.color = 0x000000;
+				out.insert_text(x+px+1, y+py, res.smallfont, tostring(here.population));
+				out.insert_text(x+px, y+py+1, res.smallfont, tostring(here.population));
+				out.insert_text(x+bx+1, y+by, res.smallfont, tostring(here.totbridges));
+				out.insert_text(x+bx, y+by+1, res.smallfont, tostring(here.totbridges));
+				res.smallfont.color = 0xFFFF00;
+				out.insert_text(x+px, y+py, res.smallfont, tostring(here.population));
+				res.smallfont.color = 0xFFFFFF;
+				out.insert_text(x+bx, y+by, res.smallfont, tostring(here.totbridges));
+			}
+			
+			int totbridges = map.get(here.rootnode).totbridges;
+			int population = map.get(here.rootnode).population;
+			uint32_t border = (totbridges < population ? -1 : totbridges == population ? 0xFFFF00 : 0xFF0000);
+			if (totbridges >= population)
+			{
+				draw_island_fragment_border(x, y, joinr, joinu, joinl, joind, border);
+			}
+			
+			if (here.bridges[1] == 1)
+			{
+				out.insert_tile(x+14, y - here.bridgelen[1]*48 + 37, 11, here.bridgelen[1]*48-34, res.bridgev);
+			}
+			if (here.bridges[1] == 2)
+			{
+				out.insert_tile(x+6,  y - here.bridgelen[1]*48 + 37, 11, here.bridgelen[1]*48-34, res.bridgev);
+				out.insert_tile(x+24, y - here.bridgelen[1]*48 + 37, 11, here.bridgelen[1]*48-34, res.bridgev);
+			}
+			if (here.bridges[2] == 1)
+			{
+				out.insert_tile(x - here.bridgelen[2]*48 + 37, y+13, here.bridgelen[2]*48-34, 11, res.bridgeh);
+			}
+			if (here.bridges[2] == 2)
+			{
+				out.insert_tile(x - here.bridgelen[2]*48 + 37, y+6,  here.bridgelen[2]*48-34, 11, res.bridgeh);
+				out.insert_tile(x - here.bridgelen[2]*48 + 37, y+24, here.bridgelen[2]*48-34, 11, res.bridgeh);
 			}
 		}
 		
@@ -771,7 +840,7 @@ public:
 				if (here.bridgelen[dir] != -1 && here.bridges[dir] != 3)
 				{
 					//clicking an ocean tile with a bridge shouldn't create a crossing bridge
-					if (here.population == -1 && here.bridges[dir] == 0 && here.bridges[dir^1] != 0) continue;
+					if (here.population < 0 && here.bridges[dir] == 0 && here.bridges[dir^1] != 0) continue;
 					break;
 				}
 				
@@ -781,7 +850,7 @@ public:
 			
 			//if that bridge is up or left, move to the other island so I won't have to implement it multiple times
 			//if it's ocean, force move
-			if (here.population == -1)
+			if (here.population < 0)
 			{
 				if (dir == 3) dir = 1;
 				if (dir == 0) dir = 2;
@@ -982,32 +1051,14 @@ public:
 				
 				return clicked;
 			};
-			item(0, 15, "Level "+tostring(map_id+1));
-			//if (item(1, 120, "How to Play"))
-			//{
-			//	popup_id = pop_tutor1;
-			//	popup_frame = 0;
-			//	game_menu = false;
-			//}
-if (item(1, 120, "Random"))
-{
-//TODO: move this to level select screen
-//srand(0);
-gamemap::genparams p = {};
-p.width=7;
-p.height=7;
-p.density=0.6;
-p.difficulty=1.0;
-p.quality=20000;
-//p.max_brilen=4;
-p.use_reef=true;
-p.use_large=true;
-//p.use_castle=true;
-//p.allow_multi=true;
-//p.allow_dense=true;
-map.generate(p);
-if(map.finished())map.reset();
-}
+			if (map_id < 100) item(0, 15, "Level "+tostring(map_id+1));
+			else item(0, 15, "Level ??");
+			if (item(1, 120, "How to Play"))
+			{
+				popup_id = pop_tutor1;
+				popup_frame = 0;
+				game_menu = false;
+			}
 			if (item(2, 280, "Reset"))
 			{
 				map.reset();
@@ -1015,6 +1066,7 @@ if(map.finished())map.reset();
 			}
 			if (item(3, 375, "Level Select")) to_menu(in_press & 1<<k_confirm);
 			if (item(4, 545, "Hint"))
+//TODO
 {
 if(map.finished())map.solve_another();else map.solve();
 }
@@ -1041,7 +1093,12 @@ tileset = 0;
 to_title(); //TODO
 						break;
 					}
-					if (map_id+1 >= unlocked*5) unlocked++;
+					if (map_id >= 100)
+					{
+						game_load(map_id, popup_closed_with_kb);
+						break;
+					}
+					if (map_id+1 >= unlocked) unlocked++;
 					game_load(map_id+1, popup_closed_with_kb);
 					break;
 				case pop_tutor2:
@@ -1058,6 +1115,7 @@ to_title(); //TODO
 				case pop_tutor4:
 				case pop_lv6p2:
 				case pop_lv11:
+				case pop_tutorrandom2:
 					popup_id = pop_none;
 					break;
 				default:
@@ -1144,6 +1202,17 @@ to_title(); //TODO
 					"must be connected.\2 No isolated islands are "
 					"allowed. Also, \1a bridge MUST NOT CROSS another "
 					"bridge.\2",
+					
+					
+					"\1Welcome to the random levels! Each time you play " // pop_tutorrandom1
+					"this, it's a new map. They're always solvable, but "
+					"may be harder than the originals. Progress will "
+					"not be saved.",
+					
+					"\1There are a few new objects here: Dark tiles " // pop_tutorrandom2
+					"block bridge building, and large islands have "
+					"more than four possible bridge directions. Good "
+					"luck!",
 					
 					
 					
@@ -1245,11 +1314,13 @@ to_title(); //TODO
 	void load(const savedat& dat)
 	{
 		unlocked = dat.unlocked;
+		seen_random_tutorial = dat.seen_random_tutorial;
 	}
 	
 	void save(savedat& dat)
 	{
 		dat.unlocked = unlocked;
+		dat.seen_random_tutorial = seen_random_tutorial;
 	}
 	
 	
