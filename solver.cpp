@@ -285,7 +285,7 @@ class solver {
 	// 1<<(12..15) means joined with that island; if set, 0 1 and 2 are banned in that direction
 	// ocean tiles have this set too; for them, left and right are always equal, as are up/down
 	uint16_t* possibilities;
-	uint16_t possibilities_buf[32][100*100];
+	uint16_t possibilities_buf[32*100*100];
 	
 	linker link;
 	
@@ -734,7 +734,9 @@ public:
 //printf("LAYER=%i\n",layer);
 		add_difficulty(3*layer*layer);
 		
-		uint16_t maxlayer2 = sizeof(possibilities_buf)/sizeof(possibilities_buf[0]);
+		size_t layerbufsize = sizeof(uint16_t)*100*map.height;
+		
+		uint16_t maxlayer2 = sizeof(possibilities_buf)/layerbufsize;
 		if (op != op_hint && op != op_difficulty) maxlayer = maxlayer2; // discard the argument and hope inliner deletes it
 		if (layer < maxlayer && layer < maxlayer2)
 		{
@@ -774,11 +776,9 @@ public:
 									continue;
 								}
 								
-								size_t bufsize = sizeof(possibilities_buf[0])/100*map.height;
-								
 								int newflags = (flags & (set_mask | dirbit));
-								memcpy(possibilities_buf[layer+1], possibilities_buf[layer], bufsize);
-								possibilities = possibilities_buf[layer+1];
+								memcpy(possibilities_buf + (layer+1)*layerbufsize, possibilities_buf + layer*layerbufsize, layerbufsize);
+								possibilities = possibilities_buf + (layer+1)*layerbufsize;
 								
 								int ret = set_state(index, newflags);
 								if (ret) ret = solve_rec(layer+1, maxlayer);
@@ -787,15 +787,15 @@ public:
 //puts("GUESS:GOOD");
 									//if that's a valid solution, return it
 									//otherwise, mark the map unsolvable
-									possibilities = possibilities_buf[layer];
-									memcpy(possibilities_buf[layer], possibilities_buf[layer+1], bufsize);
+									possibilities = possibilities_buf + layer*layerbufsize;
+									memcpy(possibilities_buf + layer*layerbufsize, possibilities_buf + (layer+1)*layerbufsize, layerbufsize);
 									return true;
 								}
 								if (ret == 0)
 								{
 //puts("GUESS:BAD");
 									//if that can't be a valid solution, mark it as such
-									possibilities = possibilities_buf[layer];
+									possibilities = possibilities_buf + layer*layerbufsize;
 									
 									//it's possible that both yes and no are impossible
 									if (!set_state(index, flags & ~dirbit)) return false;
@@ -831,7 +831,7 @@ public:
 	bool solve()
 	{
 //puts("SOLVEBEGIN");
-		possibilities = possibilities_buf[0];
+		possibilities = possibilities_buf;
 		
 		int num_roots = 0;
 		

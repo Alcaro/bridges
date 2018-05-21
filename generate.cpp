@@ -759,8 +759,10 @@ bool gamemap::generate(const genparams& par)
 	//WARNING: Even if this one is constant, output will still be nondeterministic,
 	//due to threads finishing their work items in unpredictable order, giving varying diff_min/max,
 	// or finding the same difficulty multiple times.
+	//A fixed random seed with exactly one thread will be deterministic.
 	mgr.randseed = (uint64_t)rand()<<32;
 	
+#ifdef ARLIB_THREAD
 	unsigned n_threads = thread_num_cores();
 	// don't spin up too many shortlived threads
 	if (n_threads > par.quality / 500) n_threads = par.quality / 500;
@@ -768,22 +770,25 @@ bool gamemap::generate(const genparams& par)
 	
 //static int i;srand(++i);printf("SEED=%i\n",i);
 //srand(2);
-uint64_t start = time_ms_ne();
+//uint64_t start = time_ms_ne();
 	
 	mgr.n_started = n_threads;
 	for (unsigned i=1;i<n_threads;i++)
 	{
 		thread_create(bind_ptr(&generatormanager::threadproc, &mgr));
 	}
+#else
+	mgr.n_started = n_threads;
+#endif
 	mgr.run(true);
 	
 	mgr.sem.wait();
 	if (mgr.n_finished != mgr.n_started) abort();
 	
-uint64_t end = time_ms_ne();
-printf("Generated %u maps (%u usable) in %ums (%u threads)\n", mgr.n_finished, mgr.n_valid, (unsigned)(end-start), n_threads);
-printf("Difficulty: %i (%f, desired %f), range %i-%i\n", mgr.best_diff,
-(mgr.best_diff-mgr.diff_min) / (float)(mgr.diff_max-mgr.diff_min), par.difficulty, mgr.diff_min, mgr.diff_max);
+//uint64_t end = time_ms_ne();
+//printf("Generated %u maps (%u usable) in %ums (%u threads)\n", mgr.n_finished, mgr.n_valid, (unsigned)(end-start), n_threads);
+//printf("Difficulty: %i (%f, desired %f), range %i-%i\n", mgr.best_diff,
+//(mgr.best_diff-mgr.diff_min) / (float)(mgr.diff_max-mgr.diff_min), par.difficulty, mgr.diff_min, mgr.diff_max);
 //puts(serialize());
 
 	return mgr.n_valid;
