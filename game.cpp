@@ -402,13 +402,7 @@ public:
 			out.insert_text(320-textwidth/2, oy-22, res.smallfont, names[y]);
 		}
 		
-		//res.smallfont.scale = 1;
-		//uint32_t textwidth = res.smallfont.measure("Solve the golden puzzles to unlock the next set of puzzles!");
-		//out.insert_text(320-textwidth/2, 460, res.smallfont, "Solve the golden puzzles to unlock the next set of puzzles!");
-		//res.smallfont.scale = 2;
-		
 		//no birds on the menu
-if (in_press & 1<<k_click)unlocked++;
 	}
 	
 	
