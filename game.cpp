@@ -317,7 +317,7 @@ public:
 			"Kimera - 7x7 Map (Tutorial)",
 			"Remnant - 7x7 Map (Normal)",
 			"Alchemia - 7x7 Map (Hard)",
-			"Firestorm - 7x7 Map (Hardcore)",
+			"Firestorm - 7x7 Map (Very Hard)", // originally Hardcore, but I'm not sure how that compares to Hard
 			"Constantine - 9x9 Map (Normal)",
 			"Silverstone - 9x9 Map (Hard)",
 		};
@@ -438,17 +438,21 @@ public:
 			
 			if (id == 100)
 			{
+				p.density = 0.3; // reducing density reduces difficulty a lot more than the difficulty tweak
 				p.difficulty = 0.4;
 				tileset = 0;
 			}
 			if (id == 101)
 			{
-				p.difficulty = 0.7;
+				p.difficulty = 1.0;
 				tileset = 1;
 			}
 			if (id == 102)
 			{
+				//larger maps have higher probabilitiy of having multiple solutions, so the remaining ones are usually easier
 				p.difficulty = 1.0;
+				p.width = 9;
+				p.height = 9;
 				tileset = 2;
 			}
 			
