@@ -9,7 +9,7 @@
 // 80..83 if that's an island or bridge, and it's connected to a castle of the given color
 
 namespace {
-class generator {
+class loc_generator {
 public:
 
 gamemap& map;
@@ -19,7 +19,7 @@ const gamemap::genparams& par;
 //I could've used rand_r instead, but that'd require an ifdef on windows and I'd rather not.
 random_t rand;
 
-generator(gamemap& map, const gamemap::genparams& par) : map(map), par(par) {}
+loc_generator(gamemap& map, const gamemap::genparams& par) : map(map), par(par) {}
 
 uint16_t valid_bridges_from(int x, int y, bool doit, uint16_t& color)
 {
@@ -655,112 +655,19 @@ done: ;
 	}
 }
 };
-
-class generatormanager {
-public:
-
-gamemap& out;
-const gamemap::genparams& par;
-
-mutex mut;
-semaphore sem;
-
-uint64_t randseed;
-unsigned n_started = 0;
-unsigned n_valid = 0;
-unsigned n_finished = 0;
-
-unsigned diff_min = 999999;
-unsigned diff_max = 0;
-unsigned best_diff;
-
-bool stop = false;
-
-generatormanager(gamemap& out, const gamemap::genparams& par) : out(out), par(par) {}
-
-void run(bool is_main)
-{
-	bool first = true;
-	gamemap map;
-	generator gen(map, par);
-	
-	bool map_valid;
-	unsigned diff;
-	
-	bool local_stop = false;
-	unsigned local_started;
-	
-	while (true)
-	{
-		synchronized(mut)
-		{
-			if (!first)
-			{
-				n_finished++;
-				
-				if (map_valid)
-				{
-					n_valid++;
-					
-					if (diff > diff_max) diff_max = diff;
-					if (diff < diff_min) diff_min = diff;
-					
-					float diff_scale = (diff-diff_min) / (float)(diff_max-diff_min);
-					float best_diff_scale = (best_diff-diff_min) / (float)(diff_max-diff_min);
-					if (diff_max==diff_min || fabs(diff_scale - par.difficulty) <= fabs(best_diff_scale - par.difficulty))
-					{
-						best_diff = diff;
-						out = map;
-					}
-				}
-			}
-			
-			if (local_stop || stop)
-			{
-				stop = true;
-				if (n_finished == n_started)
-					sem.release();
-				if (n_finished > n_started)
-					abort();
-				return;
-			}
-			
-			//to avoid races if the threads decide to terminate before all have entered the mutex at least once,
-			// n_started is set to the number of threads when creating the object
-			if (!first)
-				n_started++;
-			first = false;
-			
-			if (n_valid && n_started >= par.quality) stop = true;
-			local_started = n_started;
-		}
-		
-		gen.generate_one(randseed+local_started);
-		
-		map_valid = false;
-		if (!map.finished()) abort();
-//tmp.reset();if(!tmp.solve())abort();
-		if (map.numislands <= 1 && par.width*par.height >= 3) continue; 
-		if (!par.allow_multi && map.solve_another()) continue;
-		
-		map_valid = true;
-		diff = map.difficulty();
-		
-		if (is_main && par.progress && !par.progress(local_started)) local_stop = true;
-	}
-}
-void threadproc() { run(false); }
-};
 }
 
-bool gamemap::generate(const genparams& par)
+
+gamemap::generator::generator(const gamemap::genparams& par) : par(par)
 {
-	generatormanager mgr(*this, par);
-	//WARNING: Even if this one is constant, output will still be nondeterministic,
-	//due to threads finishing their work items in unpredictable order, giving varying diff_min/max,
-	// or finding the same difficulty multiple times.
+	//WARNING: Even if this one is made constant, output will still be nondeterministic,
+	//  due to threads finishing in varying order, making different maps seem superior;
+	//  therefore, it is not allowed to override it.
 	//A fixed random seed with exactly one thread will be deterministic.
-	mgr.randseed = (uint64_t)rand()<<32;
+	randseed = time(NULL);
+	randseed <<= 16;
+	randseed += rand();
+	randseed <<= 16;
 	
 #ifdef ARLIB_THREAD
 	unsigned n_threads = thread_num_cores();
@@ -768,31 +675,141 @@ bool gamemap::generate(const genparams& par)
 	if (n_threads > par.quality / 500) n_threads = par.quality / 500;
 	if (n_threads < 1) n_threads = 1;
 	
-//static int i;srand(++i);printf("SEED=%i\n",i);
-//srand(2);
-//uint64_t start = time_ms_ne();
-	
-	mgr.n_started = n_threads;
-	for (unsigned i=1;i<n_threads;i++)
+	n_started = n_threads;
+	for (unsigned i=0;i<n_threads;i++)
 	{
-		thread_create(bind_ptr(&generatormanager::threadproc, &mgr));
+		thread_create(bind_this(&generator::threadproc));
 	}
 #else
-	mgr.n_started = n_threads;
+	n_started = 1;
 #endif
-	mgr.run(true);
+}
+
+//If 'first', the thread is freshly started, and has already claimed its work via n_started.
+//If false, there's no more work to do; thread should terminate.
+//Must be called while holding the mutex.
+bool gamemap::generator::get_work(bool first, workitem& w)
+{
+	if (!first)
+	{
+		if (stop) return false;
+		if (n_valid > 0 && n_started >= par.quality) return false;
+		n_started++;
+	}
 	
-	mgr.sem.wait();
-	if (mgr.n_finished != mgr.n_started) abort();
+	randseed++;
+	w.seed = randseed;
+	return true;
+}
+//Should be called while not holding the mutex.
+void gamemap::generator::do_work(workitem& w, gamemap& map)
+{
+	loc_generator gen(map, par);
+	gen.generate_one(w.seed);
 	
-//uint64_t end = time_ms_ne();
+	//if (!map.finished()) abort();
+	w.valid = true;
+	if (map.numislands <= 1 && par.width*par.height >= 5) w.valid = false;
+	if (!par.allow_multi && map.solve_another()) w.valid = false;
+	
+	if (w.valid) w.diff = map.difficulty();
+}
+//Must be called while holding the mutex.
+void gamemap::generator::finish_work(workitem& w)
+{
+	n_finished++;
+	
+	if (w.valid)
+	{
+		n_valid++;
+		
+		if (w.diff > diff_max) diff_max = w.diff;
+		if (w.diff < diff_min) diff_min = w.diff;
+		
+		//these two can be NaN or negative if only one difficulty has been observed, but then diff_max<=diff_min and the NaNs aren't used
+		float diff_scale = (w.diff-diff_min) / (float)(diff_max-diff_min);
+		float best_diff_scale = (best_diff-diff_min) / (float)(diff_max-diff_min);
+		if (diff_max<=diff_min || fabs(diff_scale - par.difficulty) <= fabs(best_diff_scale - par.difficulty))
+		{
+			best_diff = w.diff;
+			best_seed = w.seed;
+		}
+	}
+}
+
+void gamemap::generator::threadproc()
+{
+	gamemap map; // this object is huge, cache it to avoid pointless stack probing
+	
+	workitem w;
+	synchronized(mut) { get_work(true, w); }
+	
+	while (true)
+	{
+		do_work(w, map);
+		
+		synchronized(mut)
+		{
+			finish_work(w);
+			
+			if (!get_work(false, w))
+			{
+				if (n_started == n_finished) sem.release();
+				return; // not break, synchronized() uses a for loop internally
+			}
+		}
+	}
+}
+
+bool gamemap::generator::done(unsigned* progress)
+{
+#ifdef ARLIB_THREAD
+	synchronized(mut)
+	{
+		if (progress) *progress = n_finished;
+		return n_finished == n_started;
+	}
+	return false; // unreachable, but gcc doesn't know that
+#else
+	if (progress) *progress = par.quality;
+	return true;
+#endif
+}
+
+bool gamemap::generator::finish(gamemap& map)
+{
+#ifndef ARLIB_THREAD
+	threadproc();
+#endif
+	sem.wait();
+	
 //printf("Generated %u maps (%u usable) in %ums (%u threads)\n", mgr.n_finished, mgr.n_valid, (unsigned)(end-start), n_threads);
 //printf("Difficulty: %i (%f, desired %f), range %i-%i\n", mgr.best_diff,
 //(mgr.best_diff-mgr.diff_min) / (float)(mgr.diff_max-mgr.diff_min), par.difficulty, mgr.diff_min, mgr.diff_max);
 //puts(serialize());
-
-	return mgr.n_valid;
+	
+	bool ret;
+	synchronized(mut) // must grab mutex after awaiting the semaphore, to avoid race condition on releasing vs freeing mutex
+	{
+		ret = n_valid;
+		if (ret)
+		{
+			loc_generator lgen(map, par);
+			lgen.generate_one(best_seed);
+		}
+	}
+	
+	sem.release(); // in case some noob decides to call finish() multiple times
+	return ret;
 }
+
+void gamemap::generator::cancel()
+{
+	synchronized(mut) { stop = true; }
+	sem.wait();
+	sem.release(); // in case some noob decides to call finish() after this
+}
+
 
 test("generator","solver","generator")
 {

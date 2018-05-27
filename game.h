@@ -149,10 +149,56 @@ public:
 		                                        // To create arbitrarily many maps, using only this to stop it,
 		                                        //   set quality to UINT_MAX.
 	};
-	// Replaces the map. The returned map will be solved.
-	// If return value is false, the generation was terminated by progress() before any map matching the specification was found.
-	//TODO: create generate_start function that spawns a few threads, then returns immediately and lets you collect the result later
-	bool generate(const genparams& par);
+	
+	class generator {
+		gamemap::genparams par; // Read only, safe to read from any thread.
+		
+		mutex mut;
+		semaphore sem;
+		
+		//None of these may be accessed without holding the mutex.
+		uint64_t randseed;
+		unsigned n_started; // initialized to number of threads
+		unsigned n_valid = 0;
+		unsigned n_finished = 0;
+
+		unsigned diff_min = 999999;
+		unsigned diff_max = 0;
+		uint64_t best_seed;
+		unsigned best_diff = 999999;
+		
+		bool stop = false;
+		
+		struct workitem {
+			uint64_t seed;
+			bool valid;
+			unsigned diff;
+		};
+		
+		bool get_work(bool first, workitem& w);
+		void do_work(workitem& w, gamemap& map);
+		void finish_work(workitem& w);
+		void threadproc();
+		
+	public:
+		//The object may not be deleted before calling cancel() or finish() at least once.
+		generator(const gamemap::genparams& par);
+		void cancel();
+		bool done(unsigned* progress);
+		bool finish(gamemap& map);
+	};
+	
+	//class generator;
+	//static generator* generate_async(const genparams& par);
+	//static bool generate_done(generator* gen, unsigned* progress = NULL);
+	//static void generate_cancel(generator* gen);
+	//static bool generate_finish(generator* gen, gamemap& map);
+	
+	bool generate(const genparams& par)
+	{
+		generator gen(par);
+		return gen.finish(*this);
+	}
 	
 	string serialize(); // Passing this return value to init() will recreate the map (minus placed bridges).
 };

@@ -122,6 +122,7 @@ public:
 	bool game_menu;
 	int game_menu_pos;
 	int game_menu_focus;
+	gamemap::generator* game_next_gen = NULL;
 	
 	int game_kb_x;
 	int game_kb_y;
@@ -415,6 +416,42 @@ public:
 		game_menu_pos = 480;
 	}
 	
+	gamemap::genparams game_params(int id)
+	{
+		gamemap::genparams p = {};
+		p.width = 7;
+		p.height = 7;
+		p.density = 0.6;
+		p.quality = 20000;
+		p.use_reef = true;
+		p.use_large = true;
+		//p.use_castle = true;
+		//p.allow_multi = true;
+		//p.allow_dense = true;
+		
+		if (id == 100)
+		{
+			p.density = 0.3; // reducing density reduces difficulty a lot more than the difficulty switch
+			p.difficulty = 0.4;
+			tileset = 0;
+		}
+		if (id == 101)
+		{
+			p.difficulty = 1.0;
+			tileset = 1;
+		}
+		if (id == 102)
+		{
+			//larger maps have higher probabilitiy of having multiple solutions, so the remaining ones are usually easier
+			p.difficulty = 1.0;
+			p.width = 9;
+			p.height = 9;
+			tileset = 2;
+		}
+		
+		return p;
+	}
+	
 	void game_load(int id, bool use_kb)
 	{
 		map_id = id;
@@ -425,38 +462,14 @@ public:
 		}
 		else
 		{
-			gamemap::genparams p = {};
-			p.width = 7;
-			p.height = 7;
-			p.density = 0.6;
-			p.quality = 20000;
-			p.use_reef = true;
-			p.use_large = true;
-			//p.use_castle = true;
-			//p.allow_multi = true;
-			//p.allow_dense = true;
-			
-			if (id == 100)
+			gamemap::genparams p = game_params(id);
+			if (game_next_gen)
 			{
-				p.density = 0.3; // reducing density reduces difficulty a lot more than the difficulty tweak
-				p.difficulty = 0.4;
-				tileset = 0;
+				game_next_gen->finish(map);
+				delete game_next_gen;
+				game_next_gen = NULL;
 			}
-			if (id == 101)
-			{
-				p.difficulty = 1.0;
-				tileset = 1;
-			}
-			if (id == 102)
-			{
-				//larger maps have higher probabilitiy of having multiple solutions, so the remaining ones are usually easier
-				p.difficulty = 1.0;
-				p.width = 9;
-				p.height = 9;
-				tileset = 2;
-			}
-			
-			map.generate(p);
+			else map.generate(p);
 			map.reset();
 		}
 		
@@ -888,6 +901,7 @@ public:
 				{
 					popup_id = pop_welldone;
 					popup_frame = 0;
+					if (map_id >= 100) game_next_gen = new gamemap::generator(game_params(map_id));
 				}
 			}
 		}
@@ -972,6 +986,7 @@ public:
 				{
 					popup_id = pop_welldone;
 					popup_frame = 0;
+					if (map_id >= 100) game_next_gen = new gamemap::generator(game_params(map_id));
 				}
 			}
 			else
