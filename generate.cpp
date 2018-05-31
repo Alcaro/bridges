@@ -217,16 +217,16 @@ bool try_add_island(int x, int y)
 			X(0,-1); X(0,+1);
 			break;
 		case 6: // square, up left
-			(X(-1,0) || X(0,-1)) && X(-1,-1);
+			(X(-1,0) + X(0,-1)) && X(-1,-1);
 			break;
 		case 7: // square, up right
-			(X(+1,0) || X(0,-1)) && X(+1,-1);
+			(X(+1,0) + X(0,-1)) && X(+1,-1);
 			break;
 		case 8: // square, down left
-			(X(-1,0) || X(0,+1)) && X(-1,+1);
+			(X(-1,0) + X(0,+1)) && X(-1,+1);
 			break;
 		case 9: // square, down right
-			(X(+1,0) || X(0,+1)) && X(+1,+1);
+			(X(+1,0) + X(0,+1)) && X(+1,+1);
 			break;
 #undef X
 		}

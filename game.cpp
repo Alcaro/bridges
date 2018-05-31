@@ -704,6 +704,8 @@ public:
 				int bx;
 				int by;
 				
+				if (joinr && joind && ((tx+ty)&1)) goto do_joind;
+				
 				if (joinr)
 				{
 					plx = 16;
@@ -719,6 +721,7 @@ public:
 				}
 				else if (joind)
 				{
+				do_joind: ;
 					plx = 10;
 					ply = 13;
 					blx = 10;
