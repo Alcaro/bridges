@@ -95,7 +95,7 @@ int main(int argc, char** argv)
 				par.use_large = false;
 				par.use_castle = false;
 				par.allow_multi = true;
-				par.difficulty = 0;
+				par.difficulty = 0.0;
 				par.quality = 1;
 				
 				gamemap map;

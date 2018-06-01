@@ -146,6 +146,7 @@ bool add_island_sub(int x, int y, uint16_t root, bool force, uint16_t color)
 				map.get(root).population += nbri;
 			}
 			here.bridges[dir] = nbri;
+			here.bridgelen[dir] = len;
 			
 			int idx = y*100+x;
 			do {
@@ -158,6 +159,7 @@ bool add_island_sub(int x, int y, uint16_t root, bool force, uint16_t color)
 				map.get(map.get(idx).rootnode).population += nbri;
 			}
 			map.get(idx).bridges[dir^2] = nbri;
+			map.get(idx).bridgelen[dir^2] = len;
 			
 			any = true;
 		}
@@ -419,12 +421,14 @@ void generate_one(uint64_t seed)
 				//- at least one tile is island
 				//- all four tiles are available (towalk < 3, or rootnode same)
 				//   (towalk=2 is always true somewhere unless the island initially was a 2x2,
-				//     which is super rare, so it must be allowed)
+				//     which is a pointless restriction, so it must be allowed)
 				//- none of the eight surrounding tiles has the same root node
+				//- allow_multi is true, or this one is not beside a castle of the same color
 				//then a castle can be placed here
 				
 				uint16_t index = y*100+x;
 				
+				//- at least one tile is island
 				uint16_t root = -1;
 				if (map.get(index    ).population >= 0) root = index    ;
 				if (map.get(index+  1).population >= 0) root = index+  1;
@@ -435,25 +439,51 @@ void generate_one(uint64_t seed)
 				root = map.get(root).rootnode;
 				if (map.get(root).population >= 80) continue;
 				
+				//- all four tiles are available (towalk < 3)
 				if (map.towalk[index    ] >= 3 && map.get(index    ).rootnode != root) continue;
 				if (map.towalk[index+  1] >= 3 && map.get(index+  1).rootnode != root) continue;
 				if (map.towalk[index+100] >= 3 && map.get(index+100).rootnode != root) continue;
 				if (map.towalk[index+101] >= 3 && map.get(index+101).rootnode != root) continue;
 				
+				//- all four tiles are available (rootnode same)
 				if (map.get(index    ).population >= 0 && map.get(index    ).rootnode != root) continue;
 				if (map.get(index+  1).population >= 0 && map.get(index+  1).rootnode != root) continue;
 				if (map.get(index+100).population >= 0 && map.get(index+100).rootnode != root) continue;
 				if (map.get(index+101).population >= 0 && map.get(index+101).rootnode != root) continue;
 				
+				//- none of the eight surrounding tiles has the same root node
 				if (x > 0 && map.get(index    -1).population >= 0 && map.get(index    -1).rootnode == root) continue;
 				if (x > 0 && map.get(index+100-1).population >= 0 && map.get(index+100-1).rootnode == root) continue;
 				if (y > 0 && map.get(index-100  ).population >= 0 && map.get(index-100  ).rootnode == root) continue;
 				if (y > 0 && map.get(index-100+1).population >= 0 && map.get(index-100+1).rootnode == root) continue;
 				
+				//- none of the eight surrounding tiles has the same root node
 				if (x < map.width-1  && map.get(index+  2).population >= 0 && map.get(index+  2).rootnode == root) continue;
 				if (x < map.width-1  && map.get(index+102).population >= 0 && map.get(index+102).rootnode == root) continue;
 				if (y < map.height-1 && map.get(index+200).population >= 0 && map.get(index+200).rootnode == root) continue;
 				if (y < map.height-1 && map.get(index+201).population >= 0 && map.get(index+201).rootnode == root) continue;
+				
+				//- allow_multi is true, or this one is not beside a castle of the same color
+				if (!par.allow_multi)
+				{
+					for (int tile=0;tile<4;tile++)
+					{
+						static const int8_t tilepos[] = { 0, 1, 100, 101 };
+						uint16_t lindex = index + tilepos[tile];
+						
+						static const int8_t diroff[] = { 1, -100, -1, 100 };
+						for (int dir=0;dir<4;dir++)
+						{
+							int8_t bridgelen = map.get(lindex).bridgelen[dir];
+							if (bridgelen == -1) continue;
+							
+							uint16_t newindex = lindex + bridgelen*diroff[dir];
+							//printf("%.4X\n",newindex);
+							if (map.get(newindex).population == map.towalk[root]) goto has_castle_link;
+						}
+					}
+				}
+				if (false) { has_castle_link: continue; }
 				
 				uint16_t color = map.towalk[root];
 //printf("CASTLEVALID[%i]:%.3i,%.3i\n",color,root,index);
@@ -481,7 +511,7 @@ void generate_one(uint64_t seed)
 						if (pos1 == pos2 + 100) goto skip_new_castles;
 						if (pos1 == pos2 +  99) goto skip_new_castles;
 						//these four checks are enough; if they overlap in other directions, it'll be one of those for the other one
-						//equal position can be ignored, it'd just x
+						//equal position is impossible, it'd cause unauthorized overlaps
 					}
 				}
 				
@@ -783,9 +813,9 @@ bool gamemap::generator::finish(gamemap& map)
 #endif
 	sem.wait();
 	
-//printf("Generated %u maps (%u usable) in %ums (%u threads)\n", mgr.n_finished, mgr.n_valid, (unsigned)(end-start), n_threads);
-//printf("Difficulty: %i (%f, desired %f), range %i-%i\n", mgr.best_diff,
-//(mgr.best_diff-mgr.diff_min) / (float)(mgr.diff_max-mgr.diff_min), par.difficulty, mgr.diff_min, mgr.diff_max);
+//printf("Generated %u maps (%u usable)\n", n_finished, n_valid);
+//printf("Difficulty: %i (%f, desired %f), range %i-%i\n", best_diff,
+//(best_diff-diff_min) / (float)(diff_max-diff_min), par.difficulty, diff_min, diff_max);
 //puts(serialize());
 	
 	bool ret;
