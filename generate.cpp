@@ -704,13 +704,12 @@ gamemap::generator::generator(const gamemap::genparams& par) : par(par)
 	unsigned n_threads = thread_num_cores();
 	// don't spin up too many shortlived threads
 	if (n_threads > par.quality / 500) n_threads = par.quality / 500;
+	if (n_threads > 32) n_threads = 32; // that's just excessive
 	if (n_threads < 1) n_threads = 1;
 	
 	n_started = n_threads;
-	for (unsigned i=0;i<n_threads;i++)
-	{
-		thread_create(bind_this(&generator::threadproc));
-	}
+	n_more_threads = n_threads-1;
+	thread_create(bind_this(&generator::threadproc));
 #else
 	n_started = 1;
 #endif
@@ -773,7 +772,16 @@ void gamemap::generator::threadproc()
 	gamemap map; // this object is huge, cache it to avoid pointless stack probing
 	
 	workitem w;
-	synchronized(mut) { get_work(true, w); }
+	synchronized(mut)
+	{
+		get_work(true, w);
+		
+		if (n_more_threads)
+		{
+			thread_create(bind_this(&generator::threadproc));
+			n_more_threads--;
+		}
+	}
 	
 	while (true)
 	{

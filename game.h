@@ -170,6 +170,7 @@ public:
 		unsigned best_diff = 999999;
 		
 		bool stop = false;
+		uint8_t n_more_threads;
 		
 		struct workitem {
 			uint64_t seed;

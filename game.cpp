@@ -1366,7 +1366,6 @@ to_title(); //TODO
 		{
 			if (gamegen_core->done(NULL))
 			{
-printf("DONE %i\n",gamegen_type);
 				gamegen_next[gamegen_type] = gamegen_core->pack();
 				delete gamegen_core;
 				gamegen_core = NULL;
@@ -1400,7 +1399,8 @@ printf("DONE %i\n",gamegen_type);
 		
 		this->out.init_ref(out);
 		
-		gamegen_step();
+		if (state != st_init) // don't do too much the first frame
+			gamegen_step();
 		
 		switch (state)
 		{

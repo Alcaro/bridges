@@ -250,7 +250,10 @@ int main(int argc, char** argv)
 				in.mouseclick = false;
 			}
 			
+			uint64_t start = time_us_ne();
 			g->run(in, out);
+			uint64_t end = time_us_ne();
+			if (end-start >= 2000) printf("rendered in %uus\n", (unsigned)(end-start));
 			gl.TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 640, 480, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, pixels);
 		}
 		
