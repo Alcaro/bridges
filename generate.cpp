@@ -464,6 +464,7 @@ void generate_one(uint64_t seed)
 				if (y < map.height-1 && map.get(index+201).population >= 0 && map.get(index+201).rootnode == root) continue;
 				
 				//- allow_multi is true, or this one is not beside a castle of the same color
+				//(TODO: allow, but force zero bridges that way)
 				if (!par.allow_multi)
 				{
 					for (int tile=0;tile<4;tile++)
@@ -808,6 +809,14 @@ bool gamemap::generator::done(unsigned* progress)
 
 bool gamemap::generator::finish(gamemap& map)
 {
+	uint64_t seed = pack();
+	if (!seed) return false;
+	unpack(par, seed, map);
+	return true;
+}
+
+uint64_t gamemap::generator::pack()
+{
 #ifndef ARLIB_THREAD
 	threadproc();
 #endif
@@ -818,20 +827,22 @@ bool gamemap::generator::finish(gamemap& map)
 //(best_diff-diff_min) / (float)(diff_max-diff_min), par.difficulty, diff_min, diff_max);
 //puts(serialize());
 	
-	bool ret;
+	uint64_t ret;
 	synchronized(mut) // must grab mutex after awaiting the semaphore, to avoid race condition on releasing vs freeing mutex
 	{
-		ret = n_valid;
-		if (ret)
-		{
-			loc_generator lgen(map, par);
-			lgen.generate_one(best_seed);
-		}
+		ret = n_valid ? best_seed : 0;
 	}
 	
 	sem.release(); // in case some noob decides to call finish() multiple times
 	return ret;
 }
+
+void gamemap::generator::unpack(const gamemap::genparams& par, uint64_t seed, gamemap& map)
+{
+	loc_generator lgen(map, par);
+	lgen.generate_one(seed);
+}
+
 
 void gamemap::generator::cancel()
 {

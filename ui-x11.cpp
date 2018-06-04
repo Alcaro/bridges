@@ -216,8 +216,8 @@ int main(int argc, char** argv)
 	
 	pressed_keys_init();
 	
-	//save support not implemented here, just hardcode a save file
-	static const uint8_t saveraw[] = { 31, 1 };
+	//save support not implemented here, just hardcode something reasonable
+	static const uint8_t saveraw[] = { 31, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 	game::savedat save;
 	static_assert(sizeof(save) == sizeof(saveraw));
 	memcpy(&save, saveraw, sizeof(save));

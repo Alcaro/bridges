@@ -21,7 +21,6 @@ RUN_ONCE_FN(initialize)
 static bool validate_hostname(const char * hostname, const X509 * server_cert);
 #endif
 
-#include"../deps/valgrind/valgrind.h"
 class socketssl_impl : public socket {
 public:
 	runloop* loop;
@@ -38,6 +37,11 @@ public:
 	
 	uintptr_t timer_id = 0;
 	bool* deleted_p = NULL;
+	
+#if OPENSSL_VERSION_NUMBER < 0x10002000 // < 1.0.2
+	bool permissive;
+	string domain;
+#endif
 	
 	socketssl_impl(socket* parent, cstring domain, runloop* loop, bool permissive)
 	{
@@ -59,10 +63,9 @@ public:
 		
 		SSL_set_verify(ssl, permissive ? SSL_VERIFY_NONE : SSL_VERIFY_PEER, NULL);
 		
-#if OPENSSL_VERSION_NUMBER >= 0x10100000 // >= 1.1.0
-#error test, especially [gs]et0 vs [gs]et1
-#error also check whether set_tlsext_host_name is needed
-		SSL_set1_host(ssl, "example.com");
+#if OPENSSL_VERSION_NUMBER < 0x10002000
+		this->permissive = permissive;
+		this->domain = domain;
 #endif
 		
 #if OPENSSL_VERSION_NUMBER >= 0x10002000 && OPENSSL_VERSION_NUMBER < 0x10100000 // >= 1.0.2, < 1.1.0
@@ -71,6 +74,12 @@ public:
 			X509_VERIFY_PARAM* param = SSL_get0_param(ssl);
 			X509_VERIFY_PARAM_set1_host(param, domain.c_str(), 0);
 		}
+#endif
+		
+#if OPENSSL_VERSION_NUMBER >= 0x10100000 // >= 1.1.0
+#error test, especially [gs]et0 vs [gs]et1
+#error also check whether set_tlsext_host_name is needed
+		SSL_set1_host(ssl, "example.com");
 #endif
 		
 		update();
@@ -97,12 +106,13 @@ public:
 		{
 			connected = true;
 #if OPENSSL_VERSION_NUMBER < 0x10002000 // < 1.0.2
-			X509* cert = SSL_get_peer_certificate(ret->ssl);
-			if (!permissive && !validate_hostname(domain.c_str(), cert))
+			if (!permissive)
 			{
-				sock = NULL;
+				X509* cert = SSL_get_peer_certificate(ssl);
+				if (!validate_hostname(domain.c_str(), cert))
+					sock = NULL;
+				X509_free(cert);
 			}
-			X509_free(cert);
 #endif
 		}
 	}
@@ -124,6 +134,7 @@ public:
 		
 	again: ;
 		bool again = false;
+		if (!sock) is_readable = true;
 		
 		if (cb_read && is_readable) { again = true; cb_read(); }
 		if (deleted) return;
@@ -296,102 +307,6 @@ test("OpenSSL init", "array,base64", "tcp")
 		assert_lt(end_us-begin_us, 5000); // takes about 1ms - no clue why Bear is so much slower
 	}
 }
-#endif
-
-#if 0
-_   class socketssl_impl : public socket {
-_   public:
-_   	socket* sock;
-_   	SSL* ssl;
-_   	
-_   	socketssl_impl(socket* parent) : sock(parent) {}
-_   	
-_   	static socketssl_impl* create(socket* parent, cstring domain, bool permissive)
-_   	{
-_   		socketssl_impl* ret = new socketssl_impl(parent);
-_   		ret->ssl = SSL_new(ctx);
-_   		SSL_set_tlsext_host_name(ret->ssl, (const char*)domain.c_str());
-_   		SSL_set_fd(ret->ssl, ret->fd);
-_   		
-_   		SSL_set_verify(ret->ssl, permissive ? SSL_VERIFY_NONE : SSL_VERIFY_PEER, NULL);
-_   		
-_   #if OPENSSL_VERSION_NUMBER >= 0x10100000 // >= 1.1.0
-_   #error test, especially [gs]et0 vs [gs]et1
-_   #error also check whether set_tlsext_host_name is needed
-_   		SSL_set1_host(ret->ssl, "example.com");
-_   #endif
-_   		
-_   #if OPENSSL_VERSION_NUMBER >= 0x10002000 && OPENSSL_VERSION_NUMBER < 0x10100000 // >= 1.0.2, < 1.1.0
-_   		if (!permissive)
-_   		{
-_   			X509_VERIFY_PARAM* param = SSL_get0_param(ret->ssl);
-_   			X509_VERIFY_PARAM_set1_host(param, domain.c_str(), 0);
-_   		}
-_   #endif
-_   		
-_   		bool ok = (SSL_connect(ret->ssl)==1);
-_   		
-_   #if OPENSSL_VERSION_NUMBER < 0x10002000 // < 1.0.2
-_   		X509* cert = SSL_get_peer_certificate(ret->ssl);
-_   		if (ok && !permissive && !validate_hostname(domain.c_str(), cert))
-_   		{
-_   			ok=false;
-_   		}
-_   		X509_free(cert);
-_   #endif
-_   		
-_   		if (!ok)
-_   		{
-_   			delete ret;
-_   			return NULL;
-_   		}
-_   		return ret;
-_   	}
-_   	
-_   	/*private*/ int fixret(int ret)
-_   	{
-_   		if (ret > 0) return ret;
-_   		
-_   		int sslerror = SSL_get_error(ssl, ret);
-_   		if (sslerror==SSL_ERROR_WANT_READ || sslerror==SSL_ERROR_WANT_WRITE) return 0;
-_   //printf("ERR=%i\n",sslerror);
-_   //ERR_print_errors();
-_   		return e_ssl_failure;
-_   	}
-_   	
-_   	int recv(arrayvieww<uint8_t> data)
-_   	{
-_   		setblock(fd, block);
-_   		return fixret(SSL_read(ssl, data.ptr(), data.size()));
-_   	}
-_   	
-_   	int send(arrayview<uint8_t> data)
-_   	{
-_   		setblock(fd, block);
-_   		return fixret(SSL_write(ssl, data.ptr(), data.size()));
-_   	}
-_   	
-_   	//bool active(bool want_recv, bool want_send)
-_   	//{
-_   	//	if (want_recv) return SSL_pending(ssl);
-_   	//	else return false; // don't care about write, assume it always succeeds
-_   	//}
-_   	
-_   	~socketssl_impl()
-_   	{
-_   		SSL_shutdown(ssl);
-_   		SSL_free(ssl);
-_   		delete sock;
-_   	}
-_   };
-_   
-_   socketssl* socketssl::create(socket* parent, cstring domain, bool permissive)
-_   {
-_   	initialize();
-_   	if (!ctx) return NULL;
-_   	
-_   	return socketssl_impl::create(parent, domain, permissive);
-_   }
 #endif
 
 

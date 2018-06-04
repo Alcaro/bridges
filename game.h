@@ -18,6 +18,8 @@ public:
 	struct savedat {
 		uint8_t unlocked;
 		bool seen_random_tutorial;
+		
+		litend<uint64_t> gen_seeds[3];
 	};
 	
 	//'out' should be a 640x480 image. 0rgb8888 or xrgb8888 is recommended, xrgb is slightly faster.
@@ -181,11 +183,17 @@ public:
 		void threadproc();
 		
 	public:
-		//The object may not be deleted before calling cancel() or finish() at least once.
+		//The object may not be deleted before calling cancel(), compress() or pack() at least once.
 		generator(const gamemap::genparams& par);
 		void cancel();
 		bool done(unsigned* progress);
+		
 		bool finish(gamemap& map);
+		
+		//Pass this value to unpack(). Passing any other value is likely to give results inconsistent with the generation parameters.
+		//If the return value is 0, generation was cancelled.
+		uint64_t pack();
+		static void unpack(const gamemap::genparams& par, uint64_t seed, gamemap& map);
 	};
 	
 	//class generator;

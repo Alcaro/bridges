@@ -19,7 +19,7 @@ public:
 	//If the server doesn't exist or doesn't respond, reports a broken connection.
 	//Once the connection is established, it reports writability to its runloop. However, writes before that will succeed.
 	static socket* create(cstring domain, int port, runloop* loop);
-	static socket* create_ssl(cstring domain, int port, runloop* loop); // TODO: choosable backend, permissiveness, SSL server
+	static socket* create_ssl(cstring domain, int port, runloop* loop); // TODO: choosable backend, server
 	// To avoid amplification attacks, any homemade protocol must have the first packet longer than the first reply.
 	// For example, it can contain a 256 character message explaining that this is a 256 byte message to avoid amplification attacks.
 	static socket* create_udp(cstring domain, int port, runloop* loop);

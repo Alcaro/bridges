@@ -122,7 +122,12 @@ public:
 	bool game_menu;
 	int game_menu_pos;
 	int game_menu_focus;
-	gamemap::generator* game_next_gen = NULL;
+	
+#ifdef ARLIB_THREAD
+	uint64_t gamegen_next[3] = { 0, 0, 0 };
+	uint8_t gamegen_type;
+	gamemap::generator* gamegen_core = NULL;
+#endif
 	
 	int game_kb_x;
 	int game_kb_y;
@@ -433,12 +438,10 @@ public:
 		{
 			p.density = 0.3; // reducing density reduces difficulty a lot more than the difficulty switch
 			p.difficulty = 0.4;
-			tileset = 0;
 		}
 		if (id == 101)
 		{
 			p.difficulty = 1.0;
-			tileset = 1;
 		}
 		if (id == 102)
 		{
@@ -446,7 +449,6 @@ public:
 			p.difficulty = 1.0;
 			p.width = 9;
 			p.height = 9;
-			tileset = 2;
 		}
 		
 		return p;
@@ -463,14 +465,18 @@ public:
 		else
 		{
 			gamemap::genparams p = game_params(id);
-			if (game_next_gen)
+#ifdef ARLIB_THREAD
+			if (gamegen_next[id-100])
 			{
-				game_next_gen->finish(map);
-				delete game_next_gen;
-				game_next_gen = NULL;
+				gamemap::generator::unpack(p, gamegen_next[id-100], map);
+				gamegen_next[id-100] = 0;
 			}
-			else map.generate(p);
+			else
+#endif
+				map.generate(p);
 			map.reset();
+			
+			tileset = id-100;
 		}
 		
 		popup_id = pop_none;
@@ -904,7 +910,6 @@ public:
 				{
 					popup_id = pop_welldone;
 					popup_frame = 0;
-					if (map_id >= 100) game_next_gen = new gamemap::generator(game_params(map_id));
 				}
 			}
 		}
@@ -989,7 +994,6 @@ public:
 				{
 					popup_id = pop_welldone;
 					popup_frame = 0;
-					if (map_id >= 100) game_next_gen = new gamemap::generator(game_params(map_id));
 				}
 			}
 			else
@@ -1331,12 +1335,55 @@ to_title(); //TODO
 	{
 		unlocked = dat.unlocked;
 		seen_random_tutorial = dat.seen_random_tutorial;
+		
+#ifdef ARLIB_THREAD
+		gamegen_next[0] = dat.gen_seeds[0];
+		gamegen_next[1] = dat.gen_seeds[1];
+		gamegen_next[2] = dat.gen_seeds[2];
+#endif
 	}
 	
 	void save(savedat& dat)
 	{
 		dat.unlocked = unlocked;
 		dat.seen_random_tutorial = seen_random_tutorial;
+		
+#ifdef ARLIB_THREAD
+		dat.gen_seeds[0] = gamegen_next[0];
+		dat.gen_seeds[1] = gamegen_next[1];
+		dat.gen_seeds[2] = gamegen_next[2];
+#else
+		dat.gen_seeds[0] = 0;
+		dat.gen_seeds[1] = 0;
+		dat.gen_seeds[2] = 0;
+#endif
+	}
+	
+	void gamegen_step()
+	{
+#ifdef ARLIB_THREAD
+		if (gamegen_core)
+		{
+			if (gamegen_core->done(NULL))
+			{
+printf("DONE %i\n",gamegen_type);
+				gamegen_next[gamegen_type] = gamegen_core->pack();
+				delete gamegen_core;
+				gamegen_core = NULL;
+			}
+			else return;
+		}
+		
+		for (int i=0;i<3;i++)
+		{
+			if (!gamegen_next[i])
+			{
+				gamegen_core = new gamemap::generator(game_params(100+i));
+				gamegen_type = i;
+				return;
+			}
+		}
+#endif
 	}
 	
 	
@@ -1352,6 +1399,8 @@ to_title(); //TODO
 		this->in = in;
 		
 		this->out.init_ref(out);
+		
+		gamegen_step();
 		
 		switch (state)
 		{
