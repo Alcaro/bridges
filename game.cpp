@@ -10,9 +10,6 @@
 //    is the generator good enough, or do I make a map editor?
 //    make sure to introduce the new objects in a reasonable way
 //- add hint system
-//- add UI for game generator
-//- for large maps, generator yields REALLY few non-multiple solutions
-//    with 9x9, use_castle and allow_dense true, and density=0.6, I've seen 30000 attempts with 0 valid
 //- restrict keyboard cursor position to the middle if the outermost parts have no possible bridges, I'll need it for mainlands
 //- make solver consider maps unambiguous if all solutions have the same number of bridges between islands A and B,
 //    to avoid handing out "this one is either 0 or 4" hints to people who know how generator works
@@ -426,7 +423,7 @@ public:
 		gamemap::genparams p = {};
 		p.width = 7;
 		p.height = 7;
-		p.density = 0.6;
+		p.density = 0.4;
 		p.quality = 20000;
 		p.use_reef = true;
 		p.use_large = true;
@@ -436,8 +433,8 @@ public:
 		
 		if (id == 100)
 		{
-			p.density = 0.3; // reducing density reduces difficulty a lot more than the difficulty switch
-			p.difficulty = 0.4;
+			p.density = 0.2;
+			p.difficulty = 0.75; // this is somewhat high, but the low density makes all maps easy
 		}
 		if (id == 101)
 		{
@@ -471,7 +468,8 @@ public:
 				gamemap::generator::unpack(p, gamegen_next[id-100], map);
 				gamegen_next[id-100] = 0;
 			}
-			else
+			else // this can only happen if player enters a map, leaves, and reenters, within half a second (or savefile is corrupt)
+			     // getting a generator delay is suboptimal, but unavoidable, and no human can click that fast
 #endif
 				map.generate(p);
 			map.reset();

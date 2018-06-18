@@ -293,7 +293,7 @@ public:
 	uint32_t accumulator; // used for difficulty/hint counting
 private:
 	
-	//this increases the difficulty score for incorrect guesses; this is intentional
+	//this increases the difficulty score even for incorrect guesses; this is intentional
 	__attribute__((always_inline)) void add_difficulty(uint32_t n) { if (op==op_difficulty) accumulator += n; }
 	
 	
@@ -919,7 +919,7 @@ public:
 			if (ret == 0) return false;
 			if (ret == -1) { maxdepth++; goto again; }
 			maxdepth--; // needs at least depth 1, or it won't notice that it's finished. this should not contribute to difficulty
-			add_difficulty(100*maxdepth*maxdepth*maxdepth);
+			add_difficulty(100*maxdepth*maxdepth);
 if(maxdepth>=2)puts("#######"),puts(map.serialize()),puts("#######");
 		}
 		else

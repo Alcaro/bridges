@@ -128,8 +128,8 @@ public:
 		uint8_t height;
 		
 		float density; // Use a value between 0.0 and 1.0; it will attempt to fill that fraction of the map with islands.
-		               // Since some tiles will be taken by bridges, the highest possible values will act identical.
-		               // However, too low will be too easy. 0.6 is recommended.
+		               // Since some tiles will be taken by bridges, anything above (roughly) 0.4 will act identical.
+		               // Reducing it further will considerably reduce difficulty.
 		bool allow_dense; // Don't try to avoid maps where two islands are exactly beside each other.
 		
 		bool use_reef; // Include reefs in the returned map.

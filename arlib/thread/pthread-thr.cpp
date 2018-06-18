@@ -20,13 +20,27 @@ static void * threadproc(void * userdata)
 	return NULL;
 }
 
-void thread_create(function<void()> start)
+void thread_create(function<void()> start, priority_t pri)
 {
 	threaddata_pthread* thdat = new threaddata_pthread;
 	thdat->func = start;
+	
+	pthread_attr_t attr;
+	if (pthread_attr_init(&attr) < 0) abort();
+	
+	sched_param sched;
+	if (pthread_attr_getschedparam(&attr, &sched) >= 0)
+	{
+		static const int8_t prios[] = { 0, -10, 10, 19 };
+		sched.sched_priority = prios[pri];
+		pthread_attr_setschedparam(&attr, &sched);
+	}
+	
 	pthread_t thread;
-	if (pthread_create(&thread, NULL, threadproc, thdat) != 0) abort();
+	if (pthread_create(&thread, &attr, threadproc, thdat) != 0) abort();
 	pthread_detach(thread);
+	
+	pthread_attr_destroy(&attr);
 }
 
 mutex_rec::mutex_rec() : mutex(noinit())
