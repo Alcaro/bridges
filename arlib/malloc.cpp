@@ -20,7 +20,7 @@ static void malloc_fail(size_t size)
 
 anyptr malloc_check(size_t size)
 {
-	void* ret=malloc(size);
+	void* ret = malloc(size);
 	debug(ret);
 	if (size && !ret) malloc_fail(size);
 	return ret;
@@ -33,7 +33,7 @@ anyptr try_malloc(size_t size)
 
 anyptr realloc_check(anyptr ptr, size_t size)
 {
-	void* ret=realloc(ptr, size);
+	void* ret = realloc(ptr, size);
 	debug(ret);
 	if (size && !ret) malloc_fail(size);
 	return ret;
@@ -46,7 +46,7 @@ anyptr try_realloc(anyptr ptr, size_t size)
 
 anyptr calloc_check(size_t size, size_t count)
 {
-	void* ret=calloc(size, count);
+	void* ret = calloc(size, count);
 	debug(ret);
 	if (size && count && !ret) malloc_fail(size*count);
 	return ret;

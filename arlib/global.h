@@ -193,11 +193,11 @@ template<> struct static_assert_t<false> {};
 
 #ifdef __cplusplus
 class anyptr {
-void* data;
+	void* data;
 public:
-template<typename T> anyptr(T* data_) { data=(void*)data_; }
-template<typename T> operator T*() { return (T*)data; }
-template<typename T> operator const T*() const { return (const T*)data; }
+	template<typename T> anyptr(T* data_) { data=(void*)data_; }
+	template<typename T> operator T*() { return (T*)data; }
+	template<typename T> operator const T*() const { return (const T*)data; }
 };
 #else
 typedef void* anyptr;

@@ -128,6 +128,7 @@ public:
 	
 	int game_kb_x;
 	int game_kb_y;
+	uint8_t game_kb_visible; // 0 - invisible, anything else - recently used, reduced by 1 for every mouse click
 	uint8_t game_kb_state; // 0 - keyboard inactive, focus box invisible; 1 - not focused, moving around; 2 - held down
 	uint8_t game_kb_holdtimer; // if this hits 0 and the key is still held, move another step
 	
@@ -916,10 +917,14 @@ public:
 		if (in_press&~(1<<k_cancel | 1<<k_click) && game_kb_state==0 && !game_menu)
 		{
 			game_kb_state = 1;
-			game_kb_x = 0;
-			game_kb_y = 0;
-			
 			in_press &= 1<<k_cancel;
+		}
+		
+		
+		if (in_press & 1<<k_click && game_kb_visible != 0)
+		{
+			game_kb_visible--;
+			if (game_kb_visible == 0) game_kb_state = 0;
 		}
 		
 		if (game_kb_state != 0 && !game_menu)
@@ -932,6 +937,7 @@ public:
 					game_kb_holdtimer = 3;
 					in_press = in.keys;
 				}
+				game_kb_visible = 5;
 			}
 			else game_kb_holdtimer = 20;
 			

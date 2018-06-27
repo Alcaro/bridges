@@ -695,13 +695,10 @@ gamemap::generator::generator(const gamemap::genparams& par) : par(par)
 	//  due to threads finishing in varying order, making different maps seem superior;
 	//  therefore, it is not allowed to override it.
 	//A fixed random seed with exactly one thread will be deterministic.
-	randseed = time(NULL);
-	randseed <<= 16;
-	randseed += rand();
-	randseed <<= 16;
+	randseed = time_us() << 16;
 	
 #ifdef ARLIB_THREAD
-	unsigned n_threads = thread_num_cores();
+	unsigned n_threads = thread_num_cores_idle();
 	// don't spin up too many shortlived threads
 	if (n_threads > par.quality / 500) n_threads = par.quality / 500;
 	if (n_threads > 32) n_threads = 32; // more than 32 is just excessive, such high quality is pointless

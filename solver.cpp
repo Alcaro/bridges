@@ -884,6 +884,8 @@ public:
 				uint16_t newflags = flags;
 				
 				//keep the pointless flags&0x1234 checks, here.bridgelen[0] is undefined if the relevant flag isn't set
+				//this isn't a pure performance optimization - the isolation rule processor ignores pop-1 islands,
+				//  so without this, it could claim the map '1111' is solvable
 				if (here.population == 2 && (flags&0x0100) && map.map[y][x+here.bridgelen[0]].population == 2)
 					newflags &= ~0x0100;
 				if (here.population == 1 && (flags&0x0010) && map.map[y][x+here.bridgelen[0]].population == 1)

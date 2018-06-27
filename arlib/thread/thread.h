@@ -12,6 +12,8 @@ void thread_create(function<void()> start, priority_t pri = pri_default);
 
 //Returns the number of threads to create to utilize the system resources optimally.
 unsigned int thread_num_cores();
+//Returns the number of low-priority threads that can be created without interfering with other programs.
+unsigned int thread_num_cores_idle();
 
 #include <string.h>
 #if defined(__unix__)
