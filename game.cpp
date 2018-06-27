@@ -1175,7 +1175,7 @@ to_title(); //TODO
 				static const char * const helptexts[] = {
 					NULL,
 					
-					"\7            Click anywhere to continue...", // pop_welldone
+					"\7              Click anywhere to continue...", // pop_welldone
 					
 					"\1Lord of Bridges is played on a square grid with " // pop_tutor1
 					"squares that represent islands. The yellow "
@@ -1301,12 +1301,12 @@ to_title(); //TODO
 				{
 					res.smallfont.scale = 6;
 					res.smallfont.color = 0xFFFF00;
-					out.insert_text(140-1, 60-1, res.smallfont, "WELL DONE!", 6);
-					out.insert_text(140+1, 60-1, res.smallfont, "WELL DONE!", 6);
-					out.insert_text(140-1, 60+1, res.smallfont, "WELL DONE!", 6);
-					out.insert_text(140+1, 60+1, res.smallfont, "WELL DONE!", 6);
+					out.insert_text(158-1, 60-1, res.smallfont, "WELL DONE!", 6);
+					out.insert_text(158+1, 60-1, res.smallfont, "WELL DONE!", 6);
+					out.insert_text(158-1, 60+1, res.smallfont, "WELL DONE!", 6);
+					out.insert_text(158+1, 60+1, res.smallfont, "WELL DONE!", 6);
 					res.smallfont.color = 0xFF0000;
-					out.insert_text(140,   60,   res.smallfont, "WELL DONE!", 6);
+					out.insert_text(158,   60,   res.smallfont, "WELL DONE!", 6);
 					res.smallfont.scale = 2;
 				}
 				
