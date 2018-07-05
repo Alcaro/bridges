@@ -1,6 +1,21 @@
 #include "game.h"
 #include <math.h>
 
+//TODO: new generator
+//- pick a number of islands; keep constant for every iteration 1..quality
+//- scatter that many islands; if they don't fit, drop a few
+//- build 1 bridge at all possible spots
+//- for every crossing on ocean, randomly pick which one to remove
+//- use some spanning-tree algorithm to find which bridges must exist, and change them to 2
+//    use Kruskal's algorithm, with edges sorted randomly
+//    if it reports unconnected, return false
+//- for every 1, randomly pick whether to change it to 0 (80%) or 2 (20%)
+//- for every 1 or 2, randomly pick whether to change it to 1 (50%) or 2 (50%)
+//- if that has multiple solutions, try the above step again a few times
+//    if still multi-solvable on the third attempt, give up
+
+
+
 //During generate_one, towalk is
 // 0 if there can't be any island here because it wouldn't connect to anything (or would be too long)
 // 1 if it may be possible to place an island here
@@ -16,7 +31,7 @@ gamemap& map;
 const gamemap::genparams& par;
 
 //use a per-thread RNG, to avoid thread safety issues (or, if rand() is mutexed, avoid the associated cacheline bouncing)
-//I could've used rand_r instead, but that'd require an ifdef on windows and I'd rather not.
+//I could've used rand_r instead, but I'd need something else on windows, so let's just do said something else everywhere.
 random_t rand;
 
 loc_generator(gamemap& map, const gamemap::genparams& par) : map(map), par(par) {}
@@ -219,16 +234,18 @@ bool try_add_island(int x, int y)
 			X(0,-1); X(0,+1);
 			break;
 		case 6: // square, up left
-			(X(-1,0) + X(0,-1)) && X(-1,-1);
+			//+ instead of || because otherwise it short-circuits and only creates L-shaped islands (| would work as well)
+			//rand()%100 to ensure it does create some L shapes - it's kinda silly to know that L shapes always have something in the hole
+			(X(-1,0) + X(0,-1)) && rand()%100<75 && X(-1,-1);
 			break;
 		case 7: // square, up right
-			(X(+1,0) + X(0,-1)) && X(+1,-1);
+			(X(+1,0) + X(0,-1)) && rand()%100<75 && X(+1,-1);
 			break;
 		case 8: // square, down left
-			(X(-1,0) + X(0,+1)) && X(-1,+1);
+			(X(-1,0) + X(0,+1)) && rand()%100<75 && X(-1,+1);
 			break;
 		case 9: // square, down right
-			(X(+1,0) + X(0,+1)) && X(+1,+1);
+			(X(+1,0) + X(0,+1)) && rand()%100<75 && X(+1,+1);
 			break;
 #undef X
 		}

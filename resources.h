@@ -19,7 +19,7 @@ static const uint8_t bridgeh_raw[297];
 image bridgeh;
 static const uint8_t bridgev_raw[294];
 image bridgev;
-static const uint8_t castle_raw[898];
+static const uint8_t castle_raw[894];
 image castle;
 static const uint8_t fg0_raw[497];
 image fg0;

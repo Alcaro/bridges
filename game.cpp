@@ -145,6 +145,7 @@ public:
 		pop_lv11,
 		pop_tutor3b,
 		pop_tutor3c,
+		pop_tutor3d,
 		
 		pop_tutorrandom1,
 		pop_tutorrandom2,
@@ -680,7 +681,7 @@ public:
 				int flagx2 = 0;
 				int flagy = 0;
 				
-				if (here.population == 80) { flagx1=14; flagx2=51; flagy=0; }
+				if (here.population == 80) { flagx1=16; flagx2=49; flagy=1; }
 				if (here.population == 81) { flagx1=28; flagx2=28; flagy=3; }
 				if (here.population == 82) { flagx1=20; flagx2=48; flagy=2; }
 				if (here.population == 83) { flagx1=32; flagx2=32; flagy=2; }
@@ -1133,9 +1134,14 @@ to_title(); //TODO
 					break;
 					
 				case pop_tutor3b:
-				case pop_tutor3c:
+				case pop_tutor3d:
 					popup_id = pop_tutor4;
 					break;
+				case pop_tutor3c:
+					if (map_id >= 100) popup_id = pop_tutor3d;
+					else popup_id = pop_tutor4;
+					break;
+				
 				case pop_tutor4:
 				case pop_lv6p2:
 				case pop_lv11:
@@ -1226,6 +1232,10 @@ to_title(); //TODO
 					"must be connected.\2 No isolated islands are "
 					"allowed. Also, \1a bridge MUST NOT CROSS another "
 					"bridge.\2",
+					
+					"\2The dark tiles block bridge building, and large " // pop_tutor3d
+					"islands have more than four possible bridge "
+					"directions.",
 					
 					
 					"\1Welcome to the random levels! Each time you play " // pop_tutorrandom1
