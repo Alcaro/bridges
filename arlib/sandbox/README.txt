@@ -38,7 +38,7 @@ Under a suitable sandbox policy, typical runs of distro-provided command line pr
 
 Under the same sandbox policy, if a malicious program is substituted, it cannot in any way:
 (1) access private data
-(2) contact any unrelated process
+(2) contact or disrupt any unrelated process
 (3) keep running beyond termination of the sandbox
 
 "Private data" includes (unless authorized by sandbox policy):
@@ -75,6 +75,8 @@ but does not include:
 - The current timezone
     like the above, it's exported in vdso
     hard-but-not-impossible is a waste of time, it will become a library routine and then it's easy
+- inode numbers
+    fstat() leaks them, and I'm not aware of anything useful that can be done with an inode, other than equality comparisons
 though obviously, even acceptable data will not be leaked frivolously.
 
 "Contact" includes:
@@ -92,12 +94,13 @@ but does not include:
 - Cache timing side channels to leak data from non-sandboxed processes
     again, impossible to block, other than by using constant-time algorithms in the victim
     this includes Meltdown/Spectre; only the victim can defend against that, the sandbox can't do
-      anything about it (though Spectre may possibly be usable against the sandbox)
+      anything about it (though Spectre may possibly be usable against the sandbox itself, just like against any other program)
 though again, such permissions will not be granted frivolously.
 
 The above applies even if the attacker is able to cause arbitrary syscalls to fail during sandbox
- setup. Such an attacker may not cause the child to be launched with a less restrictive sandbox. (It
- may, however, prevent the sandbox from launching at all.)
+ setup, and/or launch arbitrarily many arbitrary executables, including ones built using information
+ gathered by previous ones. Each sandbox run is assumed able to create a few files in an
+ initially-empty directory.
 
 I choose to discount the possibility of kernel/glibc/compiler/hardware bugs; I know there are some,
  but smarter people than me have already looked for them. (And by restricting many syscalls,
@@ -126,7 +129,7 @@ both require root (or equivalent)
 
 Mozilla Firefox https://wiki.mozilla.org/Security/Sandbox
 doesn't want root, judging by https://bugzilla.mozilla.org/show_bug.cgi?id=1151607#c0 #3
-                   as well as missing features in https://wiki.mozilla.org/Security/Sandbox#Linux_3
+                   as well as https://wiki.mozilla.org/Security/Sandbox/Specifics#Linux
 but can only run Firefox
 (like Chrome, there are three, plus various special cases <https://wiki.mozilla.org/Security/Sandbox#Current_Status>)
 
@@ -160,7 +163,7 @@ Systrace http://www.citi.umich.edu/u/provos/systrace/
 very complex
 rewrites syscall arguments, can elevate child's permissions -> race conditions everywhere!
  unless it suspends all threads on every sensitive syscall, which I assume is many, yielding bad performance
- (how would it even do that?)
+ (how would it even do that? how does it elevate permissions in the first place, kernel patch?)
 no updates since 2009
 
 SELinux, AppArmor, TOMOYO, Smack
@@ -172,7 +175,7 @@ as far as I can gather, they all require root to configure, even if installed - 
 grsecurity https://grsecurity.net/
 it's a kernel patch, likely to conflict with your distro
 seems to be more about protecting against kernel vulnerabilities than protecting processes from each other
-seems to not be freely available
+seems to not be freely available anymore
 
 chroot https://en.wikipedia.org/wiki/Chroot
 not a complete sandbox, doesn't protect network
@@ -218,7 +221,8 @@ The sandbox will contain four main components: Broker, locker, filter, and emula
 
 The broker is the main process. It will start the child process, then process requests for file
  access until the child exits. It is the most safety-critical component; it must assume all input is
- hostile, and anything unexpected must be safely rejected (possibly by terminating).
+ hostile, and anything unexpected must be safely rejected (possibly by terminating the child, or
+ itself).
 
 The locker is responsible for dropping privileges, blocking every unnecessary syscall, and otherwise
  ensuring it can't do anything it shouldn't. While also important, the sandbox configuration is
@@ -253,7 +257,7 @@ After forking the locker, it will keep a list of child-accessible file/directory
 Locker
 ------
 
-The locker's job is long, but fairly straightforward. After broker's fork() returns, it will
+The locker's job is long, but fairly straightforward. After broker's fork() returns, it will (not necessarily in this order)
 - unshare(CLONE_NEWUSER | CLONE_NEWPID | CLONE_NEWNET | CLONE_NEWCGROUP | CLONE_NEWIPC | CLONE_NEWNS | CLONE_NEWUTS)
     NEWUSER is because NEWPID and chroot needs it
       and because the real UID is private
@@ -274,12 +278,12 @@ The locker's job is long, but fairly straightforward. After broker's fork() retu
     it's half of socketpair(AF_UNIX, SOCK_SEQPACKET, 0), used for passing additional file descriptors around
       why not DGRAM? because it allows sendmsg to contact others' sockets <https://bugzilla.mozilla.org/show_bug.cgi?id=1066750>
       and I'm not sure if STREAM passes the ancillary data (file descriptors) when I want it
-      DGRAM is probably safe, there are two locks each of which should be safe, but this is even safer
+      DGRAM is probably safe, there are two locks each of which should be safe, but three is better
         chroot/CLONE_NEWNET ensures no sockaddr_un is valid
         and seccomp rejects sendto/sendmsg so no sockaddr_un can be used, we only need recvmsg
           still, I'd be happier if sendmsg took a flag saying 'ignore address'
 - chroot("/proc/sys/debug/"), chdir("/")
-    execveat() accesses the filesystem, which must be neutralized. See the Emulator section for details.
+    execveat() accesses the filesystem, which must be neutralized. See the execve section for details.
     While a freshly created and empty directory would work, I'd rather not write to the filesystem at all.
     /proc/sys/debug/ is chosen as root directory since that part of the kernel config is unlikely to be changed,
       and the defaults are public. Still, it is suboptimal.
@@ -291,30 +295,43 @@ The locker's job is long, but fairly straightforward. After broker's fork() retu
     https://www.kernel.org/doc/Documentation/cgroup-v1/memory.txt
     http://man7.org/linux/man-pages/man7/cgroups.7.html
     unfortunately, unsharing UIDs doesn't grant the ability to set up cgroups
-- (Ideally) set cgroup cpu.cfs_period_us = 100*1000, cpu.cfs_quota_us = 50*1000
+    instead, RLIMIT_AS (address space) is set to one gigabyte
+      this does nothing against forkbombs, but helps against non-malicious but misbehaving software
+- Don't set cgroup cpu.cfs_period_us = 100*1000, cpu.cfs_quota_us = 50*1000
     again, to avoid resource waste
       RLIMIT_CPU doesn't help, I believe it's reset by fork()
     https://www.kernel.org/doc/Documentation/scheduler/sched-bwc.txt
     the broker will enforce that the child doesn't run longer than expected
-    but like memsw.limit_in_bytes, cgroups are annoying
+    but like memsw.limit_in_bytes, cgroups are restricted
 - Don't set cgroup blkio.throttle.{read,write}_bps_device
     they require setting for each partition, complex to implement and breaks if a USB drive is added
     slamming the disk serves only to annoy the user and attract attention, the attacker gains nothing
     https://www.kernel.org/doc/Documentation/cgroup-v1/blkio-controller.txt
+- Set the lowest possible nice and ionice values
+    this yields the same benefits (sandboxes can't exhaust resources for non-sandboxed processes) as the above two, but is available
+    and unlike the above, it doesn't prevent them from running if the system is otherwise idle
 - (Ideally) set cgroup pids.max to 10
     while the memory limit blocks some things, even a low memory limit can fit a lot of zombie processes; PIDs are a finite resource
     https://www.kernel.org/doc/Documentation/cgroup-v1/pids.txt
-- Close all fds above 4
+    but since cgroups are unavailable, only RLIMIT_NPROC is set
+      unfortunately, that one includes root-namespace user's processes too, so the limit is set to 500
+- Close fd 5 and everything above
     there should be none, and they should be CLOEXEC even if they exist, but no point taking silly risks
     3 and 4 are the broker socket and emulator fd, opened before clone() (if they were originally something else, dup2 will be used)
     0, 1 and 2 are kept if sandbox policy permits
 - prctl(PR_SET_PDEATHSIG, SIGKILL)
     to ensure this process dies if the broker does, taking the children with it
     we must also ensure the sandbox terminates if the parent dies prior to this, otherwise it'd outlive the sandbox
-    since we're in a PID namespace, we can't check if getppid() is 1;
-      however, we can ask our parent if it's still alive, using our socket
-      we could let the emulator handle this, it won't be compromised before entering ld-linux,
-        but that would make the security boundaries harder to define
+- Send a ping message to the parent
+    if parent dies before PR_SET_PDEATHSIG, the child may outlive the sandbox
+    to avoid this, the sandbox must check if it has a parent, at some point after setting PDEATHSIG
+    the most obvious one would be checking if getppid() is 1, but we're in a pid namespace, so that won't work
+    however, we can ask the sandbox monitor if we have a parent
+    since the sandbox monitor is the parent, it will reply only if it exists; therefore, any message at all works
+      however, we must await the response, to avoid things happening in the order
+        'parent dies / PDEATHSIG set / send() returns / parent's fds are closed'
+    this is technically unnecessary, since the first post-exec syscall will be to ask the parent to open(/lib64/ld-linux-x86-64.so.2),
+      but relying on that makes the security boundaries harder to define, so explicit is better than implicit
 - prctl(PR_SET_NO_NEW_PRIVS)
     seccomp requires it (maybe CLONE_NEWUSER is sufficient authorization, but why not, it does no harm)
 - prctl(PR_SET_SECCOMP)
@@ -322,6 +339,9 @@ The locker's job is long, but fairly straightforward. After broker's fork() retu
 - Create a new, clean environment block
     the old one contains various items considered private or otherwise unnecessary, such as $SSH_AUTH_SOCK, $LANG and $HOME
 - execveat(emulator)
+    everything before this (including after PR_SET_SECCOMP) is considered trusted code;
+      we know it will execute correctly, or notice the failure and terminate
+    everything afterwards is considered untrusted; it may misbehave arbitrarily
 
 
 Emulator
@@ -340,10 +360,12 @@ A minor issue is that it must be fully self-contained, no libc. But the useful p
  easily recreated (syscall wrappers - easy to clone; printf - make my own on top of write(), using
  some C++ template tricks; malloc - global variables, or implement my own with mmap).
 
-While we can get grandchildren reparented to us (we're namespace init), yielding zombies, we choose
- to ignore this. We can't reap zombies without potentially reaping things we shouldn't, they only
- show up if anything daemonizes or otherwise does stupid stuff, and these sandboxes are short-lived.
- We'll accept them. They're not very expensive.
+Another minor issue is that we're namespace init, so we can get grandchildren reparented to us,
+ yielding zombies. This can be solved by creating an intermediate process that spawns the real one,
+ then reaps children forever; or it can be considered too unlikely and inconsequential to worry
+ about. Since zombies only show up if anything daemonizes or otherwise does stupid stuff, this
+ sandbox is intended for short-lived utilities like gcc, and zombies aren't very expensive, we
+ choose to accept a few of them (but there's a RLIMIT_NPROC in place to block too rampant abuse).
 
 
 open
@@ -452,18 +474,24 @@ Threads are currently rejected. It's theoretically possible, just wrap open()/et
 execve
 ------
 
-Leaving execve is covered above. However, entering it isn't obvious either.
+Leaving execve (initializing the new process) is covered above. However, entering it isn't obvious
+ either.
 
-To start with, execve() takes a filename, which will fail due to chroot. Solution: fexecve().
+To start with, execve() takes a filename, which must fail, or it'd leak which files exist. Even if
+ we can ensure a known-good filename is passed, ELF files can contain a .interp section (usually
+ pointing to /lib64/ld-linux-x86-64.so.2), which causes the kernel to access that filename, leaking
+ whether it exists. Solution: chroot() to an empty directory.
 
-Except that's not a syscall, glibc implements it as execve(/proc/self/fd/123), which won't work
+But if we're in an empty chroot, we don't have access to the emulator either. Solution: fexecve().
+
+Except that's not a syscall; glibc implements it as execve(/proc/self/fd/123), which won't work
  either. I could change the chroot to /proc/self/fd, but that'd probably screw up on fork(). And I'm
  not chrooting to /proc, too high risk of granting access to something unauthorized (kernel command
- line, for example).
+ line, for example, or the symlink /proc/<broker's PID>/root/ -> /).
 
 Instead, execveat() can be employed. Like other *at() functions, it takes a fd and a path, using the
  fd instead of the current directory if the path is relative. It also supports a flag to execute the
- fd directly.
+ fd directly, if the path is empty. (I have no idea why nonempty paths are allowed with that flag.)
 
 To ensure the path is empty, the path address must be the last mappable byte in the address space,
  0x00007FFF'FFFFEFFF; either it's "", or it's not a NUL-terminated string and the kernel returns
@@ -497,9 +525,9 @@ O_BENEATH would solve most symlink-related issues (other than restricted directo
  ones, which can be "solved" by adding "don't do that" to the docs), but it was never merged.
 
 AT_BENEATH/etc <https://lwn.net/Articles/723057/> seem similar; they claim to not be intended for
- sandboxes, but so does chroot. If it acts the way I need, it's a sandbox component. I'll take a
- look once (if) it's merged and my distro updates. The broker is still needed (to count the number
- of writes), but keeping reads in the same process would be a fair bit faster.
+ sandboxes, but so does chroot. If it acts the way I need, it's a usable sandbox component. I'll
+ take a look once (if) it's merged and my distro updates. The broker is still needed (to count the
+ number of writes), but keeping reads in the same process would be a fair bit faster.
 
 
 inode numbers
@@ -511,9 +539,10 @@ should probably not be exposed via stat() (and I'll admit I forgot them when des
 Additionally, blocking it would be fairly tricky. First off, teaching the broker about stat() would
  add a bit of complexity - nothing terrible, but good to avoid if possible.
 
-But fstat() is a lot worse. I'd have to either block it (which would probably break a lot of stuff -
- didn't check), or have the child send the fd to the broker somehow (which would require opening
- sendmsg() to the children, and possibly a few others; this could be dangerous).
+But fstat() is a lot worse. I'd have to either block it (which would break a lot of stuff - for
+ example, glibc printf() does fstat(STDOUT_FILENO)), or have the child send the fd to the broker
+ somehow (which would require opening sendmsg() to the children, and possibly a few others, with all
+ potential security risks that yields).
 
 As such, I choose to accept this leak, much like the vDSO leaking the current time.
 
@@ -536,14 +565,10 @@ I intend to use this sandbox to allow random people to compile and run arbitrary
  <https://github.com/mattgodbolt/compiler-explorer/issues/419>.
 
 
-Yet two problems remain:
+Yet one problem remains:
 
-First, due to kernel limitations, resource limits are available only for the current process, not
- the current PID namespace. For example, a forkbomb would impact unsandboxed processes.
-
-Second, inventing your own crypto, or inventing your own security in general, is generally not
- recommended. So who am I, and how dare I try to make a security solution? Why would anyone trust 
- this thing?
+Inventing your own crypto, or inventing your own security in general, is generally not recommended.
+ So who am I, and how dare I try to make a security solution? Why would anyone trust this thing?
 
 
 Vulnerabilities
@@ -553,7 +578,8 @@ Everything contains bugs. The following is a list of possible vulnerabilities th
  since I presented it at school.
 - filesystem: nonzero max_write was treated as infinite
     exploitability: trivial
-    maximum impact: disk space exhaustion - though attacker is assumed able to launch arbitrarily many sandboxes, so none in practice.
+    maximum impact: disk space exhaustion - though attacker is assumed able to launch arbitrarily
+      many sandboxes, each of which can waste some disk space, so none in practice.
     severity: low, due to the trivial maximum impact
 - launch_impl: failure in process::set_fds was ignored
     exploitability: extremely hard, requires resource exhaustion and then some luck
@@ -585,17 +611,28 @@ Everything contains bugs. The following is a list of possible vulnerabilities th
     exploitability: trivial
     maximum impact: per the inode section above, most likely none
     severity: low, due to the trivial maximum impact
+    notes: not fixed, security model was changed; however, it did break the stated security model, so still a vulnerability
+- seccomp filter: ioctl(TCGETS) and ioctl(TIOCGWINSZ) were allowed
+    exploitability: trivial
+    maximum impact: reveals some properties of stdout, including whether it's a terminal or redirected
+    severity: low, due to the trivial maximum impact
+    notes: trivial leaks of non-authorized data is still a sandbox flaw; no clue why I ever allowed them
 - Spectre type 2 (indirect jumps)
-    exploitability: fully possible for a determined attacker
-    maximum impact: revealing the full contents of the broker's address space of the broker,
-      including the full environment (containing, for example, the user ID and username), and (under
-      some parents) other private data (possibly including freed data, if the memory wasn't reused)
-    severity: medium, due to leaking the username; it can't leak data the parent isn't already
-      processing, which is unlikely to be of much interest
-- Spectre type 1 (array indexing behind mispredicted branches)
-    exploitability: unknown if any vulnerable sequences exist, but likely same as Spectre type 2
-    maximum impact: same as Spectre type 2
-    severity: medium, same as Spectre type 2
+    exploitability: if I understand it correctly, fully possible for a sufficiently determined attacker
+    maximum impact: revealing the full contents of the broker's address space, including the full
+      environment (containing, for example, the user ID and username), and (under some parents)
+      other private data (possibly including freed data)
+    severity: medium; leaking the username is a medium-severity vulnerability
+    notes: not fixed yet, I believe this one can only be fixed with a compiler patch
+- Other Spectre and Meltdown variants
+    not gonna list them separately, they're too many and they affect exactly everything
+    exploitability: likely fully possible for a determined attacker
+    maximum impact: see documentation for each Spectre variant
+    severity: likely no more than medium, but depends on what exactly shows up
+    notes: not fixed yet - in fact, it'd surprise me if all variants are even discovered yet
+
+This is a total of 6 low-severity vulnerabilities, and an unknown but nonzero number of hardware
+  bugs (Spectre variants) that yield low- or medium-severity vulnerabilities.
 
 
 Missing kernel features
@@ -609,21 +646,27 @@ Each of these would either enable additional functionality, or simplify somethin
     setrlimit(RLIMIT_NPROC) would be the obvious choice, but it's affected by processes outside the namespace
       http://elixir.free-electrons.com/linux/latest/source/kernel/fork.c#L1564
     setting /proc/sys/kernel/pid_max to 10 would also work, but that too is a global parameter, not per-pid-namespace
-- A way to disable the filesystem completely, rather than just chroot to an empty (except . and ..) directory
+- A way to disable the filesystem completely, rather than just chroot to an empty (except . and ..) directory, it feels wrong
+    and I can't find a guaranteed-empty directory (preferably one in a non-weird filesystem, /proc creeps me out sometimes)
+- Allow execveat(pathname=NULL) and consider it equivalent to pathname="", that final-byte trick is kinda creepy
+    the original execveat proposal https://lkml.org/lkml/2012/9/11/528 used NULL rather than "", it's unclear why it changed
+    alternatively, consider execveat(pathname!={NULL,""}, flags=AT_EMPTY_PATH|...) a nonsensical combination and make it fail
+      though that is a strange request when I rely on the nonsensical
+        combination clone(flags=CLONE_PARENT_SETTID|..., ptid=NULL) working and being a nop
 - Slightly less bizarre naming policy in the kernel, these foobar/__foobar pairs confuse me (there's even ___sys_sendmsg)
-- MSG_NOADDR in sendmsg(), to block non-NULL msg_name
+- MSG_NOADDR in sendmsg(), to block non-NULL msg_name (for use with seccomp-bpf)
 - A control mechanism for global disk bandwidth usage
 - fcntl(F_GETPATH) (like OSX), or similar
 - A way to list existing fds in the process without /proc/self/fd
     My favorite interface would be fcntl(F_NEXTFD), which returns the lowest fd >= this (or error if there is none)
 - A way to list threads in the process without /proc/self/tasks/, and a way to terminate them
-- O_BENEATH or similar (AT_BENEATH/etc <https://lwn.net/Articles/723057/>, maybe?)
+- O_BENEATH or similar (AT_BENEATH/etc <https://lwn.net/Articles/723057/> <https://lwn.net/Articles/767547/>, maybe?)
 
 
 Future - Networking
 -------------------
 
-Of course there are more features that could make sense. For example, perhaps some sandboxed
+There are, of course, more features that could make sense. For example, perhaps some sandboxed
  children should access the network. This isn't part of this project, but like everything else I've
  chosen to exclude, it's architecturally possible.
 
@@ -631,47 +674,38 @@ Let's list some things to consider if adding this feature.
 
 Obviously, the child can't be allowed access to the entire internet, only a whitelisted set of
  hostnames (and ports on said hostnames). Therefore, the broker must perform both connect() and
- getaddrinfo() - but they're blocking! We can't allow the child to freeze the broker for an
- arbitrary amount of time, it may contain a limit for how long the child is allowed to execute.
- connect() can be made nonblocking with a setsockopt, but getaddrinfo() can't. I haven't found how
- to solve this; perhaps the broker should use a thread, perhaps it should create DNS packets
- manually.
+ getaddrinfo() - but they're blocking! We can't allow the child to freeze the broker like that, it
+ may contain a limit for how long the child is allowed to execute.
+
+Solutions: connect() can be made nonblocking with a setsockopt, and getaddrinfo() is the sequence 
+ 'open UDP socket, send DNS query, wait for reply, parse reply, return', each of which is (or can be
+ made) nonblocking. It requires using a non-libc DNS client, but that's not too terrible.
 
 We also need a way to ensure the child can't saturate the pipe and disrupt everything else trying to
  use the network. I believe this is best solved by wrapping the connection in a AF_LOCAL socketpair
  and letting the broker add a rate limit. This also stops the child from accessing anything
- unauthorized via getpeername.
+ unauthorized via getpeername. (Not that getpeername would get past seccomp, but defense in depth.)
 
-
-Future - Sandbox-aware children
--------------------------------
-
-As much fun as it is to sandbox gcc, sandbox-aware children can also do some nifty stuff, like
- sharing memory with an unconstrained process.
-
-For example, there is a system called Libretro <https://www.libretro.com/>; a large number of
- emulators and other games have been rewritten to be shared libraries ("cores"), under a consistent
- API that can be used by various programs ("frontends"). Obviously, there's a lot of attack surface
- in the cores (and who says the core itself isn't malicious?), but if the cores are sandboxed, said
- attack surface becomes irrelevant.
-
-It's not finished, but the sandbox architecture allows it.
+Additionally, there may be complications in reproducing the high-level 'give me a TCP connection to
+ example.com port 80' operation from the child's syscall sequence. I don't expect it to be a too big
+ deal, but I haven't analyzed it.
 
 
 Future - execve
 ---------------
 
 is still a pretty nasty syscall. I believe it can't access anything harmful, but it tries to,
- necessitating a chroot to make sure said attempts fail. It also grants access to vdso, four
- syscalls (clock_gettime, getcpu, gettimeofday, time) the sandbox doesn't really need.
+ necessitating various shenanigans to make sure said attempts fail. It also grants access to vdso,
+ four syscalls (clock_gettime, getcpu, gettimeofday, time) the sandbox doesn't really need.
 
 We already emulate parts of the syscall in userspace (preload.cpp). It would be better to emulate
  the rest too and disable the syscall.
 
 Checking the manpage reveals a long list of things execve does. Most are easy to emulate (remove
- signal handlers and sigaltstack) or irrelevant (detach SysV shared memory - blocked by seccomp,
- replace /proc/self/cmdline - not relevant outside debugging). Unfortunately, a few are tricky but
- required: Killing all other threads in the process, close-on-exec, and resuming the vfork parent.
+ signal handlers and sigaltstack), irrelevant (detach SysV shared memory - blocked by seccomp), or
+ both (replace /proc/self/cmdline - PR_SET_MM_ARG_START/etc, and not relevant outside debugging).
+ Unfortunately, a few are tricky but required: Killing all other threads in the process,
+ close-on-exec, and resuming the vfork parent.
 
 Releasing vfork is impossible without execve or _exit. But that syscall is already unsafe; we have
  to return all the way through a signal handler, which won't work the second time vfork returns.
@@ -681,29 +715,143 @@ Releasing vfork is impossible without execve or _exit. But that syscall is alrea
 cloexec is, in theory, easy; just iterate over the file descriptors, fcntl(F_GETFD), close
  everything with cloexec. In practice, which file descriptors are that? The only way to list open
  file descriptors on Linux is /proc/self/fd/, which isn't available. We can't ask the broker for a
- list either, we're probably a fork and the broker doesn't know our PID. We can reduce RLIMIT_NOFILE
- and iterate over them, but that's ugly; I'd rather not.
+ list either; while we can tell it our PID with SOCK_PASSCRED, using it would be a TOCTTOU. Another
+ option would be reducing RLIMIT_NOFILE and iterating over them, but that's ugly, I'd rather not.
 
-However, there is one possibility: Place a process in the sandbox PID namespace, but otherwise
- unrestricted, and ask it for /proc/getpid()/fd/. Since it's in the sandbox namespace, it can't see
- processes it shouldn't; it can return data about other processes in the sandbox, but that's fine.
- (Making this the namespace init, PID 1, would be the easiest solution; this would also allow it to
- reap zombies.)
+However, there is one possibility: Place a process in the sandbox's PID namespace, but otherwise
+ unrestricted (no seccomp, no chroot), and ask it for /proc/getpid()/fd/. Since it's in the sandbox
+ namespace, inappropriate PIDs would only leak information about other sandboxed processes. (Making
+ this the namespace init, PID 1, would be the easiest solution; as mentioned above, this would also
+ allow it to reap zombies.)
 
-Killing the other threads is also tricky. There's no syscall to list them, nor is there any obvious
- way to terminate them - sending SIGKILL terminates the entire process.
+Killing the other threads is also tricky. (Threads aren't implemented yet, but they still need to be
+ considered.) There's no syscall to list them, nor is there any obvious way to terminate them - even
+ with tgkill(), sending SIGKILL terminates the entire process.
 
-But, again, it's possible: The list can be found in /proc/getpid()/task/ and fetched by the
- namespace init, and installing a signal handler could cause any recipient thread to terminate
- itself. SIGSYS, for example, we already have a SIGSYS handler. Signals can be blocked, but only
- if it can get past seccomp, which it can't. (And exec in multithreaded programs at all is rare.)
+But, again, it's possible: A list of threads can be found in /proc/getpid()/task/ and fetched by the
+ namespace init, and we could send a custom signal that causes any recipient thread to terminate
+ itself. SIGSYS, for example, we already have a SIGSYS handler. Signals can be blocked, but only if
+ sigprocmask() can get past seccomp, which it can't. And exec in multithreaded programs at all is
+ rare - even if a multithreaded program wants to exec something, it usually does fork() first, which
+ only clones the calling thread.
 
-However, it's a lot of effort, and since the sandbox is in a chroot, it doesn't really accomplish
- anything.
+(A complication would be avoiding races between cloexec and open() in another thread; easy to fix,
+ just kill the threads first. Another issue is races between clone() and thread killing; to fix that
+ one, repeatedly kill all threads, until /proc/getpid()/task/ contains only one entry.)
 
-Removing the need to chroot would be a slight improvement, but won't accomplish much either;
- I would be happy if I could remove CLONE_NEWUSER, but it's also needed for CLONE_NEWPID, which I
- haven't found a usable replacement for.
+However, it's a lot of effort, and it wouldn't accomplish much. It makes the chroot unnecessary (ELF
+ .interp can leak file existence, disabling that would be an improvement), but no paths exist in the
+ chroot, so it wouldn't accomplish much. (And I'd include the chroot anyways, defense in depth.)
+
+
+Future - Sandbox-aware children
+-------------------------------
+
+As much fun as it is to sandbox gcc, sandbox-aware children can also do some nifty stuff, like
+ sharing memory with an unconstrained process (which could be the broker).
+
+For example, there is a system called Libretro <https://www.libretro.com/>; a large number of
+ emulators and other games have been rewritten to be shared libraries ("cores"), under a consistent
+ API that can be used by various programs ("frontends"). Obviously, there's a lot of attack surface
+ in the cores (and the core itself could be malicious), but if the cores are sandboxed, said attack
+ surface becomes irrelevant.
+
+It's not finished, but the sandbox architecture allows it.
+
+
+Future - Sandboxing of OpenGL
+-----------------------------
+
+Some Libretro cores want to use OpenGL. This requires access to X11 (or Wayland, but I'll ignore
+ that, at least for now). Obviously, unrestricted X11 access is unacceptable - for example, the
+ child could use XTEST to send ctrl-alt-T to open a terminal, then type whatever it wants and have
+ it executed outside the sandbox.
+
+Therefore, the broker must monitor all communication. Which means it must avoid the host's installed
+ GPU drivers, since the ABIs are very complex, poorly documented, likely a race condition to try to
+ audit, and possibly not stable.
+
+Luckily, X11 (including GLX) supports running across the network. If the child thinks this is done,
+ all communication will be done over a single TCP socket, which the broker can easily audit. (Yes,
+ this is slower, I don't think safe and fast is possible. Maybe with Wayland, but who knows. Or
+ maybe I should check what Flatpak does.)
+
+To enable networking mode, I can set the env DISPLAY=127.0.0.1:123. But on the other hand, since
+ this won't go to the connect() syscall, there's no reason to use localhost, and it wouldn't
+ surprise me if localhost is special cased somehow. Instead, I'd rather use some other IP address;
+ for example, 203.0.113.1 (from TEST-NET-3) would be usable. (While it would be tempting to skip
+ DISPLAY and the X protocol completely, glFlush() ends up sending GLX opcodes, so I need Xlib to
+ think it's talking to an X server.)
+
+To reduce the amount of information the child can access, the child won't create a toplevel window;
+ it will only create a child window using the XEmbed protocol, and the parent will aggressively
+ censor irrelevant data. This also allows the parent to draw its own stuff (for example a 'disable
+ sandbox' button), which the child can't interfere with, or even know about.
+
+Another solution would be to implement a custom GL wrapper protocol, but the GL API is HUGE so let's
+ not.
+
+Vulkan would also be desirable, but I don't know how the Vulkan-kernel interfaces look.
+
+
+Future - Removing the unprivileged namespaces
+---------------------------------------------
+
+Unprivileged user namespaces are enabled by default in some distros, like Ubuntu - but disabled by
+ default in others, like Debian. It would be better if the sandbox could be used on all distros.
+
+The namespaces are used to restrict user ID in auxv, to enforce the termination of all sandboxed
+ processes upon sandbox exit, to grant access to chroot(), and possibly a few other operations. (I
+ also want to add cgroup support, but that seems to require real root.)
+
+To remove namespaces without compromising security, the above must be restricted in another way.
+auxv can only be cleaned post-execveat(), at which point code execution cannot be trusted, so that
+ syscall must be banned or emulated. The latter is (as discussed above) impossible without
+ namespaces, so a namespace-less sandbox would be unable to run a significant fraction of programs.
+ (However, the ones it can run may still be interesting.)
+Terminating grandchildren is also necessary, and must be emulated somehow. Not only is CLONE_NEWPID
+ the easiest way - I couldn't find any other way at all. CLONE_THREAD confuses waitpid(), and blocks
+ execveat() by indirectly requiring CLONE_VM; PR_SET_CHILD_SUBREAPER looks somewhat promising, but
+ judging by the readme of <https://github.com/rootmos/dont-fear-the-reaper>, the desired result
+ (terminating the subreaper causes termination of its children) will not happen. It is possible to
+ loop over all children and terminate them prior to the broker terminating, but only if said code
+ always runs - and since the broker cannot be assumed crash-free, that's an unacceptably big 'if'.
+ This leaves only one option - disable fork(), further restricting the set of runnable children.
+chroot is only used to disable the filesystem so execveat .INTERP doesn't do anything strange, and
+ since execveat() is banned, no further consideration is needed. It is one less layer of
+ defense-in-depth, but one solid layer is enough anyways.
+
+Therefore, a namespace-less sandbox would be able to run a few programs, but significantly fewer
+ than a namespace-enabled one. It would also be a fair bit of code, for a fairly small usecase:
+ according to <https://wiki.mozilla.org/Security/Sandbox/Specifics>, 88% of Firefox users have
+ access to unprivileged user namespaces; this is biased towards desktop Linux, which may or may not
+ reflect the usecases for my sandbox, but I believe it's safe to assume a large majority of users
+ support unprivileged namespaces).
+
+However, removing namespaces isn't the only way to remove unprivileged namespaces. The alternative
+ is adding privilege, i.e. setuid. This would require
+- splitting the launch to a separate process and making it setuid
+- changing effective user ID to caller's UID, to avoid pointless risks (for example, I believe the
+    OOM killer deprioritizes root)
+- fiddling with capset() to gain CAP_SYS_ADMIN, CAP_SETUID and CAP_SETGID (alternatively setting SECBIT_KEEP_CAPS before setting EUID)
+- clone(CLONE_NEWPID|CLONE_NEWUSER|etc) (which clears capabilities in the calling user namespace,
+    leaving the new child fully unprivileged)
+- parent: send child's PID to broker
+- broker: accept PID; reject any further attempts to set PID, only the first one is trustworthy
+- child: await confirmation from broker that child's PID has been recorded, to avoid race conditions
+    (CLONE_STOPPED would work just as well, but it was deleted in Linux 2.6.38 for some reason)
+- child: apply other launcher restrictions, then execve the emulator (otherwise, the setuid binary
+    could be abused to exploit the exact vulnerabilities Debian's restrictions are trying to protect
+    from - with the sandbox's restrictive setuid rules, I believe no vulnerabilities are available)
+which is easier to implement than removing namespaces, and can run as much as the normal one.
+ However, it would complicate installation, and, like removing namespaces, would only benefit a
+ small fraction of users.
+
+Conclusion: The best course of action is most likely to keep the hard dependency on user namespaces,
+ and (together with the web browsers) keep asking distros to unrestrict namespaces. Perhaps they
+ would be receptive to a patch blocking unprivileged user namespaces from creating other namespaces;
+ from what I can gather, most of the vulnerabilities are in the network namespace, which I only use
+ as a dispensable defense-in-depth mechanism (though Firefox seems to actually need it).
 
 
 Future - Cooperating with ld-linux

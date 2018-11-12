@@ -306,6 +306,7 @@ extern const char * const game_maps[] = {
 
 
 
+#if 0
 //TODO: number these
 "2 2   2\n" // small, but very hard
 "  1    \n"
@@ -324,6 +325,17 @@ extern const char * const game_maps[] = {
 " 3 1 3 2  \n"
 "  2 5 2 g<\n"
 "        >^\n",
+
+
+//neat map, quite complex ending
+"3   1< 33\n"
+"^ 5 #   ^\n"
+"  ^   4  \n"
+"  ^ 2 ^ 3\n"
+"2# 4 #^2 \n"
+" 3 ^>4   \n"
+"    ^^  2\n"
+"3<   5 4<\n",
 
 
 //hard but playable
@@ -374,7 +386,7 @@ extern const char * const game_maps[] = {
 //- mainlands (will always be castles, will never have population)
 //- one where there's only 1s
 
-//evilest ones I've ever seen
+//evilest ones I've ever seen (from various variants of the generator)
 "2>5< 4<\n"
 "^   1  \n"
 "  2  2 \n"
@@ -392,5 +404,66 @@ extern const char * const game_maps[] = {
 "   2< 2  \n"
 " 2 ^ 8 2 \n"
 "2 2  ^  3\n",
+
+"         \n"
+"1  3   3<\n"
+"    1 2 ^\n"
+"3  7 2   \n"
+" 1 ^   2 \n"
+"2 1 2<<  \n"
+" 2 3    2\n"
+"3   3  2 \n"
+"3< 2   2<\n",
+
+"6<<  3  3\n"
+"8< 5  5  \n"
+"    4 ^ v\n"
+" 3  ^< 6<\n"
+"4 #2     \n"
+" 2  2 >7 \n"
+"5 vv   ^ \n"
+"  5< 2< 3\n"
+"4   3  5^\n",
+
+"1 vv   2 \n"
+"  4< v#  \n"
+"v1   6<3<\n"
+"5  1     \n"
+"^ 6 2 4 5\n"
+"    ^ #  \n"
+"3 4  5  3\n"
+"         \n"
+"2 3  2 1 \n",
+
+" 4<  4 >3\n"
+"2      ^^\n"
+" 3 3< 1  \n"
+"   ^ 2  2\n"
+"3 2 3 >6 \n"
+" 2 1  ^^ \n"
+" ^   1   \n"
+" ^2 5 4 2\n"
+"3  4<< 2^\n",
+
+" 4 8<  2 \n"
+"2   ^ 2 2\n"
+"         \n"
+" 4 2  #1 \n"
+"  2 4 2 v\n"
+"3 ^5 2  3\n"
+"     #>4^\n"
+"22 4 2 ^ \n"
+"^ 3 3   2\n",
+
+" 34  6<4<\n"
+" ^    2 ^\n"
+"  4  4   \n"
+"#4  2  vv\n"
+"     1 3<\n"
+"  4 4 4# \n"
+"     # 1 \n"
+" vv # 2 3\n"
+" 4< 2  3^\n",
+#endif
 
 };

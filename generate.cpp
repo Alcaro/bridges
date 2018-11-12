@@ -2,8 +2,8 @@
 #include <math.h>
 
 //TODO: new generator
-//- pick a number of islands; keep constant for every iteration 1..quality
-//- scatter that many islands; if they don't fit, drop a few
+//- pick a number N, scatter that many islands across the map
+//    if the chosen place would touch another island, pick another place with 95% probability
 //- build 1 bridge at all possible spots
 //- for every crossing on ocean, randomly pick which one to remove
 //- use some spanning-tree algorithm to find which bridges must exist, and change them to 2
@@ -11,8 +11,10 @@
 //    if it reports unconnected, return false
 //- for every 1, randomly pick whether to change it to 0 (80%) or 2 (20%)
 //- for every 1 or 2, randomly pick whether to change it to 1 (50%) or 2 (50%)
-//- if that has multiple solutions, try the above step again a few times
+//- if that has multiple solutions, randomize 1s and 2s again a few times
 //    if still multi-solvable on the third attempt, give up
+//- calculate the penalty for the map, which equals number of islands, plus number of length-1 bridge spots
+//    this is subtracted from the map's difficulty before checking if that's the toughest yet
 
 
 

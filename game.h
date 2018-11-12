@@ -24,7 +24,13 @@ public:
 	
 	//'out' should be a 640x480 image. 0rgb8888 or xrgb8888 is recommended, xrgb is slightly faster.
 	//All 640*480 pixels will be overwritten. They will be written non-sequentially, multiple times, and may be read.
-	virtual void run(const input& in, image& out) = 0;
+	//Return value:
+	// 1 - the frame was rendered
+	// 0 - the frame wasn't rendered, the previous one should be shown for another 16ms.
+	// -1 - the frame wasn't rendered, and there are no ongoing animations; the previous frame should be shown until the next user input
+	//For the latter two, 'out' remains unchanged; caller is allowed to put the previous frame there and rerender that.
+	//If can_skip is false, return value is always 1.
+	virtual int run(const input& in, image& out, bool can_skip = false) = 0;
 	
 	//Call this before exiting the game, and save the result to disk. Next session, pass that struct to create().
 	//For the first run, call create() without a savedat.

@@ -23,7 +23,7 @@ for fn in sorted(os.listdir("resources/")):
 		
 		if ext == "png":
 			header += "image "+sfn+";\n"
-			constructor += sfn+".init_decode("+sfn+"_raw);\n"
+			constructor += sfn+".init_decode_png("+sfn+"_raw);\n"
 		if ext == "font.png":
 			header += "font "+sfn+";\n"
 			constructor += "{ image font_tmp; font_tmp.init_decode("+sfn+"_raw); "+sfn+".init_from_image(font_tmp); }\n"

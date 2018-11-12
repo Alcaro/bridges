@@ -35,7 +35,7 @@ class birds {
 	
 public:
 	//if birds are on-screen, moves them away
-	//if 'force', they'll appear nearby; if not, 
+	//if 'force', they'll appear nearby; if not, far off
 	void reset(bool force)
 	{
 		if (frame < -800/spd) return; // far off = leave there, so they appear earlier
@@ -56,7 +56,7 @@ public:
 	
 	void draw(image& out, const image& birdsmap, int tileset)
 	{
-		if (tileset != 2) // no birds in the rock region
+		if (tileset != 2) // no birds in the snow region
 		{
 			image bird;
 			int animframe = frame/10 & 1;
@@ -90,8 +90,10 @@ public:
 	image res_menuclose;
 	
 	struct input in;
+	struct input prev_in;
 	static const int k_click = 7; // used in in_push
 	uint8_t in_press; // true for one frame only
+	bool recent_change = false;
 	
 	struct image out;
 	
@@ -199,8 +201,6 @@ public:
 		state = st_title;
 		birdfg.reset(true);
 		title_frame = 0;
-//to_game(0,false);
-//popup_id=0;
 	}
 	
 	void title()
@@ -309,7 +309,8 @@ public:
 		
 		if (in_press & 1<<k_confirm)
 		{
-			if (menu_focus != -1) to_game(menu_focus, true);
+			if (menu_focus != -1)
+				to_game(menu_focus, true);
 		}
 		if (in_press & 1<<k_cancel)
 		{
@@ -356,18 +357,12 @@ public:
 			{
 				highlight = true;
 				if (in_press & 1<<k_click)
-				{
 					to_game(n, false);
-				}
 			}
 			if (menu_focus == n)
-			{
 				highlight = true;
-			}
 			if (highlight) // as a variable to make sure the box isn't drawn twice, that'd be ugly
-			{
 				out.insert(x-10, y-10, res.levelboxactive);
-			}
 		};
 		for (int y=0;y<6;y++)
 		{
@@ -495,6 +490,8 @@ public:
 		game_kb_state = use_kb ? 1 : 0;
 		game_kb_x = 0;
 		game_kb_y = 0;
+		
+		recent_change = true;
 	}
 	
 	void draw_island_fragment(int x, int y, bool right, bool up, bool left, bool down, bool downright)
@@ -601,8 +598,21 @@ public:
 		}
 	}
 	
-	void ingame()
+	int ingame(bool can_skip)
 	{
+		// this conditional is a mess, but it reduces battery use
+		if (can_skip && !recent_change &&
+			in.keys == 0 && in_press == 0 &&
+			// popups hide the mouse, which confuses prev_in
+			((in.mousex == prev_in.mousex && in.mousey == prev_in.mousey) || popup_frame==16) &&
+			tileset == 2 /* tileset 2 has no birds */ && !map.has_castles &&
+			(popup_id == pop_none || popup_frame == 16) && !game_menu && game_menu_pos == 480)
+		{
+			recent_change = false;
+			return -1;
+		}
+		recent_change = (in.keys || in_press);
+		
 		background();
 		
 		if (popup_id != pop_none)
@@ -1226,12 +1236,12 @@ to_title(); //TODO
 					"as the number in yellow in the island. Also, \1a "
 					"bridge MUST NOT CROSS another bridge.\2",
 					
-					
 					"\0Each island must have as many bridges from it " // pop_tutor3c
 					"as the number in yellow in the island. \1All islands "
 					"must be connected.\2 No isolated islands are "
 					"allowed. Also, \1a bridge MUST NOT CROSS another "
 					"bridge.\2",
+					
 					
 					"\2The dark tiles block bridge building, and large " // pop_tutor3d
 					"islands have more than four possible bridge "
@@ -1340,9 +1350,12 @@ to_title(); //TODO
 				res.smallfont.height = 9;
 				res.smallfont.fallback = NULL;
 				
-				popup_frame--; // make sure it stays on the 'full popup visible' frame
+				if (popup_frame == 17)
+					popup_frame--; // make sure it stays on the 'full popup visible' frame
 			}
 		}
+		
+		return 1;
 	}
 	
 	void load(const savedat& dat)
@@ -1405,10 +1418,15 @@ to_title(); //TODO
 	
 	
 	
-	void run(const input& in, image& out)
+	int run(const input& in, image& out, bool can_skip)
 	{
+		if (state == st_init)
+			this->in = in;
+		
 		this->in_press = (in.keys & ~this->in.keys);
-		if (in.mouseclick && !this->in.mouseclick) this->in_press |= 1<<k_click;
+		if (in.mouseclick && !this->in.mouseclick)
+			this->in_press |= 1<<k_click;
+		this->prev_in = this->in;
 		this->in = in;
 		
 		this->out.init_ref(out);
@@ -1429,9 +1447,9 @@ to_title(); //TODO
 				menu();
 				break;
 			case st_ingame:
-				ingame();
-				break;
+				return ingame(can_skip);
 		}
+		return 1;
 	}
 };
 }

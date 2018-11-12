@@ -99,11 +99,16 @@ public:
 	//Can not be undone, the process may already have opened the file; to be sure, destroy the process.
 	//If 'path' ends with a /, it's assumed to be a directory; it, and every child, are made available.
 	//If 'path' does not end with a /, any child returns ENOTDIR.
+	//max_write is how many times files may be opened for writing. Zero is allowed. Reads are unlimited.
 	//[TODO: verify the above]
 	void fs_grant(cstring path, int max_write = 0) { fs_grant_at(path, path, max_write); }
 	
-	//To allow moving the filesystem around. For example, /home/user/ can be mounted at /@CWD/.
+	//To allow shuffling the filesystem. For example, /home/user/ can be mounted at /@CWD/.
 	void fs_grant_at(cstring real, cstring mount_at, int max_write = 0) { fs.grant_native_redir(mount_at, real, max_write); }
+	
+	//max_write is how many unique files may exist in the temp directory.
+	//Created files will never exist on disk (except maybe in swap).
+	void fs_grant_tmp(cstring path, int max_size) { fs.grant_tmp(path, max_size); }
 	
 	void fs_grant_cwd(int max_write = 0) { fs_grant_cwd("./", max_write); }
 	void fs_grant_cwd(cstring real, int max_write = 0) { fs_grant_at(real, "/@CWD/", max_write); }
@@ -129,16 +134,6 @@ public:
 	{
 		fs.report_access_violation = cb;
 	}
-	
-	//TODO: sandboxing of OpenGL programs
-	//to do that:
-	//- set DISPLAY to not Unix socket, to remove some hard-to-reason-about operations
-	//    some random reserved IP would work, for example 203.0.113.1 (from TEST-NET-3)
-	//    yes, it's slower, I don't think it's possible to be both safe and fast
-	//- whenever it tries to connect, sysemu intercepts it and sends to broker, who returns a socketpair
-	//- broker listens to socketpair, and connects to X (over Unix socket)
-	//    broker tolerates and passes on (after censoring irrelevant data) the minimum operations required to implement GtkPlug/GtkSocket,
-	//    plus everything on the GLX opcode; anything else causes child termination
 	
 	~sandproc();
 };

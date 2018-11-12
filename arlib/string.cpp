@@ -3,18 +3,18 @@
 
 void string::resize(uint32_t newlen)
 {
-	switch (!inlined()<<1 | (newlen>max_inline))
+	switch (!inlined()<<1 | (newlen>max_inline()))
 	{
 	case 0: // small->small
 		{
 			m_inline[newlen] = '\0';
-			m_inline_len = max_inline-newlen;
+			m_inline_len = max_inline()-newlen;
 		}
 		break;
 	case 1: // small->big
 		{
 			uint8_t* newptr = malloc(bytes_for(newlen));
-			memcpy(newptr, m_inline, max_inline);
+			memcpy(newptr, m_inline, max_inline());
 			newptr[newlen] = '\0';
 			m_data = newptr;
 			m_len = newlen;
@@ -29,7 +29,7 @@ void string::resize(uint32_t newlen)
 			memcpy(m_inline, oldptr, newlen);
 			free(oldptr);
 			m_inline[newlen] = '\0';
-			m_inline_len = max_inline-newlen;
+			m_inline_len = max_inline()-newlen;
 		}
 		break;
 	case 3: // big->big
@@ -47,11 +47,11 @@ void string::init_from(arrayview<byte> data)
 	const uint8_t * str = data.ptr();
 	uint32_t len = data.size();
 	
-	if (len <= max_inline)
+	if (len <= max_inline())
 	{
 		memcpy(m_inline, str, len);
 		m_inline[len] = '\0';
-		m_inline_len = max_inline-len;
+		m_inline_len = max_inline()-len;
 	}
 	else
 	{
@@ -66,6 +66,25 @@ void string::init_from(arrayview<byte> data)
 	}
 }
 
+void string::reinit_from(arrayview<byte> data)
+{
+	const uint8_t * str = data.ptr();
+	uint32_t len = data.size();
+	
+	if (str == ptr() && len == length()) return;
+	
+	if (str >= this->ptr() && str <= this->ptr()+this->length())
+	{
+		memmove(this->ptr(), str, len);
+		resize(len);
+	}
+	else
+	{
+		release();
+		init_from(data);
+	}
+}
+
 string string::create_usurp(char * str)
 {
 	cstring tmp(str);
@@ -74,7 +93,8 @@ string string::create_usurp(char * str)
 	return ret;
 }
 
-void string::replace_set(int32_t pos, int32_t len, cstring newdat)
+
+void string::replace_set(uint32_t pos, uint32_t len, cstring newdat)
 {
 	//if newdat is a cstring backed by this, modifying this invalidates that string, so it's illegal
 	//if newdat equals this, then the memmoves will mess things up
@@ -102,7 +122,7 @@ void string::replace_set(int32_t pos, int32_t len, cstring newdat)
 	memcpy(ptr()+pos, newdat.ptr(), newlength);
 }
 
-string cstring::replace(cstring in, cstring out)
+string cstring::replace(cstring in, cstring out) const
 {
 	size_t outlen = length();
 	
@@ -142,6 +162,7 @@ string cstring::replace(cstring in, cstring out)
 	
 	return ret;
 }
+
 
 array<cstring> cstring::csplit(cstring sep, size_t limit) const
 {
@@ -227,6 +248,17 @@ done:
 	return ret;
 }
 
+
+int string::compare(cstring a, cstring b)
+{
+	size_t cmplen = min(a.length(), b.length());
+	int ret = memcmp(a.bytes().ptr(), b.bytes().ptr(), cmplen);
+	
+	if (ret) return ret;
+	else return a.length() - b.length();
+}
+
+
 string string::codepoint(uint32_t cp)
 {
 	string ret;
@@ -239,7 +271,7 @@ string string::codepoint(uint32_t cp)
 		ret += (uint8_t)(((cp>> 6)     )|0xC0);
 		ret += (uint8_t)(((cp    )&0x3F)|0x80);
 	}
-	else if (cp>=0xD800 && cp<=0xDFFF) return "\xEF\xBF\xBD";
+	else if (cp>=0xD800 && cp<=0xDFFF) return "\xEF\xBF\xBD"; // curse utf16 forever
 	else if (cp<=0xFFFF)
 	{
 		ret += (uint8_t)(((cp>>12)&0x0F)|0xE0);
@@ -258,7 +290,7 @@ string string::codepoint(uint32_t cp)
 }
 
 #define X 0xFFFD
-const uint16_t string::windows1252tab[32]={
+const uint16_t string_windows1252tab[32]={
 	//00 to 7F map to themselves
 	0x20AC, X,      0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
 	0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, X,      0x017D, X,     
@@ -271,7 +303,7 @@ const uint16_t string::windows1252tab[32]={
 static string fromlatin1(cstring in, bool windows1252)
 {
 	string out;
-	for (int i=0;in[i];i++)
+	for (size_t i=0;i<in.length();i++)
 	{
 		uint8_t ch = in[i];
 		if (ch < 0x80) out += ch;
@@ -284,6 +316,113 @@ static string fromlatin1(cstring in, bool windows1252)
 
 string cstring::fromlatin1()      const { return ::fromlatin1(*this, false); }
 string cstring::fromwindows1252() const { return ::fromlatin1(*this, true); }
+
+bool cstring::isutf8() const
+{
+	const uint8_t * bytes = ptr();
+	const uint8_t * end = bytes + length();
+	
+	while (bytes < end)
+	{
+		uint8_t head = *bytes++;
+		if (LIKELY(head < 0x80))
+			continue;
+		if (bytes == end)
+			return false; // continuation needed if above 0x80
+		
+		if (head < 0xC2) // continuation or overlong twobyte
+			return false;
+		if (head < 0xE0) // twobyte
+			goto cont1;
+		if (head == 0xE0 && *bytes <= 0x9F) // threebyte overlong
+			return false;
+		if (head == 0xED && *bytes >  0x9F) // utf16 surrogate range
+			return false;
+		if (head < 0xF0) // threebyte
+			goto cont2;
+		if (head == 0xF0 && *bytes <= 0x8F) // fourbyte overlong
+			return false;
+		if (head == 0xF4 && *bytes >  0x8F) // fourbyte, above U+110000
+			return false;
+		if (head < 0xF5) // fourbyte
+			goto cont3;
+		return false; // U+140000 or above, fivebyte, or otherwise invalid
+		
+		cont3:
+			if (bytes == end || ((*bytes++) & 0xC0) != 0x80) return false;
+		cont2:
+			if (bytes == end || ((*bytes++) & 0xC0) != 0x80) return false;
+		cont1:
+			if (bytes == end || ((*bytes++) & 0xC0) != 0x80) return false;
+	}
+	
+	return true;
+}
+
+uint32_t cstring::codepoint_at(uint32_t& idx) const
+{
+	const uint8_t * bytes = ptr();
+	uint32_t len = length();
+	if (UNLIKELY(idx == len)) return -1;
+	
+	uint8_t head = bytes[idx++];
+	if (LIKELY(head < 0x80)) return head;
+	
+	if (head <= 0xDF)
+	{
+		if (idx > len-1)
+			goto fail;
+		if (head < 0xC2) // continuation or overlong twobyte
+			goto fail;
+		if ((bytes[idx+0]&0xC0)!=0x80)
+			goto fail;
+		
+		idx += 1;
+		
+		//return (head&0x1F)<<6 | bytes[idx+1]&0x3F;
+		return (head<<6) + (bytes[idx-1]<<0) - ((0xC0<<6) + (0x80<<0));
+	}
+	
+	if (head <= 0xEF)
+	{
+		if (idx > len-2)
+			goto fail;
+		if (head == 0xE0 && bytes[idx+0] < 0xA0) // overlong
+			goto fail;
+		if (head == 0xED && bytes[idx+0] >= 0xA0) // surrogate
+			goto fail;
+		if ((bytes[idx+0]&0xC0)!=0x80)
+			goto fail;
+		if ((bytes[idx+1]&0xC0)!=0x80)
+			goto fail;
+		
+		idx += 2;
+		return (head<<12) + (bytes[idx-2]<<6) + (bytes[idx-1]<<0) - ((0xE0<<12) + (0x80<<6) + (0x80<<0));
+	}
+	
+	if (head <= 0xF4)
+	{
+		if (idx > len-3)
+			goto fail;
+		if (head == 0xF0 && bytes[idx+0] < 0x90) // overlong
+			goto fail;
+		if (head == 0xF4 && bytes[idx+0] >= 0x90) // above U+10FFFF
+			goto fail;
+		if ((bytes[idx+0]&0xC0)!=0x80)
+			goto fail;
+		if ((bytes[idx+1]&0xC0)!=0x80)
+			goto fail;
+		if ((bytes[idx+2]&0xC0)!=0x80)
+			goto fail;
+		
+		idx += 3;
+		return (head<<18) + (bytes[idx-3]<<12) + (bytes[idx-2]<<6) + (bytes[idx-1]<<0) - ((0xF0<<18) + (0x80<<12) + (0x80<<6) + (0x80<<0));
+	}
+	
+fail:
+	return 0xDC00 | head;
+}
+
 
 bool strtoken(const char * haystack, const char * needle, char separator)
 {
@@ -308,6 +447,8 @@ bool strtoken(const char * haystack, const char * needle, char separator)
 	}
 	return false;
 }
+
+
 
 test("strtoken", "", "string")
 {
@@ -435,6 +576,16 @@ test("string", "", "string")
 	}
 	
 	{
+		string a = "abcdefghijklmnopqrstuvwxyz";
+		cstring b = a;
+		a = b;
+		assert_eq(a, "abcdefghijklmnopqrstuvwxyz");
+		b = a;
+		a = b.substr(1, ~1);
+		assert_eq(a, "bcdefghijklmnopqrstuvwxy");
+	}
+	
+	{
 		arrayview<byte> a((uint8_t*)"123", 3);
 		string b = "["+string(a)+"]";
 		string c = "["+cstring(a)+"]";
@@ -525,6 +676,15 @@ test("string", "", "string")
 		assert_eq(f, "");
 		assert_eq(g, "");
 		assert_eq(h, "");
+		
+		assert(!a);
+		assert(!b);
+		assert(!c);
+		assert(!d);
+		assert(!e);
+		assert(!f);
+		assert(!g);
+		assert(!h);
 	}
 	
 	{
@@ -546,5 +706,111 @@ test("string", "", "string")
 		assert(a.icontains("Unc"));
 		assert(a.icontains("Ers"));
 		assert(!a.icontains("x"));
+	}
+	
+	{
+		cstring a(arrayview<byte>((byte*)"\0", 1));
+		assert_eq(a.length(), 1);
+		assert_eq(a[0], '\0');
+		
+		cstring b(arrayview<byte>((byte*)"\0\0\0", 3));
+		assert_eq(b.length(), 3);
+		assert_eq(b.replace(a, "ee"), "eeeeee");
+	}
+	
+	{
+		assert(cstring().isutf8());
+		assert(cstring("abc").isutf8());
+		assert(cstring(arrayview<byte>((byte*)"\0", 1)).isutf8());
+		assert(cstring("\xC2\xA9").isutf8());
+		assert(cstring("\xE2\x82\xAC").isutf8());
+		assert(cstring("\xF0\x9F\x80\xB0").isutf8());
+		assert(cstring("\x78\xC3\xB8\xE2\x98\x83\xF0\x9F\x92\xA9").isutf8()); // xø☃💩
+		assert(cstring("\xF4\x8F\xBF\xBF").isutf8()); // U+10FFFF
+		
+		assert(!cstring("\xC2").isutf8()); // too few continuations
+		assert(!cstring("\xE2\x82").isutf8()); // too few continuations
+		assert(!cstring("\xF0\x9F\x80").isutf8()); // too few continuations
+		assert(!cstring("\xBF").isutf8()); // misplaced continuation
+		assert(cstring("\xED\x9F\xBF").isutf8()); // U+D7FF
+		assert(!cstring("\xED\xA0\x80").isutf8()); // U+D800
+		assert(!cstring("\xED\xBF\xBF").isutf8()); // U+DFFF
+		assert(cstring("\xEE\x80\x80").isutf8()); // U+E000
+		assert(!cstring("\xF4\x90\xC0\xC0").isutf8()); // U+110000
+		
+		assert(!cstring("\xC0\xA1").isutf8()); // overlong '!'
+		assert(!cstring("\xC1\xBF").isutf8()); // overlong U+007F
+		assert(!cstring("\xE0\x9F\xBF").isutf8()); // overlong U+07FF
+		assert(!cstring("\xF0\x8F\xBF\xBF").isutf8()); // overlong U+FFFF
+		
+		//random mangled symbols
+		assert(!cstring("\xE2\x82\x78").isutf8());
+		assert(!cstring("\xE2\x78\xAC").isutf8());
+		assert(!cstring("\x78\xE2\x82").isutf8());
+		assert(!cstring("\x78\x82\xAC").isutf8());
+		assert(!cstring("\xF0\x9F\x80\x78").isutf8());
+		assert(!cstring("\x82\x2C\x63").isutf8());
+		assert(!cstring("\x2C\x92\x63").isutf8());
+	}
+	
+	{
+		cstring a = "a";
+		cstring ab = "ab";
+		cstring ac = "ac";
+		cstring b = "b";
+		
+		assert_eq(string::compare(a,a), 0);
+		assert_lt(string::compare(a,ab), 0);
+		assert_lt(string::compare(a,ac), 0);
+		assert_lt(string::compare(a,b), 0);
+		assert_gt(string::compare(ab,a), 0);
+		assert_eq(string::compare(ab,ab), 0);
+		assert_lt(string::compare(ab,ac), 0);
+		assert_lt(string::compare(ab,b), 0);
+		assert_gt(string::compare(ac,a), 0);
+		assert_gt(string::compare(ac,ab), 0);
+		assert_eq(string::compare(ac,ac), 0);
+		assert_lt(string::compare(ac,b), 0);
+		assert_gt(string::compare(b,a), 0);
+		assert_gt(string::compare(b,ab), 0);
+		assert_gt(string::compare(b,ac), 0);
+		assert_eq(string::compare(b,b), 0);
+	}
+	
+	{
+		cstring a = "aeø☃💩\xF4\x8F\xBF\xBF\xC0\x80\xED\xA0\x80\xF4\x90\x80\x80";
+		uint32_t n = 0;
+		assert_eq(a.codepoint_at(n), 'a');
+		assert_eq(a.codepoint_at(n), 'e');
+		assert_eq(a.codepoint_at(n), 0xF8);
+		assert_eq(a.codepoint_at(n), 0x2603);
+		assert_eq(a.codepoint_at(n), 0x1F4A9);
+		assert_eq(a.codepoint_at(n), 0x10FFFF);
+		assert_eq(a.codepoint_at(n), 0xDCC0);
+		assert_eq(a.codepoint_at(n), 0xDC80);
+		assert_eq(a.codepoint_at(n), 0xDCED);
+		assert_eq(a.codepoint_at(n), 0xDCA0);
+		assert_eq(a.codepoint_at(n), 0xDC80);
+		assert_eq(a.codepoint_at(n), 0xDCF4);
+		assert_eq(a.codepoint_at(n), 0xDC90);
+		assert_eq(a.codepoint_at(n), 0xDC80);
+		assert_eq(a.codepoint_at(n), 0xDC80);
+		assert_eq(n, a.length());
+	}
+	
+	{
+		cstring a = "💩";
+		uint32_t n = 0;
+		assert_eq(a.codepoint_at(n), 0x1F4A9);
+		assert_eq(n, a.length());
+	}
+	
+	{
+		cstring a = "\xF0\x9F\x92";
+		uint32_t n = 0;
+		assert_eq(a.codepoint_at(n), 0xDCF0);
+		assert_eq(a.codepoint_at(n), 0xDC9F);
+		assert_eq(a.codepoint_at(n), 0xDC92);
+		assert_eq(n, a.length());
 	}
 }

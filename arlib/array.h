@@ -59,8 +59,8 @@ public:
 		this->count = N;
 	}
 	
-	arrayview<T> slice(size_t first, size_t count) { return arrayview<T>(this->items+first, count); }
-	arrayview<T> skip(size_t n) { return slice(n, this->count-n); }
+	arrayview<T> slice(size_t first, size_t count) const { return arrayview<T>(this->items+first, count); }
+	arrayview<T> skip(size_t n) const { return slice(n, this->count-n); }
 	
 	T join() const
 	{
@@ -74,7 +74,8 @@ public:
 		return out;
 	}
 	
-	template<typename T2> decltype(T() + T2()) join(T2 between) const
+	template<typename T2>
+	decltype(T() + T2()) join(T2 between) const
 	{
 		if (!this->count) return decltype(T() + T2())();
 		
@@ -83,6 +84,20 @@ public:
 		{
 			out += between;
 			out += this->items[n];
+		}
+		return out;
+	}
+	
+	template<typename T2, typename Tc>
+	T2 join(T2 between, Tc conv) const
+	{
+		if (!this->count) return T2();
+		
+		T2 out = conv(this->items[0]);
+		for (size_t n=1;n < this->count;n++)
+		{
+			out += between;
+			out += conv(this->items[n]);
 		}
 		return out;
 	}
@@ -204,8 +219,20 @@ public:
 	arrayvieww<T> slice(size_t first, size_t count) { return arrayvieww<T>(this->items+first, count); }
 	arrayvieww<T> skip(size_t n) { return slice(n, this->count-n); }
 	
+	void swap(size_t a, size_t b)
+	{
+		if (a == b) return;
+		
+		char tmp[sizeof(T)];
+		memcpy(tmp, this->items+a, sizeof(T));
+		memmove(this->items+b+1, this->items+b, sizeof(T)*(a-b));
+		memcpy(this->items+b, tmp, sizeof(T));
+	}
+	
 	//stable sort
-	void sort()
+	//comparer should return whether the items are in wrong order and should be swapped
+	template<typename Tless>
+	void sort(const Tless& less)
 	{
 		//insertion sort, without binary search optimization for finding the new position
 		//TODO: less lazy
@@ -214,18 +241,24 @@ public:
 			size_t b;
 			for (b=0;b<a;b++)
 			{
-				if (this->items[a] < this->items[b]) break;
+				if (less(this->items[b], this->items[a])) break;
 			}
-			if (a == b) continue;
-			
-			char tmp[sizeof(T)];
-			memcpy(tmp, this->items+a, sizeof(T));
-			memmove(this->items+b+1, this->items+b, sizeof(T)*(a-b));
-			memcpy(this->items+b, tmp, sizeof(T));
+			swap(a, b);
 		}
 	}
 	
+	void sort()
+	{
+		sort([](const T& a, const T& b) { return b < a; });
+	}
+	
 	//unstable sort, not necessarily quicksort
+	template<typename Tless>
+	void qsort(const Tless& less)
+	{
+		sort(less); // TODO: less lazy
+	}
+	
 	void qsort()
 	{
 		sort(); // TODO: less lazy
@@ -283,6 +316,11 @@ public:
 		other.count = this->count;
 		this->items = newitems;
 		this->count = newcount;
+	}
+	
+	void swap(size_t a, size_t b)
+	{
+		arrayvieww<T>::swap(a, b);
 	}
 	
 private:
@@ -686,7 +724,7 @@ public:
 			break;
 		}
 		
-//printf("%lu->%lu t=%i", prevlen, len, ((prevlen > n_inline)<<1 | (len > n_inline)));
+//printf("%lu->%lu t=%d", prevlen, len, ((prevlen > n_inline)<<1 | (len > n_inline)));
 //size_t bytes;
 //if (len > n_inline) bytes = alloc_size(len);
 //else bytes = sizeof(bits_inline);

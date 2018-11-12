@@ -263,7 +263,7 @@ public:
 	//messing with the set during iteration half-invalidates all iterators
 	//a half-invalid iterator may return values you've already seen and may skip values, but will not crash or loop forever
 	//exception: you may not dereference a half-invalid iterator, use operator++ first
-	//as such, 'for (T i : my_set) { my_set.remove(i); }' is safe (though may keep some instances)
+	//as such, 'for (T i : my_set) { my_set.remove(i); }' is safe (though may not remove everything)
 	iterator begin() const { return iterator(this, 0); }
 	iterator end() const { return iterator(this, -1); }
 
@@ -275,7 +275,7 @@ public:
 //puts("---");
 //for (size_t i=0;i<m_data.size();i++)
 //{
-//	printf("%s %lu: valid %i, tag %i, data %s, found slot %lu\n",
+//	printf("%s %lu: valid %d, tag %d, data %s, found slot %lu\n",
 //		why, i, (bool)m_valid[i], m_data[i].tag(), (const char*)debug_node(m_data[i].member()), find_pos(m_data[i].member()));
 //}
 //puts("---");
@@ -294,6 +294,11 @@ public:
 		node() : key(), value() {}
 		node(const Tkey& key) : key(key), value() {}
 		node(const Tkey& key, const Tvalue& value) : key(key), value(value) {}
+		//these silly things won't work
+		//node(Tkey&& key) : key(std::move(key)), value() {}
+		//node(Tkey&& key, const Tvalue& value) : key(std::move(key)), value(value) {}
+		//node(const Tkey& key, Tvalue&& value) : key(key), value(std::move(value)) {}
+		//node(Tkey&& key, Tvalue&& value) : key(std::move(key)), value(std::move(value)) {}
 		//node(node other) : key(other.key), value(other.value) {}
 		
 		size_t hash() const { return ::hash(key); }
@@ -323,6 +328,11 @@ public:
 	{
 		return items.get(key)->value;
 	}
+	template<typename Tk2>
+	const Tvalue& get(const Tk2& key) const
+	{
+		return items.get(key)->value;
+	}
 	
 	//if nonexistent, returns 'def'
 	template<typename Tk2>
@@ -333,14 +343,28 @@ public:
 		else return def;
 	}
 	template<typename Tk2>
-	Tvalue get_or(const Tk2& key, Tvalue def)
+	const Tvalue& get_or(const Tk2& key, const Tvalue& def) const
 	{
 		node* ret = items.get(key);
 		if (ret) return ret->value;
 		else return def;
 	}
 	template<typename Tk2>
+	Tvalue get_or(const Tk2& key, Tvalue&& def) const
+	{
+		node* ret = items.get(key);
+		if (ret) return ret->value;
+		else return std::move(def);
+	}
+	template<typename Tk2>
 	Tvalue* get_or_null(const Tk2& key)
+	{
+		node* ret = items.get(key);
+		if (ret) return &ret->value;
+		else return NULL;
+	}
+	template<typename Tk2>
+	const Tvalue* get_or_null(const Tk2& key) const
 	{
 		node* ret = items.get(key);
 		if (ret) return &ret->value;
@@ -395,9 +419,39 @@ private:
 	public:
 		c_iterator(typename set<node>::iterator it) : it(it) {}
 		
-		const node& operator*() { return const_cast<node&>(*it); }
+		const node& operator*() { return *it; }
 		c_iterator& operator++() { ++it; return *this; }
 		bool operator!=(const c_iterator& other) { return it != other.it; }
+	};
+	
+	class k_iterator {
+		typename set<node>::iterator it;
+	public:
+		k_iterator(typename set<node>::iterator it) : it(it) {}
+		
+		const Tkey& operator*() { return (*it).key; }
+		k_iterator& operator++() { ++it; return *this; }
+		bool operator!=(const k_iterator& other) { return it != other.it; }
+	};
+	
+	class v_iterator {
+		typename set<node>::iterator it;
+	public:
+		v_iterator(typename set<node>::iterator it) : it(it) {}
+		
+		Tvalue& operator*() { return const_cast<Tvalue&>((*it).value); }
+		v_iterator& operator++() { ++it; return *this; }
+		bool operator!=(const v_iterator& other) { return it != other.it; }
+	};
+	
+	class cv_iterator {
+		typename set<node>::iterator it;
+	public:
+		cv_iterator(typename set<node>::iterator it) : it(it) {}
+		
+		const Tvalue& operator*() { return (*it).value; }
+		cv_iterator& operator++() { ++it; return *this; }
+		bool operator!=(const cv_iterator& other) { return it != other.it; }
 	};
 	
 public:
@@ -410,8 +464,12 @@ public:
 	c_iterator begin() const { return items.begin(); }
 	c_iterator end() const { return items.end(); }
 	
-	template<typename Ts>
-	void serialize(Ts& s)
+	iterwrap<k_iterator> keys() const { return iterwrap<k_iterator>(items.begin(), items.end()); }
+	iterwrap<v_iterator> values() { return iterwrap<v_iterator>(items.begin(), items.end()); }
+	iterwrap<cv_iterator> values() const { return iterwrap<cv_iterator>(items.begin(), items.end()); }
+	
+	template<typename T>
+	void serialize(T& s)
 	{
 		if (s.serializing)
 		{

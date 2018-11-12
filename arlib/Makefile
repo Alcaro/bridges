@@ -122,10 +122,10 @@ ifeq ($(OS),linux)
     CONF_LFLAGS += -pthread
   endif
   OBJNAME = linux
-  TESTRUNNER = valgrind --num-callers=100
+  TR = valgrind --num-callers=100
 endif
-ifeq ($(TESTRUNNER),gdb)
-  override TESTRUNNER = gdb --args
+ifeq ($(TR),gdb)
+  override TR = gdb --args
 endif
 
 ifeq ($(OS),windows)
@@ -143,6 +143,7 @@ OPTFLAGS := -Os -fomit-frame-pointer -fmerge-all-constants -fvisibility=hidden
 OPTFLAGS += -fno-unwind-tables -fno-asynchronous-unwind-tables
 OPTFLAGS += -ffunction-sections -fdata-sections
 OPTFLAGS += -fno-ident
+OPTFLAGS += -fno-threadsafe-statics
 OPTFLAGS += -Werror -DNDEBUG -DARLIB_OPT
 OPTLFLAGS := -Wl,--gc-sections,--build-id=none,--hash-style=gnu,--relax
 #OPTLFLAGS += -Wl,--print-map
@@ -301,9 +302,9 @@ ifeq ($(ARSOCKET),1)
   else ifeq ($(ARSOCKET_SSL),bearssl)
     CFLAGS_ARLIB += -DARLIB_SSL_BEARSSL
     SOURCES_ARLIB += arlib/socket/bear-ser.c
-    OBJS_LATE += arlib/deps/bearssl-0.5/build/libbearssl.a
-arlib/deps/bearssl-0.5/build/libbearssl.a:
-	$(MAKE) -C arlib/deps/bearssl-0.5/ CFLAGS='$(OPTFLAGS) -fpic' lib
+    OBJS_LATE += arlib/deps/bearssl-0.6/build/libbearssl.a
+arlib/deps/bearssl-0.6/build/libbearssl.a:
+	$(MAKE) -C arlib/deps/bearssl-0.6/ CFLAGS='$(OPTFLAGS) -fpic' lib
   else ifeq ($(ARSOCKET_SSL),tlse)
     CFLAGS_ARLIB += -DARLIB_SSL_TLSE
     SOURCES_NOWARN += arlib/deps/tlse.c
@@ -367,12 +368,12 @@ ifneq ($(TF),)
   TESTFILTER := --filter="$(TF)"
 endif
 test: obj/arlibtest$(EXESUFFIX)
-	$(TESTRUNNER) obj/arlibtest$(EXESUFFIX) $(TESTFILTER)
+	$(TR) obj/arlibtest$(EXESUFFIX) $(TESTFILTER)
 check: test
 test-all: obj/arlibtest$(EXESUFFIX)
-	$(TESTRUNNER) obj/arlibtest$(EXESUFFIX) --all $(TESTFILTER)
+	$(TR) obj/arlibtest$(EXESUFFIX) --all $(TESTFILTER)
 test-all-twice: obj/arlibtest$(EXESUFFIX)
-	$(TESTRUNNER) obj/arlibtest$(EXESUFFIX) --all --twice $(TESTFILTER)
+	$(TR) obj/arlibtest$(EXESUFFIX) --all --twice $(TESTFILTER)
 endif
 
 

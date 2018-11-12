@@ -30,7 +30,7 @@ void Discord::http(HTTP::req r, function<void(HTTP::rsp)> callback)
 	
 	r.url = "https://discordapp.com/api" + r.url;
 	headers(r.headers);
-	//if (r.method == "POST" && !r.postdata) r.postdata = "{}";
+	//if (r.method == "POST" && !r.body) r.body = "{}";
 	puts("request "+r.url);
 	//r.userdata = ++m_http_index;
 	m_http.send(r, callback);
@@ -102,7 +102,7 @@ puts("DOCONNECT:"+ws_url);
 	m_ws.connect(ws_url, heads);
 }
 
-bool Discord::keepalive_cb()
+void Discord::keepalive_cb()
 {
 	// if we don't connect properly, lie to ourselves until we ping out (easiest way to say 'reconnect in a minute')
 	if (guilds_to_join == 0)
@@ -119,17 +119,14 @@ bool Discord::keepalive_cb()
 	}
 	
 	if (keepalive_sent)
-	{
 		connect();
-		return true;
-	}
-	keepalive_sent = true;
-	return true;
+	else
+		keepalive_sent = true;
 }
 
-void Discord::ws_str(string msg)
+void Discord::ws_str(cstring msg)
 {
-//printf("d=%i dn=%li t=%li\n",(bool)debug_target,debug_next,time(NULL));
+//printf("d=%d dn=%ld t=%ld\n",(bool)debug_target,debug_next,time(NULL));
 //if (debug_target && time(NULL) >= debug_next)
 //{
 //	debug_next = time(NULL)+60;
@@ -388,7 +385,7 @@ void Discord::del_user(cstring guild_id, cstring user_id)
 
 void Discord::User::fetch(function<void(User)> callback)
 {
-puts("PARTIAL:NAME="+impl().username);
+//puts("PARTIAL:NAME="+impl().username);
 puts("PARTIAL:PARTIAL="+tostring(partial()));
 	if (!partial())
 	{
@@ -398,21 +395,19 @@ puts("PARTIAL:SHORTCIRCUIT");
 	}
 puts("PARTIAL:FULLFETCH");
 	
-	class x {
-		Discord* m_parent;
-		function<void(User)> callback;
-	public:
-		x(Discord* m_parent, function<void(User)> callback) : m_parent(m_parent), callback(callback) {}
-		void cb_fn(HTTP::rsp r)
+	Discord* m_parent = this->m_parent; // copy these, 'this' is a use-after-free in the lambda
+	string m_id = this->m_id;
+	m_parent->http("GET", "/users/"+m_id, bind_lambda([m_parent,m_id,callback](HTTP::rsp r)
 		{
 			JSON json(r.text());
+			if (!json["id"])
+			{
+				callback(User(NULL, m_id, ""));
+				return;
+			}
 			m_parent->set_user_inner(json);
 			callback(m_parent->user_from_id(json["id"]));
-			delete this;
-		}
-	};
-	
-	m_parent->http("GET", "/users/"+m_id, bind_ptr(&x::cb_fn, new x(m_parent, callback)));
+		}));
 }
 
 string Discord::getdate()

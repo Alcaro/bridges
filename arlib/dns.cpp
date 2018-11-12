@@ -34,11 +34,11 @@ void DNS::init(cstring resolver, int port, runloop* loop)
 void DNS::resolve(cstring domain, unsigned timeout_ms, function<void(string domain, string ip)> callback)
 {
 	if (!domain) return callback(domain, "");
-	if (hosts_txt.contains(domain))
-	{
-		callback(domain, hosts_txt.get(domain));
-		return;
-	}
+	
+	uint8_t discard[16];
+	if (socket::string_to_ip(discard, domain)) return callback(domain, domain);
+	
+	if (hosts_txt.contains(domain)) return callback(domain, hosts_txt.get(domain));
 	
 	bytestreamw packet;
 	
@@ -77,7 +77,7 @@ void DNS::resolve(cstring domain, unsigned timeout_ms, function<void(string doma
 	query& q = queries.get_create(trid);
 	q.callback = callback;
 	q.domain = domain;
-	q.timeout_id = loop->set_timer_rel(timeout_ms, bind_lambda([this,trid]()->bool { this->timeout(trid); return false; }));
+	q.timeout_id = loop->set_timer_once(timeout_ms, bind_lambda([this,trid]() { this->timeout(trid); }));
 }
 
 string DNS::read_name(bytestream& stream)
@@ -117,68 +117,6 @@ string DNS::read_name(bytestream& stream)
 		}
 		else return "";
 	}
-}
-
-string DNS::ip_to_string(arrayview<byte> ip)
-{
-	if (ip.size() == 4)
-	{
-		return tostring(ip[0])+"."+tostring(ip[1])+"."+tostring(ip[2])+"."+tostring(ip[3]);
-	}
-/*
-TODO
-https://tools.ietf.org/html/rfc5952
-
-4.  A Recommendation for IPv6 Text Representation
-
-   A recommendation for a canonical text representation format of IPv6
-   addresses is presented in this section.  The recommendation in this
-   document is one that complies fully with [RFC4291], is implemented by
-   various operating systems, and is human friendly.  The recommendation
-   in this section SHOULD be followed by systems when generating an
-   address to be represented as text, but all implementations MUST
-   accept and be able to handle any legitimate [RFC4291] format.  It is
-   advised that humans also follow these recommendations when spelling
-   an address.
-
-4.1.  Handling Leading Zeros in a 16-Bit Field
-
-   Leading zeros MUST be suppressed.  For example, 2001:0db8::0001 is
-   not acceptable and must be represented as 2001:db8::1.  A single 16-
-   bit 0000 field MUST be represented as 0.
-
-4.2.  "::" Usage
-
-4.2.1.  Shorten as Much as Possible
-
-   The use of the symbol "::" MUST be used to its maximum capability.
-   For example, 2001:db8:0:0:0:0:2:1 must be shortened to 2001:db8::2:1.
-   Likewise, 2001:db8::0:1 is not acceptable, because the symbol "::"
-   could have been used to produce a shorter representation 2001:db8::1.
-
-4.2.2.  Handling One 16-Bit 0 Field
-
-   The symbol "::" MUST NOT be used to shorten just one 16-bit 0 field.
-   For example, the representation 2001:db8:0:1:1:1:1:1 is correct, but
-   2001:db8::1:1:1:1:1 is not correct.
-
-4.2.3.  Choice in Placement of "::"
-
-   When there is an alternative choice in the placement of a "::", the
-   longest run of consecutive 16-bit 0 fields MUST be shortened (i.e.,
-   the sequence with three consecutive zero fields is shortened in 2001:
-   0:0:1:0:0:0:1).  When the length of the consecutive 16-bit 0 fields
-   are equal (i.e., 2001:db8:0:0:1:0:0:1), the first sequence of zero
-   bits MUST be shortened.  For example, 2001:db8::1:0:0:1 is correct
-   representation.
-
-4.3.  Lowercase
-
-   The characters "a", "b", "c", "d", "e", and "f" in an IPv6 address
-   MUST be represented in lowercase.
-
-*/
-	return "";
 }
 
 void DNS::timeout(uint16_t trid)
@@ -232,13 +170,13 @@ void DNS::sock_cb()
 	
 	string ret = "";
 	
+	{
 	if (stream.u16b() != 0x8180) goto fail; // QR, RD, RA
 	if (stream.u16b() != 0x0001) goto fail; // QDCOUNT
-	uint16_t ancount;
-	ancount = stream.u16b(); // git.io gives eight different IPs
+	uint16_t ancount = stream.u16b(); // git.io gives eight different IPs
 	if (ancount < 0x0001) goto fail; // ANCOUNT
-	if (stream.u16b() != 0x0000) goto fail; // NSCOUNT
-	if (stream.u16b() != 0x0000) goto fail; // ARCOUNT
+	uint16_t nscount = stream.u16b(); // NSCOUNT
+	uint16_t arcount = stream.u16b(); // ARCOUNT
 	
 	//query
 	if (read_name(stream) != q.domain) goto fail;
@@ -249,8 +187,8 @@ void DNS::sock_cb()
 	if (read_name(stream) != q.domain) goto fail;
 	if (stream.remaining() < 2+2+4+2) return;
 	
-	uint16_t type;
-	type = stream.u16b();
+	//first answer
+	uint16_t type = stream.u16b();
 	if (type == 0x0005) // type CNAME
 	{
 		if (stream.u16b() != 0x0001) goto fail; // class IN
@@ -271,13 +209,15 @@ void DNS::sock_cb()
 	if (stream.u16b() != 0x0001) goto fail; // class IN
 	
 	stream.u32b(); // TTL, ignore
-	size_t iplen;
-	iplen = stream.u16b();
+	size_t iplen = stream.u16b();
 	if (stream.remaining() < iplen) goto fail;
-	if (ancount == 1 && stream.remaining() != iplen) goto fail;
+	if (ancount==1 && nscount==0 && arcount==0 && stream.remaining() != iplen) goto fail;
 	
-	ret = ip_to_string(stream.bytes(iplen));
+	ret = socket::ip_to_string(stream.bytes(iplen));
 	
+	//ignore remaining answers, as well as nscount and arcount
+	
+	}
 fail:
 	function<void(string domain, string ip)> callback = q.callback;
 	string q_domain = std::move(q.domain);
@@ -288,8 +228,8 @@ fail:
 }
 
 #include "test.h"
-test("dummy", "runloop", "udp") {} // there are no real udp tests, the dns test is enough. but something must provide udp or it gets angry
-test("DNS", "udp,string", "dns")
+test("dummy", "runloop", "udp") {} // there are no real udp tests, the dns test is enough. but something must provide udp
+test("DNS", "udp,string,ipconv", "dns")
 {
 	test_skip("kinda slow");
 	
@@ -298,46 +238,63 @@ test("DNS", "udp,string", "dns")
 	assert(isdigit(DNS::default_resolver()[0])); // TODO: fails on IPv6 ::1
 	
 	DNS dns(loop);
-	int await = 6;
-	dns.resolve("google-public-dns-b.google.com", bind_lambda([&](string domain, string ip)
+	int n_done = 0;
+	int n_total = 0;
+	n_total++; // dummy addition to ensure n_done != n_total prior to loop->enter
+	n_total++; dns.resolve("google-public-dns-b.google.com", bind_lambda([&](string domain, string ip)
 		{
-			await--; if (await == 0) loop->exit(); // put this above assert, otherwise it deadlocks
+			n_done++; if (n_done == n_total) loop->exit(); // put this above assert, otherwise it deadlocks
 			assert_eq(domain, "google-public-dns-b.google.com");
 			assert_eq(ip, "8.8.4.4"); // use public-b only, to ensure IP isn't byteswapped
 		}));
-	dns.resolve("not-a-subdomain.google-public-dns-a.google.com", bind_lambda([&](string domain, string ip)
+	n_total++; dns.resolve("not-a-subdomain.google-public-dns-a.google.com", bind_lambda([&](string domain, string ip)
 		{
-			await--; if (await == 0) loop->exit();
+			n_done++; if (n_done == n_total) loop->exit();
 			assert_eq(domain, "not-a-subdomain.google-public-dns-a.google.com");
 			assert_eq(ip, "");
 		}));
-	dns.resolve("git.io", bind_lambda([&](string domain, string ip)
+	n_total++; dns.resolve("git.io", bind_lambda([&](string domain, string ip)
 		{
-			await--; if (await == 0) loop->exit();
+			n_done++; if (n_done == n_total) loop->exit();
 			assert_eq(domain, "git.io");
 			assert_neq(ip, ""); // this domain returns eight values in answer section, must be parsed properly
 		}));
-	dns.resolve("", bind_lambda([&](string domain, string ip) // this must fail
+	n_total++; dns.resolve("", bind_lambda([&](string domain, string ip) // this must fail
 		{
-			await--; if (await == 0) loop->exit();
+			n_done++; if (n_done == n_total) loop->exit();
 			assert_eq(domain, "");
 			assert_eq(ip, "");
 		}));
-	dns.resolve("localhost", bind_lambda([&](string domain, string ip)
+	n_total++; dns.resolve("localhost", bind_lambda([&](string domain, string ip)
 		{
-			await--; if (await == 0) loop->exit();
+			n_done++; if (n_done == n_total) loop->exit();
 			assert_eq(domain, "localhost");
 			// silly way to say 'can be either of those, but must be one of them', but it's the best I can find
 			if (ip != "::1") assert_eq(ip, "127.0.0.1");
 		}));
-	dns.resolve("stacked.muncher.se", bind_lambda([&](string domain, string ip) // random domain that's on a CNAME
+	n_total++; dns.resolve("stacked.muncher.se", bind_lambda([&](string domain, string ip) // random domain that's on a CNAME
 		{
-			await--; if (await == 0) loop->exit();
+			n_done++; if (n_done == n_total) loop->exit();
 			assert_eq(domain, "stacked.muncher.se");
 			// that IP is dynamic, just accept anything
 			assert_neq(ip, "");
 		}));
+	n_total++; dns.resolve("127.0.0.1", bind_lambda([&](string domain, string ip)
+		{
+			n_done++; if (n_done == n_total) loop->exit();
+			assert_eq(domain, "127.0.0.1");
+			//if it's already an IP, it must remain an IP
+			assert_eq(ip, "127.0.0.1");
+		}));
+	//an invalid IP
+	n_total++; dns.resolve("127.0.0.", bind_lambda([&](string domain, string ip)
+		{
+			n_done++; if (n_done == n_total) loop->exit();
+			assert_eq(domain, "127.0.0.");
+			assert_eq(ip, "");
+		}));
+	n_total--; // remove dummy addition
 	
-	if (await != 0) loop->enter();
+	if (n_done != n_total) loop->enter();
 }
 #endif

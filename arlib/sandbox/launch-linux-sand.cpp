@@ -12,7 +12,34 @@
 #include <sys/stat.h>
 #include <sys/resource.h>
 #include <linux/memfd.h> // documented as sys/memfd.h, but that doesn't exist
+
+//#include <linux/ioprio.h> // ioprio_set - header doesn't exist for me, copying the content
+//these defines are in a file that claims to be GPL, but the userspace ABI/API is not GPL and
+// it's impossible to use ioprio_set without them, so I believe that license tag is incorrect
+// and/or the 'only one possible definition' defense applies
+
+#define IOPRIO_CLASS_SHIFT	(13)
+#define IOPRIO_PRIO_MASK	((1UL << IOPRIO_CLASS_SHIFT) - 1)
+#define IOPRIO_PRIO_CLASS(mask)	((mask) >> IOPRIO_CLASS_SHIFT)
+#define IOPRIO_PRIO_DATA(mask)	((mask) & IOPRIO_PRIO_MASK)
+#define IOPRIO_PRIO_VALUE(class, data)	(((class) << IOPRIO_CLASS_SHIFT) | data)
+
+enum {
+	IOPRIO_CLASS_NONE,
+	IOPRIO_CLASS_RT,
+	IOPRIO_CLASS_BE,
+	IOPRIO_CLASS_IDLE,
+};
+
+enum {
+	IOPRIO_WHO_PROCESS = 1,
+	IOPRIO_WHO_PGRP,
+	IOPRIO_WHO_USER,
+};
+
+
 #include <fcntl.h>
+#ifndef F_ADD_SEALS
 #define F_LINUX_SPECIFIC_BASE 1024
 #define F_ADD_SEALS   (F_LINUX_SPECIFIC_BASE + 9)  // and these only exist in linux/fcntl.h - where fcntl() doesn't exist
 #define F_GET_SEALS   (F_LINUX_SPECIFIC_BASE + 10) // and I can't include both, duplicate definitions
@@ -20,6 +47,7 @@
 #define F_SEAL_SHRINK 0x0002
 #define F_SEAL_GROW   0x0004
 #define F_SEAL_WRITE  0x0008
+#endif
 #include <sys/prctl.h>
 #include <linux/filter.h>
 #include <linux/seccomp.h>
@@ -98,7 +126,7 @@ template<typename T> inline T require(T x)
 	if ((long)x == -1) _exit(1);
 	return x;
 }
-//this could be an overload, but for security-critical code, compact is bad
+//this could be an overload, but for security-critical code, explicit is good
 inline void require_b(bool expected)
 {
 	if (!expected) _exit(1);
@@ -162,7 +190,6 @@ static int execveat(int dirfd, const char * pathname, char * const argv[], char 
 }
 
 
-#include"../os.h"
 pid_t sandproc::launch_impl(array<const char*> argv, array<int> stdio_fd)
 {
 	argv.prepend("[Arlib-sandbox]"); // ld-linux thinks it's argv[0] and discards the real one
@@ -170,7 +197,7 @@ pid_t sandproc::launch_impl(array<const char*> argv, array<int> stdio_fd)
 	//fcntl is banned by seccomp, so this goes early
 	//putting it before clone() allows sharing it between sandbox children
 	int preld_fd = preloader_fd();
-	if (preld_fd<0)
+	if (preld_fd < 0)
 		return -1;
 	
 	int socks[2];
@@ -182,11 +209,9 @@ pid_t sandproc::launch_impl(array<const char*> argv, array<int> stdio_fd)
 	
 	int clone_flags = CLONE_NEWUSER | CLONE_NEWPID | CLONE_NEWNET | CLONE_NEWCGROUP | CLONE_NEWIPC | CLONE_NEWNS | CLONE_NEWUTS;
 	clone_flags |= SIGCHLD; // termination signal, must be SIGCHLD for waitpid to work properly
-printf("d%lu\n",time_us_ne());
 	pid_t pid = syscall(__NR_clone, clone_flags, NULL, NULL, NULL, NULL);
-printf("e%lu,%i\n",time_us_ne(),(int)pid);
-	if (pid<0) return -1;
-	if (pid>0)
+	if (pid < 0) return -1;
+	if (pid > 0)
 	{
 		mainsock = socks[0];
 		watch_add(socks[0]);
@@ -215,27 +240,36 @@ printf("e%lu,%i\n",time_us_ne(),(int)pid);
 	//once (if) it does, set these:
 	// memory.memsw.limit_in_bytes = 100*1024*1024
 	// cpu.cfs_period_us = 100*1000, cpu.cfs_quota_us = 50*1000
-	// pids.max = 10
+	// pids.max = 30
 	//for now, just stick up some rlimit rules, to disable the most naive forkbombs or memory wastes
 	
 	struct rlimit rlim_as = { 1*1024*1024*1024, 1*1024*1024*1024 }; // this is the only one that affects mmap
-	require(setrlimit(RLIMIT_AS, &rlim_as));
+	require(setrlimit(RLIMIT_AS, &rlim_as)); // keep the value synced with sysinfo() in sysemu
 	
 	//why so many? because the rest of the root-namespace user is also included, which is often a few hundred
 	//http://elixir.free-electrons.com/linux/latest/source/kernel/fork.c#L1564
 	struct rlimit rlim_nproc = { 500, 500 };
 	require(setrlimit(RLIMIT_NPROC, &rlim_nproc));
 	
+	//nice value
+	//PRIO_PROCESS,0 - calling thread
+	//19 - lowest possible priority
+	require(setpriority(PRIO_PROCESS,0, 19));
+	//ionice
+	//IOPRIO_PRIO_VALUE(IOPRIO_CLASS_IDLE, 0) - lowest priority; the 0 is unused as of kernel 4.16
+	require(syscall(__NR_ioprio_set, IOPRIO_WHO_PROCESS,0, IOPRIO_PRIO_VALUE(IOPRIO_CLASS_IDLE, 0)));
+	
 	//die on parent death
+	//('parent' is parent thread, not the entire process, but Arlib process objects have thread affinity anyways)
 	require(prctl(PR_SET_PDEATHSIG, SIGKILL));
 	
 	//ensure parent is still alive
 	//have to check for a response, it's possible that parent died before the prctl but its socket isn't deleted yet
-	//(I don't know in which order Linux executes process teardown action, nor whether it's guaranteed to remain secure)
 	struct broker_req req = { br_ping };
-	require(send(3, &req, sizeof(req), MSG_EOR));
+	require_eq(send(3, &req, sizeof(req), MSG_NOSIGNAL|MSG_EOR), (ssize_t)sizeof(req));
 	struct broker_rsp rsp;
-	require_eq(recv(3, &rsp, sizeof(rsp), 0), (ssize_t)sizeof(rsp));
+	require_eq(recv(3, &rsp, sizeof(rsp), MSG_NOSIGNAL), (ssize_t)sizeof(rsp));
+	//discard the response, we know it's { br_ping, {0,0,0}, "" }, we only care whether we got one at all
 	
 	//revoke filesystem
 	require(chroot("/proc/sys/debug/"));
@@ -254,7 +288,7 @@ printf("e%lu,%i\n",time_us_ne(),(int)pid);
 	//0x00007FFF'FFFFF000 isn't mappable, apparently sticking SYSCALL (0F 05) at 0x00007FFF'FFFFFFFE
 	// will return to an invalid address and blow up
 	//http://elixir.free-electrons.com/linux/v4.11/source/arch/x86/include/asm/processor.h#L832
-	//we don't care what the last page is, as long as there is one
+	//doesn't matter what the last page is, as long as there is one
 	char* final_page = (char*)0x00007FFFFFFFE000;
 	require_eq(mmap(final_page+0x1000, 0x1000, PROT_READ, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, -1, 0), MAP_FAILED);
 	require_eq(mmap(final_page,        0x1000, PROT_READ, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, -1, 0), (void*)final_page);
@@ -262,17 +296,5 @@ printf("e%lu,%i\n",time_us_ne(),(int)pid);
 	
 	_exit(1); // execve never returns nonnegative, and require never returns from negative, but gcc knows neither
 }
-
-
-//void sand_do_the_thing(int pid, int sock);
-//int main(int argc, char ** argv, char ** envp)
-//{
-	//int pid;
-	//int sock;
-	//if (!boot_sand(argv, envp, pid, sock)) return 1;
-	
-	//sand_do_the_thing(pid, sock);
-	//return 0;
-//}
 #endif
 #endif

@@ -17,18 +17,20 @@
 
 class string;
 
+#define OBJ_SIZE 16 // maximum 120, or the inline length overflows
+                    // (127 would fit, but that requires an extra alignment byte, which throws the sizeof assert)
+                    // minimum 16 (pointer + various members + alignment)
+                    //  (actually minimum 12 on 32bit, but who needs 32bit)
+#define MAX_INLINE (OBJ_SIZE-1) // macros instead of static const to make gdb not print them every time
+
 class cstring {
 	friend class string;
 	
-	static const int obj_size = 16; // maximum 120, or the inline length overflows
-	                                // (127 would fit, but that requires an extra alignment byte, which throws the sizeof assert)
-	                                // minimum 16 (pointer + various members + alignment)
-	                                //  (actually minimum 12 on 32bit, but who needs 32bit)
-	static const int max_inline = obj_size-1;
+	static uint32_t max_inline() { return MAX_INLINE; }
 	
 	union {
 		struct {
-			uint8_t m_inline[max_inline];
+			uint8_t m_inline[MAX_INLINE];
 			
 			//this is how many bytes are unused by the raw string data
 			//if all bytes are used, there are zero unused bytes - which also serves as the NUL
@@ -45,7 +47,7 @@ class cstring {
 	
 	bool inlined() const
 	{
-		static_assert(sizeof(cstring)==obj_size);
+		static_assert(sizeof(cstring)==OBJ_SIZE);
 		
 		return m_inline_len != (uint8_t)-1;
 	}
@@ -59,7 +61,7 @@ class cstring {
 public:
 	uint32_t length() const
 	{
-		if (inlined()) return max_inline-m_inline_len;
+		if (inlined()) return MAX_INLINE-m_inline_len;
 		else return m_len;
 	}
 	
@@ -77,19 +79,18 @@ private:
 	void init_from_nocopy(const char * str)
 	{
 		if (!str) str = "";
-		init_from_nocopy(arrayview<byte>((uint8_t*)str, strlen(str)));
-		if (!inlined()) m_nul = true;
+		init_from_nocopy(arrayview<byte>((uint8_t*)str, strlen(str)), true);
 	}
-	void init_from_nocopy(arrayview<byte> data)
+	void init_from_nocopy(arrayview<byte> data, bool has_nul = false)
 	{
 		const uint8_t * str = data.ptr();
 		uint32_t len = data.size();
 		
-		if (len <= max_inline)
+		if (len <= MAX_INLINE)
 		{
 			memcpy(m_inline, str, len);
 			m_inline[len] = '\0';
-			m_inline_len = max_inline-len;
+			m_inline_len = MAX_INLINE-len;
 		}
 		else
 		{
@@ -97,7 +98,7 @@ private:
 			
 			m_data = (uint8_t*)str;
 			m_len = len;
-			m_nul = false;
+			m_nul = has_nul;
 		}
 	}
 	void init_from_nocopy(const cstring& other)
@@ -105,29 +106,18 @@ private:
 		memcpy(this, &other, sizeof(*this));
 	}
 	
-	//~0 means end of the string, ~1 is last character
-	//don't try to make -1 the last character, it makes str.substr(x, ~0) blow up
-	int32_t realpos(int32_t pos) const
-	{
-		if (pos >= 0) return pos;
-		else return length()-~pos;
-	}
-	
-	char getchar(int32_t index) const
+	char getchar(uint32_t index) const
 	{
 		//this function is REALLY hot, use the strongest possible optimizations
 		if (inlined()) return m_inline[index];
-		else if ((uint32_t)index < m_len) return m_data[index];
+		else if (index < m_len) return m_data[index];
 		else return '\0'; // for cstring, which isn't necessarily NUL-terminated
 	}
 	
-public:
-	string replace(cstring in, cstring out);
-	
-private:
 	class noinit {};
 	cstring(noinit) {}
 	
+	cstring(arrayview<uint8_t> bytes, bool has_nul) { init_from_nocopy(bytes, has_nul); }
 public:
 	cstring() { init_from_nocopy(""); }
 	cstring(const cstring& other) { init_from_nocopy(other); }
@@ -141,17 +131,25 @@ public:
 	cstring& operator=(nullptr_t) { init_from_nocopy(""); return *this; }
 	
 	explicit operator bool() const { return length() != 0; }
-	//operator const char * () const { return ptr_withnul(); }
+	//explicit operator const char * () const { return ptr_withnul(); }
 	
 	char operator[](int index) const { return getchar(index); }
 	
 	//static string create(arrayview<uint8_t> data) { string ret=noinit(); ret.init_from(data.ptr(), data.size()); return ret; }
 	
+	//~0 means end of the string, ~1 is last character
+	//don't try to make -1 the last character, it makes str.substr(x, ~0) blow up
+	//this shorthand exists only for substr()
+	int32_t realpos(int32_t pos) const
+	{
+		if (pos >= 0) return pos;
+		else return length()-~pos;
+	}
 	cstring substr(int32_t start, int32_t end) const
 	{
 		start = realpos(start);
 		end = realpos(end);
-		return cstring(arrayview<byte>(ptr()+start, end-start));
+		return cstring(arrayview<byte>(ptr()+start, end-start), (bytes_hasterm() && (uint32_t)end == length()));
 	}
 	
 	bool contains(cstring other) const
@@ -217,6 +215,8 @@ public:
 		return (this->length() == other.length() && this->istartswith(other));
 	}
 	
+	string replace(cstring in, cstring out) const;
+	
 	array<cstring> csplit(cstring sep, size_t limit) const;
 	template<size_t limit = SIZE_MAX>
 	array<cstring> csplit(cstring sep) const { return csplit(sep, limit); }
@@ -261,8 +261,15 @@ public:
 	
 	inline string lower() const;
 	inline string upper() const;
-	string fromlatin1() const;
+	
+	bool isutf8() const; // NUL is considered valid UTF-8. U+D800, overlong encodings, etc are not.
+	string fromlatin1() const; // Returns UTF-8.
 	string fromwindows1252() const;
+	
+	// Treats the string as UTF-8 and returns the codepoint there. If not UTF-8, not a start index, or out of bounds,
+	// returns U+DC80 through U+DCFF, depending on the byte.
+	// The index is updated to point to the next codepoint. Initialize it to zero; stop when it equals the string's length.
+	uint32_t codepoint_at(uint32_t& index) const;
 	
 	size_t hash() const { return ::hash((char*)ptr(), length()); }
 	
@@ -295,6 +302,8 @@ public:
 	c_string c_str() const { return c_string(bytes(), bytes_hasterm()); }
 };
 
+
+extern const uint16_t string_windows1252tab[32]; // placed here so gdb stops printing it every time I inspect a string
 
 class string : public cstring {
 	friend class cstring;
@@ -334,14 +343,30 @@ class string : public cstring {
 		other.m_inline_len = 0;
 	}
 	
+	void reinit_from(const char * str)
+	{
+		if (!str) str = "";
+		reinit_from(arrayview<byte>((uint8_t*)str, strlen(str)));
+	}
+	void reinit_from(arrayview<byte> data);
+	void reinit_from(cstring other)
+	{
+		reinit_from(other.bytes());
+	}
+	void reinit_from(string&& other)
+	{
+		release();
+		memcpy(this, &other, sizeof(*this));
+		other.m_inline_len = 0;
+	}
+	
 	void release()
 	{
 		if (!inlined()) free(m_data);
 	}
 	
-	void setchar(int32_t index_, char val)
+	void setchar(uint32_t index, char val)
 	{
-		uint32_t index = realpos(index_);
 		ptr()[index] = val;
 	}
 	
@@ -362,7 +387,7 @@ class string : public cstring {
 		}
 	}
 	
-	void replace_set(int32_t pos, int32_t len, cstring newdat);
+	void replace_set(uint32_t pos, uint32_t len, cstring newdat);
 	
 public:
 	//Resizes the string to a suitable size, then allows the caller to fill it in with whatever. Initial contents are undefined.
@@ -416,13 +441,14 @@ public:
 		init_from(chars.reinterpret<uint8_t>());
 	}
 	string(nullptr_t) { init_from(""); }
-	string& operator=(const string& other) { release(); init_from(other); return *this; }
-	string& operator=(string&& other) { release(); init_from(std::move(other)); return *this; }
-	string& operator=(const char * str) { release(); init_from(str); return *this; }
+	string& operator=(const string& other) { reinit_from(other); return *this; }
+	string& operator=(const cstring& other) { reinit_from(other); return *this; }
+	string& operator=(string&& other) { reinit_from(std::move(other)); return *this; }
+	string& operator=(const char * str) { reinit_from(str); return *this; }
 	string& operator=(nullptr_t) { release(); init_from(""); return *this; }
 	~string() { release(); }
 	
-	explicit operator bool() const { return length() != 0; }
+	operator bool() const { return length() != 0; }
 	operator const char * () const { return ptr_withnul(); }
 	
 private:
@@ -433,10 +459,10 @@ private:
 		charref(string* parent, uint32_t index) : parent(parent), index(index) {}
 		
 	public:
-		charref& operator=(char ch) { parent->setchar(index, ch); return *this; }
-		charref& operator+=(char ch) { parent->setchar(index, parent->getchar(index) + ch); return *this; }
-		charref& operator-=(char ch) { parent->setchar(index, parent->getchar(index) - ch); return *this; }
-		operator char() { return parent->getchar(index); }
+		charref& operator=(uint8_t ch) { parent->setchar(index, ch); return *this; }
+		charref& operator+=(uint8_t ch) { parent->setchar(index, parent->getchar(index) + ch); return *this; }
+		charref& operator-=(uint8_t ch) { parent->setchar(index, parent->getchar(index) - ch); return *this; }
+		operator uint8_t() { return parent->getchar(index); }
 	};
 	friend class charref;
 	
@@ -445,42 +471,30 @@ public:
 	//charref operator[](uint32_t index) { return charref(this, index); }
 	charref operator[](int index) { return charref(this, index); }
 	//char operator[](uint32_t index) const { return getchar(index); }
-	char operator[](int index) const { return getchar(index); }
+	uint8_t operator[](int index) const { return getchar(index); }
 	
+	//Takes ownership of the given pointer. Will free() it when done.
 	static string create_usurp(char * str);
 	
-	//static string create(arrayview<uint8_t> data) { string ret=noinit(); ret.init_from(data.ptr(), data.size()); return ret; }
-	
-	/*
-	string lower()
-	{
-		string ret = *this;
-		ret.unshare();
-		uint8_t * chars = ret.ptr();
-		for (size_t i=0;i<length();i++) chars[i] = tolower(chars[i]);
-		return ret;
-	}
-	
-	string upper()
-	{
-		string ret = *this;
-		ret.unshare();
-		uint8_t * chars = ret.ptr();
-		for (size_t i=0;i<length();i++) chars[i] = toupper(chars[i]);
-		return ret;
-	}
-	*/
+	//Returns a string containing a single NUL.
+	static cstring nul() { return arrayview<byte>((byte*)"", 1); }
 	
 	static string codepoint(uint32_t cp);
-private:
-	static const uint16_t windows1252tab[32];
-public:
+	
 	static uint32_t cpfromwindows1252(uint8_t byte)
 	{
-		if (byte >= 0x80 && byte <= 0x9F) return windows1252tab[byte-0x80];
+		if (byte >= 0x80 && byte <= 0x9F) return string_windows1252tab[byte-0x80];
 		else return byte;
 	}
+	
+	//Does a bytewise comparison, where end is considered before NUL.
+	//If a comes first, return value is positive; if equal, zero; if b comes first, negative.
+	static int compare(cstring a, cstring b);
 };
+
+#undef OBJ_SIZE
+#undef MAX_INLINE
+
 
 inline bool operator==(cstring left,      const char * right) { return left.bytes() == arrayview<byte>((uint8_t*)right,strlen(right)); }
 inline bool operator==(cstring left,      cstring right     ) { return left.bytes() == right.bytes(); }
@@ -489,13 +503,19 @@ inline bool operator!=(cstring left,      const char * right) { return !operator
 inline bool operator!=(cstring left,      cstring right     ) { return !operator==(left, right); }
 inline bool operator!=(const char * left, cstring right     ) { return !operator==(left, right); }
 
+bool operator<(cstring left,      const char * right) = delete;
+bool operator<(cstring left,      cstring right     ) = delete;
+bool operator<(const char * left, cstring right     ) = delete;
+
 inline string operator+(cstring left,      cstring right     ) { string ret=left; ret+=right; return ret; }
-inline string operator+(string&& left,     const char * right) { left+=right; return left; }
-inline string operator+(cstring left,      const char * right) { string ret=left; ret+=right; return ret; }
-inline string operator+(string&& left,     cstring right     ) { left+=right; return left; }
+inline string operator+(string&& left,     const char * right) { left+=right; return std::move(left); }
+inline string operator+(cstring left,      const char * right) { string ret=left; ret+=right; return ret; } // a few of those are because Gcc
+inline string operator+(string&& left,     char * right      ) { left+=right; return std::move(left); } // is drunk and would rather cast
+inline string operator+(cstring left,      char * right      ) { string ret=left; ret+=right; return ret; } // left to bool than right to
+inline string operator+(string&& left,     cstring right     ) { left+=right; return std::move(left); } // const char*...
 inline string operator+(const char * left, cstring right     ) { string ret=left; ret+=right; return ret; }
 
-inline string operator+(string&& left, char right) { left+=right; return left; }
+inline string operator+(string&& left, char right) { left+=right; return std::move(left); }
 inline string operator+(cstring left, char right) { string ret=left; ret+=right; return ret; }
 inline string operator+(char left, cstring right) { string ret; ret[0]=left; ret+=right; return ret; }
 
@@ -523,3 +543,6 @@ inline string cstring::upper() const
 //For example, haystack "GL_EXT_FOO GL_EXT_BAR GL_EXT_QUUX" (with space as separator) contains needles
 // 'GL_EXT_FOO', 'GL_EXT_BAR' and 'GL_EXT_QUUX', but not 'GL_EXT_QUU'.
 bool strtoken(const char * haystack, const char * needle, char separator);
+
+static inline int isualpha(int c) { return c=='_' || isalpha(c); }
+static inline int isualnum(int c) { return c=='_' || isalnum(c); }

@@ -1,7 +1,7 @@
 #pragma once
 #ifdef ARLIB_SOCKET
 #include "global.h"
-#include "containers.h"
+#include "array.h"
 #include "socket.h"
 #include "bytepipe.h"
 
@@ -13,20 +13,20 @@ public:
 		//Every field except 'url' is optional.
 		string url;
 		
-		string method;
+		string method; // GET if body is empty, POST if nonempty
 		//These headers are added automatically, if not already present:
 		//Connection: keep-alive
 		//Host: <from url>
-		//Content-Length: <from postdata> (if not GET)
-		//Content-Type: application/x-www-form-urlencoded
-		//           or application/json if postdata starts with [ or {
+		//Content-Length: <from body> (if not GET)
+		//Content-Type: application/json if body starts with [ or {, and method is POST
+		//           or application/x-www-form-urlencoded, if method is POST and body is something else
 		array<string> headers; // TODO: multimap
-		array<byte> postdata;
+		array<byte> body;
 		
 		uintptr_t id; // Passed unchanged in the rsp object, and used for cancel(). Otherwise not used.
 		
-		//If the server sends this much data, or hasn't finished in the given time, fail.
-		//They're pretty approximate; a request may succeed if the server sends slightly more than this.
+		//If the server sends this much data (including headers/etc), or hasn't finished in the given time, fail.
+		//They're approximate; a request may succeed if the server sends slightly more than this.
 		uint64_t limit_ms = 5000;
 		size_t limit_bytes = 1048576;
 		
@@ -86,6 +86,9 @@ private:
 	};
 public:
 	
+	//A custom socket creation function, if you want proxy support.
+	void wrap_socks(function<socket*(bool ssl, cstring domain, int port, runloop* loop)> cb) { cb_mksock = cb; }
+	
 	//Multiple requests may be sent to the same object. This will make them use HTTP Keep-Alive.
 	//The requests must be to the same protocol-domain-port tuple.
 	//Failures are reported in the callback.
@@ -113,18 +116,19 @@ public:
 		int port;
 		string path;
 	};
+	//If 'relative' is false, 'out' can be uninitialized. If true, must be fully valid. On failure, the output location is undefined.
 	static bool parseUrl(cstring url, bool relative, location& out);
 	
 	~HTTP();
 	
 private:
-	void resolve(bool* deleted, size_t id, bool success);
-	void resolve_err_v(bool* deleted, size_t id, int err)
+	void resolve(size_t id, bool success);
+	void resolve_err_v(size_t id, int err)
 	{
 		requests[id].r.status = err;
-		resolve(deleted, id, false);
+		resolve(id, false);
 	}
-	bool resolve_err_f(bool* deleted, size_t id, int err) { resolve_err_v(deleted, id, err); return false; }
+	bool resolve_err_f(size_t id, int err) { resolve_err_v(id, err); return false; }
 	
 	void sock_cancel() { sock = NULL; }
 	
@@ -141,15 +145,16 @@ private:
 	size_t next_send = 0; // index to requests[] next to sock->send(), or requests.size() if all done / in tosend
 	
 	runloop* loop;
+	function<socket*(bool ssl, cstring domain, int port, runloop* loop)> cb_mksock = socket::create_sslmaybe;
 	autoptr<socket> sock;
 	
-	bool do_timeout();
+	void do_timeout();
 	uintptr_t timeout_id = 0;
 	
 	size_t bytes_in_req;
 	void reset_limits();
 	
-	bool* deleted_p = NULL;
+	MAKE_DESTRUCTIBLE_FROM_CALLBACK();
 	
 	enum httpstate {
 		st_boundary, // between requests; if socket closes, make a new one

@@ -465,8 +465,8 @@ static inline int sysinfo_(struct sysinfo * info)
 	info->loads[0] = 0;
 	info->loads[1] = 0;
 	info->loads[2] = 0;
-	info->totalram = 4ULL*1024*1024*1024;
-	info->freeram = 4ULL*1024*1024*1024;
+	info->totalram = 1ULL*1024*1024*1024; // keep these synced with RLIMIT_AS in launcher
+	info->freeram = 1ULL*1024*1024*1024;
 	info->sharedram = 0;
 	info->bufferram = 0;
 	info->totalswap = 0;
@@ -570,7 +570,8 @@ static long syscall_emul(greg_t* regs, int errno)
 	//this one returns all the way out of a signal handler,
 	// and execve() allocates memory and does about a dozen syscalls
 	//it would be possible to implement vfork by rewriting the register list, but that wouldn't solve execve
-	//instead, it's a lot easier to just implement vfork as normal fork
+	//instead, it's a lot easier to just implement vfork as normal fork; it's slower than a real vfork, but
+	// I can't think of any plausible program where vfork can't be replaced with fork
 	//(would've been easier if posix_spawn was a syscall)
 	case __NR_vfork: return clone(SIGCHLD, 0, NULL, NULL, 0);
 	WRAP3(execve, char*, char**, char**);

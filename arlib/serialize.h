@@ -253,6 +253,12 @@ public:
 		return false;
 	}
 	
+	bool enter(bool& first, cstring name)
+	{
+		if (first && name != thisnode) return false;
+		return enter(first);
+	}
+	
 	template<typename T> void hex(cstring name, T& out)
 	{
 		while (thisnode == name)
@@ -293,11 +299,134 @@ template<typename T> void bmlunserialize_to(cstring bml, T& to)
 	s.read_item(to);
 }
 
-#define ser_enter(s) for (bool serialize_first = true; s.enter(serialize_first);)
+#define ser_enter_1(s,x) for (bool serialize_first = true; s.enter(serialize_first);)
+#define ser_enter_2(s,name) for (bool serialize_first = true; s.enter(serialize_first, name);)
+#define ser_enter_pick(x1,x2,use,...) use(x1,x2)
+#define ser_enter(...) ser_enter_pick(__VA_ARGS__, ser_enter_2, ser_enter_1)
 
 
 
-//class jsonserialize_impl
+class jsonserialize_impl {
+	jsonwriter w;
+	template<typename T> friend string jsonserialize(T& item);
+	template<typename T> friend string jsonserialize(const T& item);
+	
+	template<typename T>
+	typename std::enable_if<
+		std::is_same<
+			decltype(std::declval<T>().serialize(std::declval<jsonserialize_impl&>())),
+			void // it returning void isn't necessary, but I couldn't find a std::argument_is_well_formed
+		>::value>::type
+	add_node(T& inner)
+	{
+		w.map_enter();
+		inner.serialize(*this);
+		w.map_exit();
+	}
+	
+	template<typename T>
+	typename std::enable_if<
+		std::is_same<
+			decltype(std::declval<T>()(std::declval<jsonserialize_impl&>())),
+			void
+		>::value>::type
+	add_node(const T& inner)
+	{
+		w.map_enter();
+		inner(*this);
+		w.map_exit();
+	}
+	
+	void add_node(cstring inner) { w.str(inner); }
+	void add_node(const string& inner) { w.str(inner); }
+	void add_node(string& inner) { w.str(inner); }
+	
+	template<typename T, size_t size>
+	void add_node(T(&inner)[size])
+	{
+		w.list_enter();
+		for (auto& child : inner) add_node(child);
+		w.list_exit();
+	}
+	
+	template<typename T> void add_node(array<T>& inner)
+	{
+		w.list_enter();
+		for (auto& child : inner) add_node(child);
+		w.list_exit();
+	}
+	
+	template<typename T> void add_node(set<T>& inner)
+	{
+		w.list_enter();
+		for (auto& child : inner) add_node(child);
+		w.list_exit();
+	}
+	
+	void add_node(bool inner) { w.boolean(inner); }
+	
+	void add_node_hex(arrayvieww<byte> inner) { w.str(tostringhex(inner)); }
+	
+#define LEAF(T) \
+		void add_node(T inner) { w.num((double)inner); } \
+		void add_node_hex(T inner) { w.num((double)inner); }
+	ALLNUMS(LEAF);
+#undef LEAF
+	
+	template<typename T, typename Tc> void add_node(array<T>& inner, Tc& conv)
+	{
+		w.list_enter();
+		for (auto& child : inner) add_node(conv(child));
+		w.list_exit();
+	}
+	
+	template<typename T, typename Tc> void add_node(set<T>& inner, Tc& conv)
+	{
+		w.list_enter();
+		for (auto& child : inner) add_node(conv(child));
+		w.list_exit();
+	}
+	
+	template<typename T, typename Ts> void add_node(T& inner, Ts& ser)
+	{
+		w.map_enter();
+		ser(*this);
+		w.map_exit();
+	}
+	
+public:
+	
+	static const bool serializing = true;
+	
+	void comment(cstring c) {}
+	
+	template<typename T> void item(cstring name, T& inner) { w.map_key(name); add_node(inner); }
+	template<typename T> void hex(cstring name, T& inner) { w.map_key(name); add_node_hex(inner); }
+	template<typename T> void item(cstring name, const T& inner) { w.map_key(name); add_node(inner); }
+	template<typename T> void hex(cstring name, const T& inner) { w.map_key(name); add_node_hex(inner); }
+	
+	template<typename T, typename Tc> void item(cstring name, T& inner, Tc& conv)
+	{
+		w.map_key(name);
+		add_node(inner, conv);
+	}
+	
+	cstring next() const { abort(); } // illegal
+};
+
+template<typename T> string jsonserialize(T& item)
+{
+	jsonserialize_impl s;
+	s.add_node(item);
+	return s.w.finish();
+}
+
+template<typename T> string jsonserialize(const T& item)
+{
+	jsonserialize_impl s;
+	s.add_node(item);
+	return s.w.finish();
+}
 
 
 
@@ -308,19 +437,35 @@ class jsonunserialize_impl {
 	
 	jsonunserialize_impl(cstring json) : p(json) {}
 	template<typename T> friend T jsonunserialize(cstring json);
+	template<typename T> friend void jsonunserialize(cstring json, T& out);
+	template<typename T> friend void jsonunserialize(cstring json, const T& out);
 	
+	//input: ev points to any node
+	//output: if ev pointed to enter_map or enter_list, ev now points to corresponding exit; if not, no change
 	void finish_item()
 	{
-		if (ev.action == jsonparser::enter_map || ev.action == jsonparser::enter_list)
+		size_t nest = 0;
+		while (true)
 		{
-			while (true)
-			{
-				ev = p.next();
-				finish_item();
-				if (ev.action == jsonparser::exit_map || ev.action == jsonparser::exit_list) break;
-			}
+			if (ev.action == jsonparser::enter_map || ev.action == jsonparser::enter_list) nest++;
+			if (ev.action == jsonparser::exit_map || ev.action == jsonparser::exit_list) nest--;
+			if (!nest) break;
+			ev = p.next();
 		}
 	}
+	
+	//void finish_item()
+	//{
+	//	if (ev.action == jsonparser::enter_map || ev.action == jsonparser::enter_list)
+	//	{
+	//		while (true)
+	//		{
+	//			ev = p.next();
+	//			finish_item();
+	//			if (ev.action == jsonparser::exit_map || ev.action == jsonparser::exit_list) break;
+	//		}
+	//	}
+	//}
 	
 #define LEAF(T) void read_item(T& out) { if (ev.action == jsonparser::num) out = ev.num; finish_item(); ev = p.next(); }
 	ALLNUMS(LEAF);
@@ -331,6 +476,39 @@ class jsonunserialize_impl {
 		if (ev.action == jsonparser::str) out = ev.str;
 		finish_item();
 		ev = p.next();
+	}
+	
+	void read_item(bool& out)
+	{
+		if (ev.action == jsonparser::jtrue) out = true;
+		if (ev.action == jsonparser::jfalse) out = false;
+		finish_item();
+		ev = p.next();
+	}
+	
+	template<typename T> void read_item(arrayvieww<T>& out)
+	{
+		size_t pos = 0;
+		if (ev.action == jsonparser::enter_list)
+		{
+			ev = p.next();
+			while (ev.action != jsonparser::exit_list)
+			{
+				if (pos < out.size())
+					read_item(out[pos++]);
+				else
+					finish_item();
+			}
+		}
+		else finish_item();
+		ev = p.next();
+	}
+	
+	template<typename T, size_t size>
+	void read_item(T(&out)[size])
+	{
+		arrayvieww<T> outw = out;
+		read_item(outw);
 	}
 	
 	template<typename T> void read_item(array<T>& out)
@@ -365,7 +543,13 @@ class jsonunserialize_impl {
 		ev = p.next();
 	}
 	
-	template<typename T> void read_item(T& out)
+	template<typename T>
+	typename std::enable_if<
+		std::is_same<
+			decltype(std::declval<T>().serialize(std::declval<jsonserialize_impl&>())),
+			void
+		>::value>::type
+	read_item(T& out)
 	{
 		if (ev.action == jsonparser::enter_map)
 		{
@@ -375,6 +559,39 @@ class jsonunserialize_impl {
 				matchagain = false;
 				//ev = map_key
 				out.serialize(*this);
+				if (!matchagain)
+				{
+					if (ev.action == jsonparser::map_key) // always true unless document is broken
+						ev = p.next();
+					if (ev.action == jsonparser::exit_map) break; // can happen if document is broken
+					//ev = enter_map or whatever
+					finish_item();
+					//ev = exit_map or whatever
+					ev = p.next();
+					//ev = map_key or exit_map
+				}
+			}
+		}
+		else finish_item();
+		ev = p.next();
+	}
+	
+	template<typename T>
+	typename std::enable_if<
+		std::is_same<
+			decltype(std::declval<T>()(std::declval<jsonunserialize_impl&>())),
+			void
+		>::value>::type
+	read_item(const T& inner)
+	{
+		if (ev.action == jsonparser::enter_map)
+		{
+			ev = p.next();
+			while (ev.action != jsonparser::exit_map)
+			{
+				matchagain = false;
+				//ev = map_key
+				inner(*this);
 				if (!matchagain)
 				{
 					ev = p.next();
@@ -395,6 +612,50 @@ class jsonunserialize_impl {
 	
 public:
 	
+	bool enter(bool& first)
+	{
+		if (!first)
+			goto l_matchagain;
+		first = false;
+		
+		//ev = map_key
+		ev = p.next();
+		if (ev.action == jsonparser::enter_map)
+		{
+			ev = p.next();
+			while (ev.action != jsonparser::exit_map)
+			{
+				matchagain = false;
+				//ev = map_key
+				return true;
+			l_matchagain: ;
+				if (!matchagain)
+				{
+					ev = p.next();
+					if (ev.action == jsonparser::exit_map) break; // can happen if document is broken
+					//ev = enter_map or whatever
+					finish_item();
+					//ev = exit_map or whatever
+					ev = p.next();
+					//ev = map_key or exit_map
+				}
+//if(ev.action==jsonparser::finish)*(char*)0=0;
+			}
+		}
+		else finish_item();
+		
+		ev = p.next();
+		matchagain = true;
+		
+		return false;
+	}
+	
+	bool enter(bool& first, cstring name)
+	{
+		if (first && name != next()) return false;
+		return enter(first);
+	}
+	
 	static const bool serializing = false;
 	
 	template<typename T> void item(cstring name, T& out)
@@ -410,7 +671,9 @@ public:
 		}
 	}
 	
-	template<typename T> typename std::enable_if<std::is_integral<T>::value>::type hex(cstring name, T& out)
+	template<typename T>
+	typename std::enable_if<std::is_integral<T>::value>::type
+	hex(cstring name, T& out)
 	{
 		while (ev.action == jsonparser::map_key && ev.str == name)
 		{
@@ -468,4 +731,18 @@ template<typename T> T jsonunserialize(cstring json)
 	s.ev = s.p.next();
 	s.read_item(out);
 	return out;
+}
+
+template<typename T> void jsonunserialize(cstring json, T& out)
+{
+	jsonunserialize_impl s(json);
+	s.ev = s.p.next();
+	s.read_item(out);
+}
+
+template<typename T> void jsonunserialize(cstring json, const T& out)
+{
+	jsonunserialize_impl s(json);
+	s.ev = s.p.next();
+	s.read_item(out);
 }

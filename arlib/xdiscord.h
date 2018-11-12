@@ -150,7 +150,7 @@ public:
 		
 		void send(cstring text);
 		
-		bool partial() { return impl().username==""; }
+		bool partial() { return !m_parent->users.contains(m_id) || impl().username==""; }
 		//Fetches account data about this user.
 		void fetch(function<void(User)> callback);
 		
@@ -321,7 +321,7 @@ private:
 	void connect();
 	void connect_cb(HTTP::rsp r);
 	
-	void ws_str(string text);
+	void ws_str(cstring text);
 	
 	bool bot;
 	string token;
@@ -332,11 +332,11 @@ private:
 	bool keepalive_sent;
 	
 	uintptr_t keepalive_id = 0;
-	bool keepalive_cb();
+	void keepalive_cb();
 	void update_keepalive_cb()
 	{
 		loop->remove(keepalive_id);
-		keepalive_id = loop->set_timer_rel((keepalive_ms > 30000 ? keepalive_ms : 30000), bind_this(&Discord::keepalive_cb));
+		keepalive_id = loop->set_timer_loop((keepalive_ms > 30000 ? keepalive_ms : 30000), bind_this(&Discord::keepalive_cb));
 	}
 	
 	int guilds_to_join;
@@ -386,7 +386,7 @@ private:
 	void http(cstring url, JSON& post, function<void(HTTP::rsp)> callback = NULL)
 	{
 		HTTP::req r(url);
-		r.postdata = post.serialize().bytes();
+		r.body = post.serialize().bytes();
 		http(r, callback);
 	}
 	void http(cstring method, cstring url, function<void(HTTP::rsp)> callback = NULL)
@@ -399,7 +399,7 @@ private:
 	{
 		HTTP::req r(url);
 		r.method = method;
-		r.postdata = post.serialize().bytes();
+		r.body = post.serialize().bytes();
 		http(r, callback);
 	}
 	

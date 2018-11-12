@@ -217,19 +217,19 @@ int main(int argc, char** argv)
 	pressed_keys_init();
 	
 	//save support not implemented here, just hardcode something reasonable
-	static const uint8_t saveraw[] = { 31, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+	static const uint8_t saveraw[] = { 31,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
 	game::savedat save;
 	static_assert(sizeof(save) == sizeof(saveraw));
 	memcpy(&save, saveraw, sizeof(save));
 	
 	game* g = game::create(save);
 	
-	goto enter; // force render the first frame, to avoid drawing an uninitialized texture
+	bool first = true;
+	bool active = true;
 	while (wnd->is_visible())
 	{
-		if (wnd->is_active())
+		if (active)
 		{
-	enter: ;
 			game::input in;
 			in.keys = pressed_keys();
 			
@@ -251,10 +251,13 @@ int main(int argc, char** argv)
 			}
 			
 			uint64_t start = time_us_ne();
-			g->run(in, out);
+			int do_upload = g->run(in, out, !first);
+			first = false;
 			uint64_t end = time_us_ne();
-			if (end-start >= 2500) printf("rendered in %uus\n", (unsigned)(end-start));
-			gl.TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 640, 480, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, pixels);
+			if (end-start >= 2500)
+				printf("rendered in %uus\n", (unsigned)(end-start));
+			if (do_upload > 0) gl.TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 640, 480, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, pixels);
+			active = (do_upload >= 0);
 		}
 		
 		//redraw the texture, to avoid glitches if we're sent an Expose event
@@ -269,7 +272,8 @@ int main(int argc, char** argv)
 		
 		gl.swapBuffers();
 		
-		runloop::global()->step(!wnd->is_active());
+		runloop::global()->step(!active);
+		active = (wnd->is_active());
 	}
 	
 	return 0;

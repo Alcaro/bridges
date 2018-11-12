@@ -36,7 +36,7 @@ public:
 	function<void()> cb_write;
 	
 	uintptr_t timer_id = 0;
-	bool* deleted_p = NULL;
+	MAKE_DESTRUCTIBLE_FROM_CALLBACK();
 	
 #if OPENSSL_VERSION_NUMBER < 0x10002000 // < 1.0.2
 	bool permissive;
@@ -77,9 +77,9 @@ public:
 #endif
 		
 #if OPENSSL_VERSION_NUMBER >= 0x10100000 // >= 1.1.0
-#error test, especially [gs]et0 vs [gs]et1
-#error also check whether set_tlsext_host_name is needed
-		SSL_set1_host(ssl, "example.com");
+//#error test, especially [gs]et0 vs [gs]et1
+//#error also check whether set_tlsext_host_name is needed
+		SSL_set1_host(ssl, domain.c_str());
 #endif
 		
 		update();
@@ -129,29 +129,22 @@ public:
 			}
 		}
 		
-		bool deleted = false;
-		deleted_p = &deleted;
-		
 	again: ;
 		bool again = false;
 		if (!sock) is_readable = true;
 		
-		if (cb_read && is_readable) { again = true; cb_read(); }
-		if (deleted) return;
-		if (cb_write) { again = true; cb_write(); }
-		if (deleted) return;
+		if (cb_read && is_readable) { again = true; RETURN_IF_CALLBACK_DESTRUCTS(cb_read( )); }
+		if (cb_write              ) { again = true; RETURN_IF_CALLBACK_DESTRUCTS(cb_write()); }
 		
-		if (again) goto again;
+		if (sock && again) goto again;
 		
 		set_child_cb();
-		deleted_p = NULL;
 	}
 	
-	/*private*/ bool update_from_timer()
+	/*private*/ void update_from_timer()
 	{
 		update();
 		timer_id = 0;
-		return false;
 	}
 	
 	/*private*/ void set_child_cb()
@@ -210,7 +203,7 @@ public:
 		set_child_cb();
 	}
 	
-	int recv(arrayvieww<byte> data)
+	int recv(arrayvieww<byte> data) override
 	{
 		int ret = fixret(SSL_read(ssl, data.ptr(), data.size()));
 //printf("USERREAD(%lu)=%i\n",data.size(),ret);
@@ -226,11 +219,10 @@ public:
 		}
 		set_child_cb();
 		
-		if (!deleted_p) timer_id = loop->set_timer_rel(timer_id, 0, bind_this(&socketssl_impl::update_from_timer));
 		return ret;
 	}
 	
-	int send(arrayview<byte> data)
+	int send(arrayview<byte> data) override
 	{
 		if (!sock) return -1;
 		
@@ -248,17 +240,15 @@ public:
 	
 	/*private*/ void on_readable() { process_recv(); update(); }
 	/*private*/ void on_writable() { process_send(); update(); }
-	void callback(function<void()> cb_read, function<void()> cb_write)
+	void callback(function<void()> cb_read, function<void()> cb_write) override
 	{
 		this->cb_read = cb_read;
 		this->cb_write = cb_write;
-		if (cb_write) timer_id = loop->set_timer_rel(timer_id, 0, bind_this(&socketssl_impl::update_from_timer));
+		if (cb_write) timer_id = loop->set_idle(timer_id, bind_this(&socketssl_impl::update_from_timer));
 	}
 	
 	~socketssl_impl()
 	{
-		if (deleted_p) *deleted_p = true;
-		
 		loop->remove(timer_id);
 		
 		if (sock)
@@ -272,7 +262,7 @@ public:
 	}
 };
 
-socket* socket::wrap_ssl(socket* inner, cstring domain, runloop* loop)
+socket* socket::wrap_ssl_raw(socket* inner, cstring domain, runloop* loop)
 {
 	initialize();
 	if (!ctx) return NULL;
@@ -280,12 +270,12 @@ socket* socket::wrap_ssl(socket* inner, cstring domain, runloop* loop)
 	return new socketssl_impl(inner, domain, loop, false);
 }
 
-socket* socket::wrap_ssl_noverify(socket* inner, cstring domain, runloop* loop)
+socket* socket::wrap_ssl_raw_noverify(socket* inner, runloop* loop)
 {
 	initialize();
 	if (!ctx) return NULL;
 	if (!inner) return NULL;
-	return new socketssl_impl(inner, domain, loop, true);
+	return new socketssl_impl(inner, "", loop, true);
 }
 
 #include "../test.h"

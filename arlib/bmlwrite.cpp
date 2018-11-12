@@ -1,6 +1,5 @@
 #include "bml.h"
 #include "test.h"
-#include <ctype.h>
 
 inline string bmlwriter::indent()
 {
@@ -279,6 +278,5 @@ test("BML writer", "string,array", "bml")
 	assert_eq(bmlwriter::unescape("---foo"), "-foo");
 	assert_eq(bmlwriter::unescape("-----foo"), "--foo");
 	assert_eq(bmlwriter::unescape("---foo-21"), "-foo!");
-	assert_eq(bmlwriter::unescape("-foo-2Q"), "foo2Q");
 }
 #endif

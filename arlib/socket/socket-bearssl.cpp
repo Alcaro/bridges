@@ -6,7 +6,7 @@
 #include "../thread.h"
 #include "../base64.h"
 //Possible BearSSL improvements (not all of it is worth the effort; paren is last tested version, some may have been fixed since then):
-//- (0.5) serialization that I didn't have to write myself
+//- (0.6) serialization that I didn't have to write myself
 //- (0.3) official sample code demonstrating how to load /etc/ssl/certs/ca-certificates.crt
 //    preferably putting most of it in BearSSL itself, but seems hard to implement without malloc
 //- (0.3) more bool and int8_t, less int and char
@@ -19,7 +19,7 @@
 //    (not sure if that's the only ones)
 //- (0.4) tools/client.c: typo minium: "ERROR: duplicate minium ClientHello length"
 
-#include "../deps/bearssl-0.5/inc/bearssl.h"
+#include "../deps/bearssl-0.6/inc/bearssl.h"
 
 extern "C" {
 //see bear-ser.c for docs
@@ -229,7 +229,7 @@ public:
 	function<void()> cb_read;
 	function<void()> cb_write;
 	
-	bool* deleted_p = NULL;
+	MAKE_DESTRUCTIBLE_FROM_CALLBACK();
 	bool errored = false;
 	
 	socketssl_impl(socket* inner, cstring domain, runloop* loop, bool permissive)
@@ -329,15 +329,10 @@ public:
 	{
 		//this function is known to be called only directly by the runloop, and as such, can't recurse
 		//this is likely a use-after-free if the callbacks throw, but runloop itself doesn't support exceptions, so who cares
-		bool deleted = false;
-		deleted_p = &deleted;
-		
 		int state = br_ssl_engine_current_state(&s.sc.eng);
 	again:
-		if (cb_read  && (state&(BR_SSL_RECVAPP|BR_SSL_CLOSED))) cb_read( );
-		if (deleted) return;
-		if (cb_write && (state&(BR_SSL_SENDAPP|BR_SSL_CLOSED))) cb_write();
-		if (deleted) return;
+		if (cb_read  && (state&(BR_SSL_RECVAPP|BR_SSL_CLOSED))) RETURN_IF_CALLBACK_DESTRUCTS(cb_read( ));
+		if (cb_write && (state&(BR_SSL_SENDAPP|BR_SSL_CLOSED))) RETURN_IF_CALLBACK_DESTRUCTS(cb_write());
 		if (state & BR_SSL_CLOSED) sock = NULL;
 		
 		state = br_ssl_engine_current_state(&s.sc.eng);
@@ -346,8 +341,6 @@ public:
 			if (cb_read  && (state&(BR_SSL_RECVAPP|BR_SSL_CLOSED))) goto again;
 			if (cb_write && (state&(BR_SSL_SENDAPP|BR_SSL_CLOSED))) goto again;
 		}
-		
-		deleted_p = NULL;
 		
 		set_child_cb();
 	}
@@ -362,7 +355,6 @@ public:
 	
 	~socketssl_impl()
 	{
-		if (deleted_p) *deleted_p = true;
 		if (!sock) return;
 		
 		//gracefully tear this down, not really useful but not harmful either
@@ -423,7 +415,7 @@ public:
 };
 }
 
-socket* socket::wrap_ssl(socket* inner, cstring domain, runloop* loop)
+socket* socket::wrap_ssl_raw(socket* inner, cstring domain, runloop* loop)
 {
 	initialize();
 	if (!certs) return NULL;
@@ -448,7 +440,7 @@ socket* socket::wrap_ssl(socket* inner, cstring domain, runloop* loop)
 #ifdef ARLIB_TEST
 #include "../os.h"
 //this is more to initialize this thing before the actual ssl tests than a real test
-//most of them are in a runloop, but initialization takes longer (9-33ms) than the runloop watchdog (3ms)
+//most of the tests are in a runloop, but initialization takes longer (9-33ms) than the runloop watchdog (3ms)
 //this is also why it provides 'tcp' rather than 'ssl';
 // if it provides 'ssl', it'd run alongside the other SSL tests and fail watchdog
 test("BearSSL init", "array,base64", "tcp")
