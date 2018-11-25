@@ -2,6 +2,8 @@
 
 Enhanced remake of http://www.notdoppler.com/kingofbridges.php
 
+![Screenshot](https://github.com/Alcaro/bridges/blob/master/pic.png)
+
 ## Compilation - Linux
 
 ```

@@ -343,6 +343,29 @@ public:
 	~autofree() { free(ptr); }
 };
 
+template<typename T>
+class refcount {
+	struct inner_t {
+		uint32_t refcount;
+		T item;
+	};
+	inner_t* inner;
+	
+public:
+	refcount() { inner = new inner_t(); inner->refcount = 1; }
+	refcount(const refcount<T>& other) { inner = other.inner; inner->refcount++; }
+	refcount(refcount<T>&& other) { inner = other.inner; other.inner = NULL; }
+	refcount<T>& operator=(T* ptr) = delete;
+	refcount<T>& operator=(autofree<T>&& other) = delete;
+	T* operator->() { return &inner->item; }
+	T& operator*() { return inner->item; }
+	const T* operator->() const { return &inner->item; }
+	const T& operator*() const { return inner->item; }
+	operator T*() { return &inner->item; }
+	operator const T*() const { return &inner->item; }
+	~refcount() { if (inner && 0 == --inner->refcount) delete inner; }
+};
+
 #if __cplusplus < 201103
 class nullptr_t_impl {};
 #define nullptr_t nullptr_t_impl* // random pointer type nobody will ever use

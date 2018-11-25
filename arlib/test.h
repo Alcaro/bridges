@@ -1,20 +1,31 @@
 #pragma once
 #include "global.h"
 #include "stringconv.h"
+#include "linq.h"
 
 #undef assert
 
 #ifdef ARLIB_TEST
 
 template<typename T>
+string tostring_dbg(const T& item) { return tostring(item); }
+template<typename T>
 string tostring_dbg(const arrayview<T>& item)
 {
-	return item.join((string)",", [](const T& i){ return tostring(i); });
+	return item.join((string)",", [](const T& i){ return tostring_dbg(i); });
 }
 template<typename T> string tostring_dbg(const arrayvieww<T>& item) { return tostring_dbg((arrayview<T>)item); }
 template<typename T> string tostring_dbg(const array<T>& item) { return tostring_dbg((arrayview<T>)item); }
-template<typename T>
-string tostring_dbg(const T& item) { return tostring(item); }
+template<typename Tkey, typename Tvalue>
+string tostring_dbg(const map<Tkey,Tvalue>& item)
+{
+	return "{"+
+		item
+			.select([](const typename map<Tkey,Tvalue>::node& n){ return tostring_dbg(n.key)+" => "+tostring_dbg(n.value); })
+			.as_array()
+			.join(", ")
+		+"}";
+}
 
 class _testdecl {
 public:

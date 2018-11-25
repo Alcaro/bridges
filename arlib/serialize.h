@@ -23,7 +23,7 @@
 //	//The name can be any string.
 //	template<typename T> void item(cstring name, T& item);
 //	
-//	//Similar to item(), but uses hex rather than decimal if output is human readable (otherwise, identical to item).
+//	//Similar to item(), but uses hex rather than decimal, if applicable. If not, identical to item, except the type restrictions.
 //	//Valid types:
 //	//- Any unsigned integral type
 //	//- array<byte>
@@ -31,12 +31,16 @@
 //	template<typename T> void hex(cstring name, T& item);
 //	void hex(cstring name, arrayvieww<byte> item);
 //	
-//	//Makes serialized data look nicer. May be ignored.
+//	//Makes serialized data look nicer. May be ignored. Ignored while unserializing.
 //	void comment(cstring c);
 //	
-//	//Returns the next child name the structure expects to process. Valid only while unserializing.
+//	//These are valid only while unserializing. Check .serializing before calling.
+//	//Returns the next child name the structure expects to process.
 //	cstring next() const;
-//	//(BML unserializer only) Returns the value corresponding to next().
+//	//item_next(foo) is like item(next(), foo), but won't do weird things
+//	// due to next() being freed by item(), or due to two consecutive identical keys.
+//	template<typename T> void item_next(T& item);
+//	//(BML only) Returns the value corresponding to next().
 //	cstring nextval() const;
 //};
 //
@@ -113,7 +117,8 @@ public:
 		w.node(bmlwriter::escape(name), tostringhex(item));
 	}
 	
-	cstring next() const { abort(); } // illegal
+	template<typename T> void item_next(T& out) { abort(); } // only legal for deserializing
+	cstring next() const { abort(); }
 };
 
 template<typename T> string bmlserialize(T& item)
@@ -223,6 +228,13 @@ public:
 			thisnode = "";
 			to_next();
 		}
+	}
+	
+	template<typename T> void item_next(T& out)
+	{
+		read_item(out);
+		thisnode = "";
+		to_next();
 	}
 	
 	bool enter(bool& first)
@@ -411,7 +423,8 @@ public:
 		add_node(inner, conv);
 	}
 	
-	cstring next() const { abort(); } // illegal
+	template<typename T> void item_next(T& out) { abort(); } // illegal
+	cstring next() const { abort(); }
 };
 
 template<typename T> string jsonserialize(T& item)
@@ -438,7 +451,7 @@ class jsonunserialize_impl {
 	jsonunserialize_impl(cstring json) : p(json) {}
 	template<typename T> friend T jsonunserialize(cstring json);
 	template<typename T> friend void jsonunserialize(cstring json, T& out);
-	template<typename T> friend void jsonunserialize(cstring json, const T& out);
+	template<typename T> friend void jsonunserialize(cstring json, const T& out); // this is super dumb, but lambdas need it somehow
 	
 	//input: ev points to any node
 	//output: if ev pointed to enter_map or enter_list, ev now points to corresponding exit; if not, no change
@@ -669,6 +682,15 @@ public:
 			matchagain = true;
 //puts("::"+tostring(ev.action)+": "+tostring(jsonparser::map_key)+","+tostring(jsonparser::exit_map));
 		}
+	}
+	
+	template<typename T> void item_next(T& out)
+	{
+		if (ev.action != jsonparser::map_key)
+			abort();
+		ev = p.next();
+		read_item(out);
+		matchagain = true;
 	}
 	
 	template<typename T>

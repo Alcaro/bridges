@@ -563,10 +563,11 @@ test("JSON deserialization", "json", "serialize")
 		assert_eq(item.b, 2);
 	}
 	
-	//these pass if they do not give infinite loops or otherwise explode
+	//these pass if they do not give infinite loops or valgrind errors, or otherwise explode
 	{
 		jsonunserialize<ser1>("{ \"a\":1, \"b\":2, \"q\":*, \"a\":3, \"a\":4 }");
 		jsonunserialize<ser6>("{\"data\":[{\"a\":\"a\n[]\"}]}");
+		jsonunserialize<map<string,int>>("{\"aaaaaaaaaaaaaaaa\":1,\"bbbbbbbbbbbbbbbb\":2}");
 	}
 	
 	//the system is allowed to loop, but only if there's bogus or extraneous nodes
@@ -642,9 +643,9 @@ test("JSON deserialization", "json", "serialize")
 		    "{ \"data\": { \"foo\": \"bar\", "
 		                  "\"C:/Users/Administrator/My Documents/!TOP SECRET!.docx\": \"test\", "
 		                  "\"test\": \"C:/Users/Administrator/My Documents/!TOP SECRET!.docx\" } }");
-		assert_eq(item.data.get("foo"), "bar");
-		assert_eq(item.data.get("test"), "C:/Users/Administrator/My Documents/!TOP SECRET!.docx");
-		assert_eq(item.data.get("C:/Users/Administrator/My Documents/!TOP SECRET!.docx"), "test");
+		assert_eq(item.data.get_or("foo", "NONEXISTENT"), "bar");
+		assert_eq(item.data.get_or("test", "NONEXISTENT"), "C:/Users/Administrator/My Documents/!TOP SECRET!.docx");
+		assert_eq(item.data.get_or("C:/Users/Administrator/My Documents/!TOP SECRET!.docx", "NONEXISTENT"), "test");
 	}
 	
 	{

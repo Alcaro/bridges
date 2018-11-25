@@ -482,10 +482,7 @@ public:
 		{
 			Tkey tmpk;
 			if (fromstring(s.next(), tmpk))
-			{
-				Tvalue& tmpv = items.get_create(tmpk).value;
-				s.item(s.next(), tmpv);
-			}
+				s.item_next(items.get_create(tmpk).value);
 		}
 	}
 };

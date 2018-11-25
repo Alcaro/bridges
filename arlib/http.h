@@ -23,7 +23,14 @@ public:
 		array<string> headers; // TODO: multimap
 		array<byte> body;
 		
-		uintptr_t id; // Passed unchanged in the rsp object, and used for cancel(). Otherwise not used.
+		enum {
+			f_no_retry = 0x00000001,
+		};
+		uint32_t flags = 0;
+		
+		// Passed unchanged in the rsp object, and used for cancel(). Otherwise not used.
+		// Duplicates are allowed if cancel() is not used.
+		uintptr_t id = 0;
 		
 		//If the server sends this much data (including headers/etc), or hasn't finished in the given time, fail.
 		//They're approximate; a request may succeed if the server sends slightly more than this.
@@ -82,6 +89,7 @@ public:
 private:
 	struct rsp_i {
 		rsp r;
+		bool sent_once = false; // used for f_no_retry
 		function<void(rsp)> callback;
 	};
 public:

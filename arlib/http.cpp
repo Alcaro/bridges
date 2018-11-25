@@ -99,7 +99,8 @@ again:
 	if (next_send > 1) return; // only pipeline two requests at once
 	if (!sock) return;
 	
-	const rsp& r = requests[next_send].r;
+	rsp_i& ri = requests[next_send];
+	const rsp& r = ri.r;
 	if (r.status == rsp::e_canceled)
 	{
 		requests.remove(next_send);
@@ -135,13 +136,9 @@ again:
 	if (method!="GET" && !httpContentType)
 	{
 		if (q.body && (q.body[0] == '[' || q.body[0] == '{'))
-		{
 			tosend.push("Content-Type: application/json\r\n");
-		}
 		else
-		{
 			tosend.push("Content-Type: application/x-www-form-urlencoded\r\n");
-		}
 	}
 	if (!httpConnection) tosend.push("Connection: keep-alive\r\n");
 	
@@ -150,9 +147,12 @@ again:
 	tosend.push(q.body);
 	
 	bool ok = true;
-	if (sock->send(tosend.pull_buf( )) < 0) ok = false;
-	if (sock->send(tosend.pull_next()) < 0) ok = false;
+	if (ok && (q.flags & req::f_no_retry) && ri.sent_once) ok = false;
+	if (ok && sock->send(tosend.pull_buf( )) < 0) ok = false;
+	if (ok && sock->send(tosend.pull_next()) < 0) ok = false;
 	if (!ok) sock = NULL;
+	
+	ri.sent_once = true;
 	
 	next_send++;
 }
@@ -195,6 +195,7 @@ void HTTP::reset_limits()
 
 void HTTP::activity()
 {
+	//TODO: replace this state machine with bytepipe::pull_line
 newsock:
 	if (requests.size() == 0)
 	{
@@ -408,7 +409,18 @@ test("URL parser", "", "http")
 	test_url("http://example.com/foo/bar.html?baz", "foo.html",      "http", "example.com", 0, "/foo/foo.html");
 	test_url("http://example.com/foo/bar.html?baz", "?quux",         "http", "example.com", 0, "/foo/bar.html?quux");
 	test_url("http://example.com:80/",                               "http", "example.com", 80, "/");
+	test_url("http://example.com:80/", "http://example.com:8080/",   "http", "example.com", 8080, "/");
 	test_url_fail("http://example.com:80/", ""); // if changing this, also change assert in HTTP::try_compile_req()
+	test_url("http://a.com/foo/bar.html?baz",       "#corge",                "http", "a.com", 80, "/foo/bar.html?baz#corge");
+	test_url("http://a.com/foo/bar.html?baz#corge", "http://b.com/foo.html", "http", "b.com", 80, "/foo.html#corge");
+	test_url("http://a.com/foo/bar.html?baz#corge", "/bar/foo.html",         "http", "a.com", 80, "/bar/foo.html#corge");
+	test_url("http://a.com/foo/bar.html?baz#corge", "foo.html",              "http", "a.com", 80, "/foo/foo.html#corge");
+	test_url("http://a.com/foo/bar.html?baz#corge", "?quux",                 "http", "a.com", 80, "/foo/bar.html?quux#corge");
+	test_url("http://a.com/foo/bar.html?baz#corge", "http://b.com/#grault",  "http", "b.com", 80, "/foo.html#grault");
+	test_url("http://a.com/foo/bar.html?baz#corge", "/bar/foo.html#grault",  "http", "a.com", 80, "/bar/foo.html#grault");
+	test_url("http://a.com/foo/bar.html?baz#corge", "foo.html#grault",       "http", "a.com", 80, "/foo/foo.html#grault");
+	test_url("http://a.com/foo/bar.html?baz#corge", "?quux#grault",          "http", "a.com", 80, "/foo/bar.html?quux#grault");
+	test_url("http://a.com/foo/bar.html?baz#corge", "#grault",               "http", "a.com", 80, "/foo/bar.html?baz#grault");
 }
 
 test("HTTP", "tcp,ssl", "http")
