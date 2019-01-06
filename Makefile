@@ -15,4 +15,4 @@ include arlib/Makefile
 $(call OBJMANGLE,DEFAULT,game.cpp): resources.cpp
 resources.cpp: rescompile.py resources/ resources/*
 	$(ECHOQ) rescompile.py
-	$(Q)python3 rescompile.py || python rescompile.py || echo 'python not installed...? Assuming resources.cpp is up to date...'
+	$(Q)python3 rescompile.py || python rescompile.py

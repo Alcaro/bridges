@@ -49,6 +49,8 @@ struct image : nocopy {
 	
 	//Converts the image to the given image format.
 	void convert(imagefmt newfmt);
+	//Like the above, but compile-time fixed conversion, to allow dead-code elimination of x. fmt must be equal to src.
+	template<imagefmt src, imagefmt dst> void convert();
 	//Inserts the given image at the given coordinates. If that would place the new image partially outside the target,
 	// the excess pixels are ignored.
 	//Attempting to create impossible values (by rendering ARGB a=80 into BARGB a=0) is undefined behavior.
@@ -119,7 +121,7 @@ struct image : nocopy {
 		return 1 + ((magic >> (fmt*2)) & 3);
 	}
 	
-	//0x? and ?x0 images are undefined behavior.
+	//0x? and ?x0 images are undefined behavior. The pixels are uninitialized.
 	void init_new(uint32_t width, uint32_t height, imagefmt fmt)
 	{
 		size_t stride = byteperpix(fmt)*width;
@@ -157,13 +159,16 @@ struct image : nocopy {
 	//0x? and ?x0 images are undefined behavior, so neither scalex nor scaley can be zero.
 	void init_clone(const image& other, int32_t scalex = 1, int32_t scaley = 1);
 	
-	//Acts like the applicable init_decode_<fmt>.
+	//Acts like the applicable init_decode_<fmt>. Returns false on failure; if this happens, every member is considered uninitialized.
 	bool init_decode(arrayview<byte> data);
 	
 	//Always emits valid argb8888. May (but is not required to) report bargb or xrgb instead,
 	// if inspecting the image header proves it to be degenerate.
 	//Always emits a packed image, where stride = width*byteperpix.
 	bool init_decode_png(arrayview<byte> pngdata);
+	
+	//Always emits a packed 0rgb8888.
+	bool init_decode_jpg(arrayview<byte> jpgdata);
 };
 
 struct font {

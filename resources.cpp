@@ -78,6 +78,6 @@ menuopen.init_decode_png(menuopen_raw);
 menuopenborder.init_decode_png(menuopenborder_raw);
 popup.init_decode_png(popup_raw);
 popupsm.init_decode_png(popupsm_raw);
-{ image font_tmp; font_tmp.init_decode(smallfont_raw); smallfont.init_from_image(font_tmp); }
+{ image font_tmp; font_tmp.init_decode_png(smallfont_raw); smallfont.init_from_image(font_tmp); }
 title.init_decode_png(title_raw);
 }

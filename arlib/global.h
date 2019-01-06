@@ -378,7 +378,8 @@ class iterwrap {
 	
 public:
 	iterwrap(T b, T e) : b(b), e(e) {}
-	template<typename T2> iterwrap(T2 c) : b(c.begin()), e(c.end()) {}
+	template<typename T2> iterwrap(T2& c) : b(c.begin()), e(c.end()) {}
+	template<typename T2> iterwrap(const T2& c) : b(c.begin()), e(c.end()) {}
 	
 	T begin() { return b; }
 	T end() { return e; }
@@ -470,6 +471,28 @@ template<typename T> static inline T bitround(T in)
 	in++;
 	return in;
 }
+
+
+#define ALLINTS(x) \
+	x(signed char) \
+	x(unsigned char) \
+	x(signed short) \
+	x(unsigned short) \
+	x(signed int) \
+	x(unsigned int) \
+	x(signed long) \
+	x(unsigned long) \
+	x(signed long long) \
+	x(unsigned long long)
+
+#define ALLNUMS(x) \
+	ALLINTS(x) \
+	x(float) \
+	x(double) \
+
+#ifndef COMMON_INST
+#define COMMON_INST(T) extern template class T
+#endif
 
 
 //If an interface defines a function to set some state, and a callback for when this state changes,

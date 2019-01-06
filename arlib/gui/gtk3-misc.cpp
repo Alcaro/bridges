@@ -492,7 +492,8 @@ public:
 	};
 	refarray<timer_cb> timerinfo;
 	
-	bool need_exit_sync = true;
+	// if runloop is never entered (someone trying to measure startup performance by calling exit() before entering loop), don't sync
+	bool need_exit_sync = false;
 	
 	static const GIOCondition cond_rd = (GIOCondition)(G_IO_IN |G_IO_HUP|G_IO_ERR);
 	static const GIOCondition cond_wr = (GIOCondition)(G_IO_OUT|G_IO_HUP|G_IO_ERR);
@@ -644,7 +645,7 @@ public:
 			// something in gl.swapBuffers
 			//I suspect Gtk is trying to be "smart" about something, but it just ends up being counterproductive
 			//and I can't find which part of the source code describes such absurd behavior,
-			// nor any sensible way to debug it and track it down
+			// nor any sensible way to debug it, track it down, and find a less absurd workaround
 			
 			gtk_main_iteration_do(true);
 			gtk_main_iteration_do(true);

@@ -111,7 +111,7 @@ class set : public linqbase<set<T>> {
 	//used by map
 	//if the item doesn't exist, NULL
 	template<typename T2>
-	T* get(const T2& item) const
+	T* get_or_null(const T2& item) const
 	{
 		size_t pos = find_pos_const(item);
 		if (pos != (size_t)-1) return &m_data[pos];
@@ -119,9 +119,9 @@ class set : public linqbase<set<T>> {
 	}
 	//also used by map
 	template<typename T2>
-	T& get_create(const T2& item)
+	T& get_create(const T2& item, bool known_new = false)
 	{
-		size_t pos = find_pos_insert(item);
+		size_t pos = known_new ? -1 : find_pos_insert(item);
 		
 		if (pos == (size_t)-1 || !m_valid[pos])
 		{
@@ -319,54 +319,56 @@ public:
 	//can't call it set(), conflict with set<>
 	void insert(const Tkey& key, const Tvalue& value)
 	{
-		items.add(node(key, value));
+		node* item = items.get_or_null(key);
+		if (item) item->value = value;
+		else items.get_create(node(key, value), true);
 	}
 	
 	//if nonexistent, undefined behavior
 	template<typename Tk2>
 	Tvalue& get(const Tk2& key)
 	{
-		return items.get(key)->value;
+		return items.get_or_null(key)->value;
 	}
 	template<typename Tk2>
 	const Tvalue& get(const Tk2& key) const
 	{
-		return items.get(key)->value;
+		return items.get_or_null(key)->value;
 	}
 	
 	//if nonexistent, returns 'def'
 	template<typename Tk2>
 	Tvalue& get_or(const Tk2& key, Tvalue& def)
 	{
-		node* ret = items.get(key);
+		node* ret = items.get_or_null(key);
 		if (ret) return ret->value;
 		else return def;
 	}
 	template<typename Tk2>
 	const Tvalue& get_or(const Tk2& key, const Tvalue& def) const
 	{
-		node* ret = items.get(key);
+		node* ret = items.get_or_null(key);
 		if (ret) return ret->value;
 		else return def;
 	}
 	template<typename Tk2>
 	Tvalue get_or(const Tk2& key, Tvalue&& def) const
 	{
-		node* ret = items.get(key);
+		node* ret = items.get_or_null(key);
 		if (ret) return ret->value;
 		else return std::move(def);
 	}
 	template<typename Tk2>
 	Tvalue* get_or_null(const Tk2& key)
 	{
-		node* ret = items.get(key);
+		node* ret = items.get_or_null(key);
 		if (ret) return &ret->value;
 		else return NULL;
 	}
 	template<typename Tk2>
 	const Tvalue* get_or_null(const Tk2& key) const
 	{
-		node* ret = items.get(key);
+		node* ret = items.get_or_null(key);
 		if (ret) return &ret->value;
 		else return NULL;
 	}
@@ -376,7 +378,7 @@ public:
 	}
 	Tvalue& operator[](const Tkey& key) // C# does this better...
 	{
-		return get(key);
+		return *get_or_null(key);
 	}
 	
 	Tvalue& insert(const Tkey& key)

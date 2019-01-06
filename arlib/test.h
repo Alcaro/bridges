@@ -27,6 +27,26 @@ string tostring_dbg(const map<Tkey,Tvalue>& item)
 		+"}";
 }
 
+/*
+template<typename T> using has_to_string = decltype(declval<T&>().to_string());
+	template<typename T> using has_to_string_free = decltype(to_string(declval<T&>()));
+
+	template<typename T>
+	string convert(T const& t)
+	{
+		if constexpr(is_detected_exact_v<string, has_to_string, T>){
+			return t.to_string();
+		}else if constexpr(is_detected_exact_v<string, has_to_string_free, T>){
+			return to_string(t);
+		}else if constexpr(is_static_castable_v<T, string>){
+			return static_cast<string>(t);
+		}
+		
+		//give up no valid conversion exists, so dump the bytes and maybe that helps debug
+		return dump_bytes(t);
+	}
+*/
+
 class _testdecl {
 public:
 	_testdecl(void(*func)(), const char * filename, int line, const char * name, const char * requires, const char * provides);
@@ -38,6 +58,8 @@ void _test_nothrow(int add);
 
 void _teststack_push(int line);
 void _teststack_pop();
+int _teststack_pushstr(string text); // Returns 1.
+int _teststack_popstr(); // Returns 0.
 
 void _test_skip(cstring why);
 void _test_skip_force(cstring why);
@@ -177,6 +199,7 @@ void _assert_range(const T&  actual, const char * actual_exp,
 #define assert_fail(msg) do { _testfail((string)"\n"+msg, __LINE__); } while(0)
 #define assert_unreachable() do { _testfail("\nassert_unreachable() wasn't unreachable", __LINE__); } while(0)
 #define assert_fail_nostack(msg) do { _testfail((string)"\n"+msg, -1); } while(0)
+#define testctx(x) for (int i=_teststack_pushstr(x); i; i = _teststack_popstr())
 #define testcall(x) do { _teststack_push(__LINE__); x; _teststack_pop(); } while(0)
 #define test_skip(x) do { _test_skip(x); } while(0)
 #define test_skip_force(x) do { _test_skip_force(x); } while(0)
@@ -209,6 +232,7 @@ int not_quite_main(int argc, char** argv);
 #define assert_gte(x,y) ((void)((x)<(y)))
 #define assert_range(x,y,z) ((void)((x)<(y)))
 #define testcall(x) x
+#define testctx(x)
 #define test_skip(x) return
 #define test_skip_force(x) return
 #define test_inconclusive(x) return

@@ -91,7 +91,8 @@ public:
 	
 	struct input in;
 	struct input prev_in;
-	static const int k_click = 7; // used in in_push
+	static const int k_click  = k_cancel+1; // used in in_push
+	static const int k_rclick = k_cancel+2;
 	uint8_t in_press; // true for one frame only
 	bool recent_change = false;
 	
@@ -913,8 +914,10 @@ public:
 				out.insert_tile_with_border(x+13, y+37, 12, len*48-34, res.arrowv, 0, 0, 6, 9);
 			}
 			
-			if (in_press & 1<<k_click)
+			if (in_press & (1<<k_click | 1<<k_rclick))
 			{
+				if (in_press & 1<<k_rclick)
+					map.toggle(tx, ty, dir);
 				map.toggle(tx, ty, dir);
 				if (map.finished())
 				{
@@ -925,14 +928,14 @@ public:
 		}
 	no_phantom: ;
 		
-		if (in_press&~(1<<k_cancel | 1<<k_click) && game_kb_state==0 && !game_menu)
+		if (in_press&~(1<<k_cancel | 1<<k_click | 1<<k_rclick) && game_kb_state==0 && !game_menu)
 		{
 			game_kb_state = 1;
 			in_press &= 1<<k_cancel;
 		}
 		
 		
-		if (in_press & 1<<k_click && game_kb_visible != 0)
+		if (in_press & (1<<k_click | 1<<k_rclick) && game_kb_visible != 0)
 		{
 			game_kb_visible--;
 			if (game_kb_visible == 0) game_kb_state = 0;
@@ -940,15 +943,14 @@ public:
 		
 		if (game_kb_state != 0 && !game_menu)
 		{
-			if ((in.keys == 1<<k_right || in.keys == 1<<k_up || in.keys == 1<<k_left || in.keys == 1<<k_down) &&
-					(in_press&~(1<<k_click)) == 0)
+			if ((in.keys == 1<<k_right || in.keys == 1<<k_up || in.keys == 1<<k_left || in.keys == 1<<k_down) && in_press == 0)
 			{
 				if (--game_kb_holdtimer == 0)
 				{
 					game_kb_holdtimer = 3;
 					in_press = in.keys;
 				}
-				game_kb_visible = 5;
+				game_kb_visible = 1;
 			}
 			else game_kb_holdtimer = 20;
 			
@@ -1107,7 +1109,7 @@ if(map.finished())map.solve_another();else map.solve();
 }
 			
 			out.insert(600, game_menu_pos+18, res_menuclose);
-			if (in_press & 1<<k_click && in.mousex >= 595 && in.mousex < 637 &&
+			if ((in_press & 1<<k_click) && in.mousex >= 595 && in.mousex < 637 &&
 			    in.mousey >= game_menu_pos+13 && in.mousey < game_menu_pos+35)
 			{
 				game_menu = false;
@@ -1426,6 +1428,8 @@ to_title(); //TODO
 		this->in_press = (in.keys & ~this->in.keys);
 		if (in.mouseclick && !this->in.mouseclick)
 			this->in_press |= 1<<k_click;
+		if (in.rmouseclick && !this->in.rmouseclick)
+			this->in_press |= 1<<k_rclick;
 		this->prev_in = this->in;
 		this->in = in;
 		

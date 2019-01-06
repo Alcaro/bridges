@@ -242,12 +242,14 @@ int main(int argc, char** argv)
 			if (in.mousex >= 0 && in.mousey >= 0 && in.mousex < 640 && in.mousey < 480)
 			{
 				in.mouseclick = (flags & Button1Mask);
+				in.rmouseclick = (flags & Button3Mask); // why is right 3, middle should be 3
 			}
 			else
 			{
 				in.mousex = -1;
 				in.mousey = -1;
 				in.mouseclick = false;
+				in.rmouseclick = false;
 			}
 			
 			uint64_t start = time_us_ne();

@@ -11,6 +11,7 @@ public:
 		int mousex; // if the mouse is not in the game window, use x=-1 y=-1 click=false
 		int mousey;
 		bool mouseclick;
+		bool rmouseclick;
 		
 		uint8_t keys; // format: 1<<k_up | 1<<k_confirm
 	};
