@@ -510,6 +510,6 @@ template<typename T> static inline T bitround(T in)
 
 //This file, and many other parts of Arlib, uses a weird mix between Windows- and Linux-style
 // filenames and paths. This is intentional; the author prefers Linux-style paths and directory
-// structures, but Windows file extensions. .exe is less ambigous than no extension, and Windows'
-// insistence on overloading the escape character is irritating. Since this excludes following
-// any single OS, the rest is personal preference.
+// structures, but Windows file extensions. .exe is less ambigous than no extension, and 'so' is a
+// word while 'dll' is not; however, Windows' insistence on overloading the escape character is
+// irritating. Since this excludes following any single OS, the rest is personal preference.

@@ -914,7 +914,7 @@ public:
 				out.insert_tile_with_border(x+13, y+37, 12, len*48-34, res.arrowv, 0, 0, 6, 9);
 			}
 			
-			if (in_press & (1<<k_click | 1<<k_rclick))
+			if ((bool)(in_press & (1<<k_click)) != (bool)(in_press & 1<<k_rclick))
 			{
 				if (in_press & 1<<k_rclick)
 					map.toggle(tx, ty, dir);
