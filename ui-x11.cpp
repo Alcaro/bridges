@@ -48,7 +48,6 @@ static int pressed_keys()
 	return ret;
 }
 
-
 int main(int argc, char** argv)
 {
 	argparse args;
@@ -252,12 +251,16 @@ int main(int argc, char** argv)
 				in.rmouseclick = false;
 			}
 			
+#ifdef ARLIB_OPT
 			uint64_t start = time_us_ne();
+#endif
 			int do_upload = g->run(in, out, !first);
 			first = false;
+#ifdef ARLIB_OPT
 			uint64_t end = time_us_ne();
 			if (end-start >= 2500)
 				printf("rendered in %uus\n", (unsigned)(end-start));
+#endif
 			if (do_upload > 0) gl.TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 640, 480, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, pixels);
 			active = (do_upload >= 0);
 		}

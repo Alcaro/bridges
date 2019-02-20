@@ -9,10 +9,4 @@ ARWUTF = 0
 ARSOCKET = 0
 ARSANDBOX = 0
 
-SOURCES += resources.cpp
 include arlib/Makefile
-
-$(call OBJMANGLE,DEFAULT,game.cpp): resources.cpp
-resources.cpp: rescompile.py resources/ resources/*
-	$(ECHOQ) rescompile.py
-	$(Q)python3 rescompile.py || python rescompile.py

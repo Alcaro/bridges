@@ -16,6 +16,8 @@ public:
 		uint8_t keys; // format: 1<<k_up | 1<<k_confirm
 	};
 	
+	//Callers should treat savedat as an opaque binary blob.
+	//The only permitted operations are passing pointers to memcpy/fwrite/etc, and passing them to a game object.
 	struct savedat {
 		uint8_t unlocked;
 		bool seen_random_tutorial;
@@ -54,7 +56,7 @@ public:
 	int numislands; // includes non-root island tiles
 	
 	struct island {
-		int8_t population; // -1 for ocean, -2 for reef, 80-83 for castles; valid for all parts of this large island
+		int8_t population; // -1 for ocean, -2 for reef, 80-83 for castles; valid for all parts of a large island
 		int8_t totbridges; // unspecified for large islands; all other members are valid for larges
 		int16_t rootnode; // -1 for ocean, y*100+x for most islands, something else for large island non-roots
 		
@@ -109,12 +111,12 @@ public:
 	//Returns whether the given map is solvable. Assumes all input bridges are correct.
 	//If the input bridges are not correct, may falsely report the map unsolvable, or return an invalid solution.
 	//If solvable, the solution is added to the map. If not solvable, 'map' remains unchanged.
-	//If there are multiple solutions, nothing is guaranteed about which of them is returned.
+	//If there are multiple solutions, one of them is returned. There is no guarantee about which one.
 	bool solve();
 	//Give it a solved map as input. Returns another solution for the same map, if one exists.
 	//If that's the only solution, returns false and doesn't change the input.
-	//If the input is not solved, may yield any valid return value.
-	//If there are multiple solutions, nothing is guaranteed about which of them is returned, except the input is not returned.
+	//If the input is not solved, undefined behavior.
+	//If there are three or more solutions, nothing is guaranteed about which of them is returned, except the input is not returned.
 	bool solve_another();
 	//The return value is approximate, and humans may sort difficulty differently from this function.
 	//(Though humans aren't consistent with each other either.)
@@ -160,7 +162,7 @@ public:
 	};
 	
 	class generator {
-		gamemap::genparams par; // Read only, safe to read from any thread.
+		genparams par; // Read only after construction, safe to read from any thread.
 		
 		mutex mut;
 		semaphore sem;

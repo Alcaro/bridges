@@ -1,5 +1,5 @@
 #include "game.h"
-#include "resources.h"
+#include "obj/resources.h"
 #include <math.h>
 
 //TODO:
@@ -169,7 +169,7 @@ public:
 		
 		res.smallfont.scale = 2;
 		res.smallfont.height = 9;
-		res.smallfont.width[' '] += 2;
+		res.smallfont.width[(uint8_t)' '] += 2; // extra cast to shut up Clang
 	}
 	
 	void background()
