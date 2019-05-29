@@ -1,53 +1,4 @@
 extern const char * const game_maps[] = {
-// test maps
-
-//"          \n"
-//" 4< 2  1  \n"
-//"    ^ 2#2 \n"
-//" >v    1  \n"
-//" 8<       \n"
-//"     >>>v \n"
-//"  v  ^<<A \n"
-//" >A< ^^ v \n"
-//"  ^  ^^<< \n"
-//"          \n",
-
-
-//">>>A<<<<\n"
-//"1<2<3<4<\n"
-//">>>B<<<<\n"
-//"v1v12345\n"
-//"v^v     \n"
-//"A2B     \n"
-//"^^^     \n"
-//"^3^     \n"
-//"^^^     \n",
-
-
-
-
-/*
-
-
-
-
-
-"r<        \n" // contains castles, but not a good introduction to them
-"^^ 2 3 1  \n" // castles need to show up after reef and large islands
-"  2 1 1 2 \n"
-" 4 1 4 1  \n"
-"  2 3 2 5 \n"
-" 3 1 3 2  \n"
-"  2 5 2 g<\n"
-"        >^\n",
-
-
-//*/
-
-
-
-
-
 	"  2  \n" // 1
 	"     \n"
 	"2 7 1\n"
@@ -327,15 +278,16 @@ extern const char * const game_maps[] = {
 "        >^\n",
 
 
-//neat map, quite complex ending
-"3   1< 33\n"
-"^ 5 #   ^\n"
-"  ^   4  \n"
-"  ^ 2 ^ 3\n"
-"2# 4 #^2 \n"
-" 3 ^>4   \n"
-"    ^^  2\n"
-"3<   5 4<\n",
+//actually unsolvable
+////neat map, quite complex ending
+//"3   1< 33\n"
+//"^ 5 #   ^\n"
+//"  ^   4  \n"
+//"  ^ 2 ^ 3\n"
+//"2# 4 #^2 \n"
+//" 3 ^>4   \n"
+//"    ^^  2\n"
+//"3<   5 4<\n",
 
 
 //hard but playable
@@ -384,9 +336,9 @@ extern const char * const game_maps[] = {
 //- something that turns into a spiral
 //- various other forms of symmetry
 //- mainlands (will always be castles, will never have population)
-//- one where there's only 1s
+//- one where there's only 1s and castles, but varying shapes and potential crossings make it hard to determine which exist
 
-//evilest ones I've ever seen (from various variants of the generator)
+//hardest ones I've ever seen (from various variants of the generator)
 "2>5< 4<\n"
 "^   1  \n"
 "  2  2 \n"
@@ -544,6 +496,96 @@ extern const char * const game_maps[] = {
 "^  4 ^#  \n"
 "  1 3  3 \n"
 "1 ^3  3 3\n",
+
+" 4<<  >5 \n"
+"   #1  ^ \n"
+"2 3   2 #\n"
+"       2<\n"
+" 2  3 5 2\n"
+"4 2  #4< \n"
+"  ^   # 1\n"
+">3<#    #\n"
+"    2  3<\n",
+
+"2   5<  2\n"
+" 3  4  1 \n"
+" ^ 3#  ^ \n"
+" #   2<  \n"
+"2 1  ^  4\n"
+"  #6   3 \n"
+"2  ^ 2   \n"
+"  4<  2 v\n"
+"1 ^ 2  3<\n",
+
+"4 3<   4<\n"
+"^  2 >7< \n"
+"  2 3<  3\n"
+"4  4   4 \n"
+"    2 2  \n"
+" 3<< #^4 \n"
+"2       2\n"
+"^   2< 2 \n"
+"2 3   2 2\n",
+
+"4<4<#2  3\n"
+"      1 ^\n"
+"3 2      \n"
+"   3 2<# \n"
+" 4  3   4\n"
+"2  5< 4< \n"
+"      ^^ \n"
+" 3 3    2\n"
+"3   3 2  \n",
+
+"3 4  2 3<\n"
+"         \n"
+"3   2 3 2\n"
+"  4  3 2 \n"
+"  ^ 2    \n"
+"     3 3 \n"
+"2 3  ^4  \n"
+"#        \n"
+"1   3 4< \n",
+
+"  2  6< 2\n"
+" 3   2 # \n"
+"1 #      \n"
+"   1<<   \n"
+">7<   4 3\n"
+"   v   3 \n"
+"   4  #^3\n"
+" 2 ^ 2 ^ \n"
+"2    1< 2\n",
+
+"   1  4 1\n"
+">5< 2    \n"
+"  1< 5< #\n"
+" 4< 3 ^  \n"
+"  ^     2\n"
+"4  2< 1  \n"
+"^v   2  3\n"
+" 7  2   ^\n"
+" ^ 1#    \n",
+
+"   2 31< \n"
+"5<<   ^ 2\n"
+"   5<< 4 \n"
+"3        \n"
+" 3  2  2 \n"
+"  4  3  4\n"
+" 1 2<   ^\n"
+"3^       \n"
+"^ 4 5  2 \n",
+
+" 3 3< 2 3\n"
+"    2< 2 \n"
+"   2 ^ ^ \n"
+"   ^    2\n"
+" v  5 2 ^\n"
+"#6   2   \n"
+" ^ 2   v \n"
+"     3 4 \n"
+"#2  3  ^ \n",
 #endif
 
 };
