@@ -52,10 +52,7 @@ Q =
 ECHOQ = @true
 endif
 
-ifneq (,$(findstring test,$(MAKECMDGOALS)))
-  SELFTEST = 1
-endif
-ifneq (,$(findstring check,$(MAKECMDGOALS)))
+ifneq ($(filter $(MAKECMDGOALS),test test-all test-all-twice check),)
   SELFTEST = 1
 endif
 
@@ -85,10 +82,7 @@ LFLAGS =
 AS = as
 ASFLAGS =
 AR = ar
-CCXXFLAGS = -fvisibility=hidden -Wall -Wmissing-declarations -pipe
-ifeq ($(CC_FAMILY),gcc)
-CCXXFLAGS += -fno-semantic-interposition
-endif
+CCXXFLAGS = -fvisibility=hidden -Wall -Wmissing-declarations -Wvla -pipe
 #doesn't seem to do anything, and CFLAGS is used for c++ too which throws warnings all over
 #CFLAGS += -Wmissing-prototypes
 ifneq ($(EXCEPTIONS),1)
@@ -101,10 +95,14 @@ endif
 
 CC_FAMILY := gcc
 ifneq ($(findstring clang,$(CC) $(CXX) $(LD)),)
-CC_FAMILY := clang
-CC = clang
-CXX = clang++
-LD = clang++
+  CC_FAMILY := clang
+  CC = clang
+  CXX = clang++
+  LD = clang++
+endif
+
+ifeq ($(CC_FAMILY),gcc)
+  CCXXFLAGS += -fno-semantic-interposition
 endif
 
 #double gcc bug combo:
@@ -349,11 +347,11 @@ TRUE_CFLAGS := -std=c99 $(CCXXFLAGS) $(CONF_CFLAGS) $(CFLAGS)
 # I will not switch C++ version because a dependency needs that. Instead, I'll reinvent or clone the dependency.
 # C++14 offers one useful feature, which is not big enough to switch for:
 #   std::<trait>_v (rather than std::<trait>::value)
-# C++17 offers plenty of useful features, and I will switch once Debian 10 releases with a GCC newer than 6.3:
+# C++17 offers plenty of useful features, and I will switch once Debian 10 releases with a GCC newer than 6.3 on July 6:
 #   template<auto val> (for the function<> member binder, that macro sucks. Though bind_this will likely always be a macro)
 #   Guaranteed copy elision
 #   constexpr if (for the min function, and probably a few others)
-#   Structured binding (auto [ x, y ] = foo())
+#   Structured binding (auto [ x, y ] = foo() - use in function::decompose)
 #   __has_include (for valgrind.h)
 # The following features would be useful; if enough of them show up, I will switch:
 #   C++2a template lambdas (for the PNG decoder)
@@ -361,11 +359,11 @@ TRUE_CFLAGS := -std=c99 $(CCXXFLAGS) $(CONF_CFLAGS) $(CFLAGS)
 #   C++2a down with typename
 #   C++2a [[likely]]
 #   C++2a [[no_unique_address]]
-#   C++2a ban non-power-of-two integers
+#   C++2a ban non-twos-complement signed
 #   C++2a consteval
-#   C++2a void foo(auto arg) (shorthand for template<typename T> void foo(T arg))
+#   C++2a void foo(auto arg) (shorthand for template<typename T> void foo(T arg) - simplifies function::bind_member)
 #   [[trivially_relocatable]] http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2019/p1144r3.html
-#   Lambdas without braces; function<int(int)> foo = [](int i) => i*2;
+#   Lambdas without braces/return; function<int(int)> foo = [](int i) => i*2;
 #   Zero-overhead deterministic exceptions http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p0709r0.pdf
 #   String literals as template parameters http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0424r2.pdf
 #   Compile-time reflection (that SERIALIZE macro is a little too limited)

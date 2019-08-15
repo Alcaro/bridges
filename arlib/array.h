@@ -102,8 +102,8 @@ public:
 	//WARNING: Keep track of endianness if using this.
 	template<typename T2> arrayview<T2> reinterpret() const
 	{
-		//reject cast<string>()
-		//TODO: allow litend/etc
+		//reject reinterpret<string>()
+		//TODO: allow litend/etc, and T=string T2=cstring
 		static_assert(std::is_fundamental<T>::value);
 		static_assert(std::is_fundamental<T2>::value);
 		
@@ -439,6 +439,14 @@ public:
 		resize_shrink_noinit(this->count-1);
 	}
 	
+	void remove_range(size_t start, size_t end)
+	{
+		for (size_t n=start;n<end;n++)
+			this->items[n].~T();
+		memmove(this->items+start, this->items+end, sizeof(T)*(this->count-end));
+		resize_shrink_noinit(this->count - (end-start));
+	}
+	
 	void reset() { resize_shrink(0); }
 	
 	T pop(size_t index = 0)
@@ -483,13 +491,13 @@ public:
 		clone(arrayview<T>(ptr, count));
 	}
 	
-	array<T> operator=(array<T> other)
+	array<T>& operator=(array<T> other)
 	{
 		swap(other);
 		return *this;
 	}
 	
-	array<T> operator=(arrayview<T> other)
+	array<T>& operator=(arrayview<T> other)
 	{
 		if (other.ptr() >= this->ptr() && other.ptr() < this->ptr()+this->size())
 		{

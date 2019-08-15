@@ -179,7 +179,7 @@ ld [arg1l]
 #threads are fine, there's not even any point intercepting them
 jset #CLONE_THREAD, clone_thread
 
-#for fork(), only this flag is allowed, no unsharing
+#for fork(), only this flag combination is allowed, no unsharing
 jne #SIGCHLD|CLONE_CHILD_SETTID|CLONE_CHILD_CLEARTID|CLONE_PARENT_SETTID, emulate
 ld [arg3h]
 jne #0, emulate

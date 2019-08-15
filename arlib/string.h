@@ -5,14 +5,12 @@
 #include <string.h>
 #include <ctype.h>
 
-//A string is a mutable sequence of bytes. It usually represents UTF-8 text, but can be arbitrary binary data, including NULs.
-//All string:: functions taking or returning a char* assume/guarantee NUL termination. Anything using uint8_t* does not.
+//A string is a mutable byte container. It usually represents UTF-8 text, but can be arbitrary binary data, including NULs.
+//All string functions taking or returning a char* assume/guarantee NUL termination. Anything using uint8_t* does not.
 
-//cstring is an immutable sequence of bytes that does not own its storage. It can also be called stringview.
-
-//If the string contains no NULs (not even at the end), it's considered 'weak proper'.
-//If the string contains no control characters other than \t\r\n, and is valid UTF-8, it's considered 'proper'.
-//Many string users expect some level of properity.
+//cstring is an immutable sequence of bytes that does not own its storage. If the storage is modified, the cstring may not be used.
+//In most contexts, it's called stringview, but I feel that's too long.
+//Long ago, cstring was just a typedef to 'const string&', hence its name.
 
 
 class string;
@@ -41,7 +39,7 @@ class cstring {
 			uint8_t* m_data;
 			uint32_t m_len;
 			bool m_nul; // whether the string is properly terminated (always true for string, possibly false for cstring)
-			uint8_t reserved; // matches the last byte of the inline data; never ever access this
+			uint8_t reserved; // reserve space for the last byte of the inline data; never ever access this
 		};
 	};
 	
@@ -233,12 +231,19 @@ public:
 	
 	string replace(cstring in, cstring out) const;
 	
+	//crsplitwi - cstring-returning backwards-counting split on word boundaries, inclusive
+	//cstring-returning - obvious
+	//backwards-counting - splits at the rightmost opportunity, "a b c d".rsplit<1>(" ") is ["a b c", "d"]
+	//word boundary - isspace()
+	//inclusive - the boundary string is included in the output, "a\nb\n".spliti("\n") is ["a\n", "b\n"]
+	//all subsets of splitting flags are supported
+	
 	array<cstring> csplit(cstring sep, size_t limit) const;
 	template<size_t limit = SIZE_MAX>
 	array<cstring> csplit(cstring sep) const { return csplit(sep, limit); }
 	
 	array<cstring> crsplit(cstring sep, size_t limit) const;
-	template<size_t limit = SIZE_MAX>
+	template<size_t limit>
 	array<cstring> crsplit(cstring sep) const { return crsplit(sep, limit); }
 	
 	array<string> split(cstring sep, size_t limit) const { return csplit(sep, limit).cast<string>(); }
@@ -246,24 +251,43 @@ public:
 	array<string> split(cstring sep) const { return split(sep, limit); }
 	
 	array<string> rsplit(cstring sep, size_t limit) const { return crsplit(sep, limit).cast<string>(); }
-	template<size_t limit = SIZE_MAX>
+	template<size_t limit>
 	array<string> rsplit(cstring sep) const { return rsplit(sep, limit); }
 	
-	array<cstring> csplitw(size_t limit) const;
-	template<size_t limit = SIZE_MAX>
-	array<cstring> csplitw() const { return csplitw(limit); }
 	
-	array<cstring> crsplitw(size_t limit) const;
+	array<cstring> cspliti(cstring sep, size_t limit) const;
 	template<size_t limit = SIZE_MAX>
-	array<cstring> crsplitw() const { return crsplitw(limit); }
+	array<cstring> cspliti(cstring sep) const { return cspliti(sep, limit); }
 	
-	array<string> splitw(size_t limit) const { return csplitw(limit).cast<string>(); }
-	template<size_t limit = SIZE_MAX>
-	array<string> splitw() const { return splitw(limit); }
+	array<cstring> crspliti(cstring sep, size_t limit) const;
+	template<size_t limit>
+	array<cstring> crspliti(cstring sep) const { return crspliti(sep, limit); }
 	
-	array<string> rsplitw(size_t limit) const { return crsplitw(limit).cast<string>(); }
+	array<string> spliti(cstring sep, size_t limit) const { return cspliti(sep, limit).cast<string>(); }
 	template<size_t limit = SIZE_MAX>
-	array<string> rsplitw() const { return rsplitw(limit); }
+	array<string> spliti(cstring sep) const { return spliti(sep, limit); }
+	
+	array<string> rspliti(cstring sep, size_t limit) const { return crspliti(sep, limit).cast<string>(); }
+	template<size_t limit>
+	array<string> rspliti(cstring sep) const { return rspliti(sep, limit); }
+	
+	//TODO: do I need these?
+	
+	//array<cstring> csplitw(size_t limit) const;
+	//template<size_t limit = SIZE_MAX>
+	//array<cstring> csplitw() const { return csplitw(limit); }
+	//
+	//array<cstring> crsplitw(size_t limit) const;
+	//template<size_t limit>
+	//array<cstring> crsplitw() const { return crsplitw(limit); }
+	//
+	//array<string> splitw(size_t limit) const { return csplitw(limit).cast<string>(); }
+	//template<size_t limit = SIZE_MAX>
+	//array<string> splitw() const { return splitw(limit); }
+	//
+	//array<string> rsplitw(size_t limit) const { return crsplitw(limit).cast<string>(); }
+	//template<size_t limit>
+	//array<string> rsplitw() const { return rsplitw(limit); }
 	
 	cstring trim() const
 	{
@@ -283,6 +307,7 @@ public:
 	// If not UTF-8 or not a start index, returns U+DC80 through U+DCFF. Callers are welcome to treat this as an error.
 	// The index is updated to point to the next codepoint. Initialize it to zero; stop when it equals the string's length.
 	// If index is out of bounds, returns zero and does not advance index.
+	// If the string contains 00s, this function will treat it as U+0000. Callers are welcome to explicitly reject that.
 	uint32_t codepoint_at(uint32_t& index) const;
 	
 	//Whether the string matches a glob pattern. ? in 'pat' matches any one byte, * matches zero or more bytes.

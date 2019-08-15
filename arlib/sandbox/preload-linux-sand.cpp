@@ -70,15 +70,16 @@ static inline int munmap(void* addr, size_t length)
 	return syscall2(__NR_munmap, (long)addr, length);
 }
 
-#define ALIGN 4096
-#define ALIGN_MASK (ALIGN-1)
+#define ALIGN_MULT 4096
+#define ALIGN_MASK (ALIGN_MULT-1)
 #define ALIGN_OFF(ptr) ((uintptr_t)(ptr) & ALIGN_MASK)
 #define ALIGN_DOWN(ptr) ((ptr) - ALIGN_OFF(ptr))
-#define ALIGN_UP(ptr) (ALIGN_DOWN(ptr) + (ALIGN_OFF(ptr) ? ALIGN : 0))
+#define ALIGN_UP(ptr) (ALIGN_DOWN(ptr) + (ALIGN_OFF(ptr) ? ALIGN_MULT : 0))
 
 static inline Elf64_Ehdr* map_binary(int fd, uint8_t*& base, uint8_t* hbuf, size_t buflen)
 {
 	//uselib() would be the easy way out, but it doesn't tell where it's mapped, and it may be compiled out of the kernel
+	//maybe uselib() only ever worked for a.out, never ELF
 	read(fd, hbuf, buflen);
 	
 	Elf64_Ehdr* ehdr = (Elf64_Ehdr*)hbuf;
@@ -137,7 +138,7 @@ static inline Elf64_Ehdr* map_binary(int fd, uint8_t*& base, uint8_t* hbuf, size
 //ld-linux can be the main program, in which case it opens the main binary as a normal library and executes that.
 //It checks this by checking if the main program's entry point is its own.
 //So how does the loader find this entry point? As we all know, main() has three arguments: argc,
-// argv, envp. But the loader actually gets a fourth argument, auxv, containing some entropy (for
+// argv, envp. But the loader also gets a fourth argument, auxv, containing some entropy (for
 // stack cookies), user ID, page size, ELF header size, the main program's entry point, and some
 // other stuff.
 //Since we're the main program, we're the entry point, both in auxv and the actual entry, and

@@ -2,25 +2,6 @@
 #include "obj/resources.h"
 #include <math.h>
 
-//TODO:
-//- end game screen
-//- better selection icon for keyboard gameplay
-//- better reef graphics
-//- design some levels containing the new objects
-//    is the generator good enough, or do I make a map editor?
-//    make sure to introduce the new objects in a reasonable way
-//- add hint system
-//- restrict keyboard cursor position to the middle if the outermost parts have no possible bridges, I'll need it for mainlands
-//- make solver consider maps unambiguous if all solutions have the same number of bridges between islands A and B,
-//    to avoid handing out "this one is either 0 or 4" hints to people who know how generator works
-//    for example, this map should be unambiguous
-//      2 2
-//      ^ ^
-//    to do that, make solver always move same-island-pair bridges up/left, if possible
-//      and if both edges are straight (to avoid issues with L-shaped islands where the bridge in the hole must go the other way)
-//    alternatively, ban generator from creating maps where the situation shows up
-//    alternatively, just leave it like this, generator will never be perfect
-
 namespace {
 class birds {
 	static const int spd = 4;
@@ -138,6 +119,7 @@ public:
 	enum {
 		pop_none,
 		pop_welldone,
+		pop_welldone_kb,
 		
 		pop_tutor1,
 		pop_tutor2,
@@ -663,7 +645,7 @@ public:
 			}
 			if (here.population == -2)
 			{
-				out.insert(x, y, res.fg0mask);
+				out.insert(x, y, res.reef);
 			}
 		}
 		
@@ -1009,7 +991,7 @@ public:
 				
 				if (didanything && map.finished())
 				{
-					popup_id = pop_welldone;
+					popup_id = pop_welldone_kb;
 					popup_frame = 0;
 				}
 			}
@@ -1124,6 +1106,7 @@ if(map.finished())map.solve_another();else map.solve();
 				switch (popup_id)
 				{
 				case pop_welldone:
+				case pop_welldone_kb:
 					if (map_id == 29)
 					{
 tileset = 0;
@@ -1194,6 +1177,7 @@ to_title(); //TODO
 					NULL,
 					
 					"\7              Click anywhere to continue...", // pop_welldone
+					"\7Press <TODO> to continue...", // pop_welldone_kb
 					
 					"\1Lord of Bridges is played on a square grid with " // pop_tutor1
 					"squares that represent islands. The yellow "
@@ -1319,7 +1303,7 @@ to_title(); //TODO
 					//"sharing them! Good luck!",
 				};
 				
-				if (popup_id == pop_welldone)
+				if (popup_id == pop_welldone || popup_id == pop_welldone_kb)
 				{
 					res.smallfont.scale = 6;
 					res.smallfont.color = 0xFFFF00;
