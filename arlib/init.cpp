@@ -5,6 +5,7 @@
 #include <sys/resource.h>
 #endif
 #include "test.h" // TODO: define RUNNING_ON_VALGRIND at some better place
+#include <time.h>
 
 string argparse::get_usage()
 {
@@ -168,7 +169,11 @@ void argparse::parse_post()
 {
 	for (arg_base& arg : m_args)
 	{
-		if (arg.must_use) error("missing required argument --"+arg.name);
+		if (arg.must_use)
+		{
+			if (arg.name) error("missing required argument --"+arg.name);
+			else error("missing required positional argument");
+		}
 	}
 }
 

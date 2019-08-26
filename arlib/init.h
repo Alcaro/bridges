@@ -1,6 +1,7 @@
 #pragma once
 #include "string.h"
 #include "stringconv.h"
+#include "file.h"
 
 class argparse {
 	class arg_base {
@@ -72,6 +73,36 @@ public:
 	arg_str& add(            cstring name, bool* has_target, string* target) { return add('\0',  name, has_target, target); }
 	arg_str& add(char sname, cstring name,                   string* target) { return add(sname, name, NULL,       target); }
 	arg_str& add(            cstring name,                   string* target) { return add('\0',  name, NULL,       target); }
+	
+private:
+	class arg_file : public arg_t<arg_file> {
+		friend class argparse;
+		
+		arg_file(bool* has_target, string* target) : arg_t(has_target, true), has_target(has_target), target(target) {}
+		~arg_file() {}
+		bool* has_target;
+		string* target;
+		bool parse(bool has_value, cstring arg)
+		{
+			if (has_target) *has_target = true;
+			if (has_value) *target = file::sanitize_path(arg);
+			return true;
+		}
+	public:
+		//none
+	};
+public:
+	arg_file& add_file(char sname, cstring name, bool* has_target, string* target)
+	{
+		arg_file* arg = new arg_file(has_target, target);
+		arg->name = name;
+		arg->sname = sname;
+		m_args.append_take(*arg);
+		return *arg;
+	}
+	arg_file& add_file(            cstring name, bool* has_target, string* target) { return add_file('\0',  name, has_target, target); }
+	arg_file& add_file(char sname, cstring name,                   string* target) { return add_file(sname, name, NULL,       target); }
+	arg_file& add_file(            cstring name,                   string* target) { return add_file('\0',  name, NULL,       target); }
 	
 private:
 	class arg_strmany : public arg_t<arg_strmany> {

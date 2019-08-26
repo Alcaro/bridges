@@ -39,17 +39,21 @@ else
   else ifeq ($(UNAME_S),)
     $(error couldn't execute uname -s)
   else
-    $(error what weird OS is $(UNAME_S)?)
+    $(error unrecognized OS $(UNAME_S))
   endif
 endif
 
 ifeq ($(V),)
-Q = @
-ECHOQ = @echo
+  Q = @
+  ECHOQ = @echo
 else
-Q =
-#TODO: windows version - echo works on both, but true doesn't
-ECHOQ = @true
+  Q =
+  #TODO: windows version - echo works on both, but true doesn't
+  ifeq ($(OS),windows)
+    ECHOQ = @ver>nul
+  else
+    ECHOQ = @true
+  endif
 endif
 
 ifneq ($(filter $(MAKECMDGOALS),test test-all test-all-twice check),)
@@ -82,12 +86,15 @@ LFLAGS =
 AS = as
 ASFLAGS =
 AR = ar
-CCXXFLAGS = -fvisibility=hidden -Wall -Wmissing-declarations -Wvla -pipe
+CCXXFLAGS = -fvisibility=hidden -Wall -Wmissing-declarations -Wimplicit-fallthrough -Wvla -pipe
 #doesn't seem to do anything, and CFLAGS is used for c++ too which throws warnings all over
 #CFLAGS += -Wmissing-prototypes
 ifneq ($(EXCEPTIONS),1)
   ifneq ($(SELFTEST),1)
     CCXXFLAGS += -fno-exceptions
+    ifeq ($(OS),windows)
+      CONF_LFLAGS += -static-libgcc
+    endif
   endif
 else
   OPTFLAGS += -fno-enforce-eh-specs
@@ -115,6 +122,8 @@ endif
 #(2) '#pragma GCC diagnostic ignored "-Wcomment"' does nothing
 # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=53431
 CCXXFLAGS += -Wno-comment
+#every Arlib class is memmovable, I'm not interested in 99999 gcc warnings
+CONF_CXXFLAGS += -Wno-class-memaccess
 
 EXESUFFIX =
 CONF_CXXFLAGS += $(CONF_CFLAGS)
@@ -149,7 +158,8 @@ ifeq ($(OS),windows)
 #obj/resource$(OBJNAME).o: ico/*
 #	$(RC) $(RCFLAGS) ico/minir.rc obj/resource$(OBJNAME).o
   OBJNAME = windows
-  $(error check if -Wl,--nxcompat does anything or if it defaults to true)
+#surprisingly, this is still needed as of gcc 8.1.0 (to check, objdump -x | grep DllCharacteristics, 0x0100 bit is nxcompat)
+  CONF_LFLAGS += -Wl,--nxcompat
 endif
 
 OPTFLAGS += -Os -fomit-frame-pointer -fmerge-all-constants -fvisibility=hidden
@@ -158,7 +168,10 @@ OPTFLAGS += -ffunction-sections -fdata-sections
 OPTFLAGS += -fno-ident
 OPTFLAGS += -DNDEBUG -DARLIB_OPT
 OPTFLAGS_CXX += -fno-threadsafe-statics
-OPTLFLAGS := -Wl,--gc-sections,--build-id=none,--hash-style=gnu,--relax,--sort-common
+OPTLFLAGS := -Wl,--gc-sections,--build-id=none,--relax,--sort-common
+ifneq ($(OS),windows)
+OPTLFLAGS += -Wl,--hash-style=gnu
+endif
 #OPTLFLAGS += -Wl,--print-map
 ifneq ($(DEBUG),1)
   #DEBUG means still working on it, so -Werror isn't appropriate yet
@@ -378,10 +391,6 @@ TRUE_CFLAGS := -std=c99 $(CCXXFLAGS) $(CONF_CFLAGS) $(CFLAGS)
 # The compiler-magic ones, like std::move and type traits, do one thing and do it well, and optimize to nothing. I use them.
 TRUE_CXXFLAGS := -std=c++11 -fno-rtti $(CCXXFLAGS) $(CONF_CXXFLAGS) $(CXXFLAGS)
 TRUE_LFLAGS := $(LFLAGS) -fvisibility=hidden $(CONF_LFLAGS)
-
-ifeq ($(OS),windows)
-  TRUE_LFLAGS += -static-libgcc 
-endif
 
 #On Windows, cleaning up the object directory is expected to be done with 'del /q obj\*' in a batch script.
 clean:

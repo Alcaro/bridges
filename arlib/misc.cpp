@@ -29,8 +29,6 @@ void* operator new(std::size_t n, std::align_val_t al)
 #endif
 
 #ifdef __MINGW32__
-#error check what -fno-exceptions does; when exceptions are enabled, libstdc++ is already included, so importing these symbols does no harm
-#error also check whether they can be inlined into global.h, like malloc_check
 extern "C" void __cxa_pure_virtual(); // predeclaration for -Wmissing-declarations
 extern "C" void __cxa_pure_virtual() { puts("__cxa_pure_virtual"); abort(); }
 #endif

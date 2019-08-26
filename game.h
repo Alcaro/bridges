@@ -10,8 +10,8 @@ public:
 	struct input {
 		int mousex; // if the mouse is not in the game window, use x=-1 y=-1 click=false
 		int mousey;
-		bool mouseclick;
-		bool rmouseclick;
+		bool lmousebutton;
+		bool rmousebutton;
 		
 		uint8_t keys; // format: 1<<k_up | 1<<k_confirm
 	};
@@ -99,9 +99,7 @@ public:
 	//  This applies even if you don't intend to render the map; the solver requires that too.
 	//Placing zero bridges must not be a solution.
 	//
-	//Some of these rules can be broken in carefully controlled circumstances. For example,
-	// the solver test suite contains several maps where zero bridges is correct.
-	//However, all such things are subject to change at any point.
+	//(A few tests break these rules. No other caller should.)
 	void init(const char * inmap);
 	
 	void toggle(int x, int y, int dir);
@@ -193,24 +191,18 @@ public:
 		void threadproc();
 		
 	public:
-		//The object may not be deleted before calling cancel(), compress() or pack() at least once.
 		generator(const gamemap::genparams& par);
-		void cancel();
+		void cancel(); // Safe to call multiple times.
 		bool done(unsigned* progress);
 		
-		bool finish(gamemap& map);
+		bool finish(gamemap& map); // If cancelled, fails and does nothing, or yields a map not matching genparams' quality.
 		
 		//Pass this value to unpack(). Passing any other value is likely to give results inconsistent with the generation parameters.
 		//If the return value is 0, generation was cancelled.
 		uint64_t pack();
 		static void unpack(const gamemap::genparams& par, uint64_t seed, gamemap& map);
+		~generator() { cancel(); }
 	};
-	
-	//class generator;
-	//static generator* generate_async(const genparams& par);
-	//static bool generate_done(generator* gen, unsigned* progress = NULL);
-	//static void generate_cancel(generator* gen);
-	//static bool generate_finish(generator* gen, gamemap& map);
 	
 	bool generate(const genparams& par)
 	{

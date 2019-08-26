@@ -421,14 +421,15 @@ int main(int argc, char* argv[])
 			try {
 				uint64_t start_time = time_us_ne();
 				cur_test->func();
-				//assert_eq(n_malloc, n_free);
+				if (pass == 2)
+					assert_eq(n_malloc, n_free);
 				uint64_t end_time = time_us_ne();
 				uint64_t time_us = end_time - start_time;
 				uint64_t time_lim = (all_tests ? 5000*1000 : 500*1000);
 				if (time_us > time_lim)
 				{
 					printf("too slow: max %uus, got %uus\n", (unsigned)time_lim, (unsigned)time_us);
-					result = err_tooslow;
+					throw err_tooslow;
 				}
 			} catch (err_t e) {
 				result = e;

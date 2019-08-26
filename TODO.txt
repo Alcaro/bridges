@@ -1,7 +1,12 @@
 - game.cpp: An end game screen should be created
 - game.cpp: Restrict keyboard focus to the bounding rectangle of all possible bridge building points, not the map size
     this allows maps containing 'islands' going outside the screen and covering the entire edge ("mainland")
+    or maybe just set that manually in the map, so I won't need to mess with generator giving noncentered maps, or level 1 having an edge
 - game.cpp: The pop_welldone_kb message needs k_confirm named (and spaces to recenter it)
+- game.cpp: I believe keybol <http://www.notdoppler.com/kingofbridges.php> is not the sole author of the original game.
+    This suspicion is mostly based on how the original King of Bridges puts all tutorials in the first five levels,
+      but the first five levels only need the 'right number of bridges' rule, and the 'all must be connected' isn't needed until the 11th.
+    I want to know who did, so I can provide proper credit.
 - maps.cpp: Need to design some levels containing the new objects
     generator isn't enough, I want a few mainlands
     make sure to introduce the new objects in a reasonable way

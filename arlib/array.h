@@ -593,7 +593,11 @@ inline array<T2> arrayview<T>::cast() const
 
 template<> class array<bool> {
 protected:
-	static const size_t n_inline = sizeof(uint8_t*)/sizeof(uint8_t)*8;
+	//extra variable to shut up gcc
+	//  division 'sizeof (uint8_t* {aka unsigned char*}) / sizeof (uint8_t {aka unsigned char})'
+	//  does not compute the number of array elements [-Wsizeof-pointer-div]
+	static const size_t ptr_size = sizeof(uint8_t*);
+	static const size_t n_inline = ptr_size/sizeof(uint8_t)*8;
 	
 	union {
 		uint8_t bits_inline[n_inline/8];
@@ -902,5 +906,7 @@ public:
 ALLINTS(X)
 #undef X
 
+class cstring;
+extern template class array<cstring>;
 class string;
 extern template class array<string>;

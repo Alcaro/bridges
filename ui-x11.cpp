@@ -240,15 +240,15 @@ int main(int argc, char** argv)
 			              &in.mousex, &in.mousey, &flags);
 			if (in.mousex >= 0 && in.mousey >= 0 && in.mousex < 640 && in.mousey < 480)
 			{
-				in.mouseclick = (flags & Button1Mask);
-				in.rmouseclick = (flags & Button3Mask); // why is right 3, middle should be 3
+				in.lmousebutton = (flags & Button1Mask);
+				in.rmousebutton = (flags & Button3Mask); // why is right 3, middle should be 3
 			}
 			else
 			{
 				in.mousex = -1;
 				in.mousey = -1;
-				in.mouseclick = false;
-				in.rmouseclick = false;
+				in.lmousebutton = false;
+				in.rmousebutton = false;
 			}
 			
 #ifdef ARLIB_OPT

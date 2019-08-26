@@ -89,7 +89,7 @@ void DNS::resolve(cstring domain, unsigned timeout_ms, function<void(string doma
 	packet.u16b(0x0001); // class IN
 	//judging by musl libc, there's no way to ask for both ipv4 and ipv6 but not everything else, it sends two separate queries
 	
-	sock->send(packet.out());
+	sock->send(packet.finish());
 	
 	query& q = queries.get_create(trid);
 	q.callback = callback;

@@ -142,6 +142,13 @@ public:
 	bool popup_closed_with_kb;
 	bool seen_random_tutorial = false;
 	
+	~game_impl()
+	{
+#ifdef ARLIB_THREAD
+		delete gamegen_core;
+#endif
+	}
+	
 	
 	void init()
 	{
@@ -232,8 +239,8 @@ public:
 		if (title_frame > 60)
 		{
 			res.smallfont.scale = 1;
-			out.insert_text(200, 195, res.smallfont, "keybol 2010");
-			out.insert_text(380, 195, res.smallfont, "Alcaro 2018");
+			out.insert_text(198, 196, res.smallfont, "keybol 2010");
+			out.insert_text(350, 196, res.smallfont, "Alcaro 2018-2019");
 			
 			if (in.mousex > 238 && in.mousex < 406 && in.mousey > 309 && in.mousey < 388)
 			{
@@ -1410,9 +1417,9 @@ to_title(); //TODO
 			this->in = in;
 		
 		this->in_press = (in.keys & ~this->in.keys);
-		if (in.mouseclick && !this->in.mouseclick)
+		if (in.lmousebutton && !this->in.lmousebutton)
 			this->in_press |= 1<<k_click;
-		if (in.rmouseclick && !this->in.rmouseclick)
+		if (in.rmousebutton && !this->in.rmousebutton)
 			this->in_press |= 1<<k_rclick;
 		this->prev_in = this->in;
 		this->in = in;

@@ -857,7 +857,7 @@ uint64_t gamemap::generator::pack()
 		ret = n_valid ? best_seed : 0;
 	}
 	
-	sem.release(); // in case some noob decides to call finish() multiple times
+	sem.release(); // in case some noob decides to call pack() multiple times
 	return ret;
 }
 
