@@ -312,8 +312,8 @@ public:
 	
 	//Whether the string matches a glob pattern. ? in 'pat' matches any one byte, * matches zero or more bytes.
 	//NUL bytes are treated as any other byte, in both strings.
-	bool matches_glob(cstring pat) const __attribute__ ((pure));
-	bool matches_globi(cstring pat) const __attribute__ ((pure)); // Case insensitive. Considers ASCII only, øØ are considered nonequal.
+	bool matches_glob(cstring pat) const __attribute__((pure));
+	bool matches_globi(cstring pat) const __attribute__((pure)); // Case insensitive. Considers ASCII only, øØ are considered nonequal.
 	
 	size_t hash() const { return ::hash((char*)ptr(), length()); }
 	
@@ -510,7 +510,7 @@ private:
 	friend class charref;
 	
 public:
-	//Reading the NUL terminator is fine. Writing extends the string. Poking outside the string is undefined.
+	//Reading the NUL terminator is fine. Writing the terminator extends the string. Poking beyond the NUL is undefined.
 	//charref operator[](uint32_t index) { return charref(this, index); }
 	charref operator[](int index) { return charref(this, index); }
 	//char operator[](uint32_t index) const { return getchar(index); }

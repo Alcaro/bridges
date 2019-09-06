@@ -275,7 +275,7 @@ uint32_t rand_coprime(uint32_t to)
 	return ret;
 }
 
-//Ignores allow_multi, difficulty and quality.
+//Ignores allow_ambiguous, difficulty and quality.
 void generate_one(uint64_t seed)
 {
 	rand.seed(seed);
@@ -442,7 +442,7 @@ void generate_one(uint64_t seed)
 				//   (towalk=2 is always true somewhere unless the island initially was a 2x2,
 				//     which is a pointless restriction, so it must be allowed)
 				//- none of the eight surrounding tiles has the same root node
-				//- allow_multi is true, or this one is not beside a castle of the same color
+				//- allow_ambiguous is true, or this one is not beside a castle of the same color
 				//then a castle can be placed here
 				
 				uint16_t index = y*100+x;
@@ -482,9 +482,9 @@ void generate_one(uint64_t seed)
 				if (y < map.height-1 && map.get(index+200).population >= 0 && map.get(index+200).rootnode == root) continue;
 				if (y < map.height-1 && map.get(index+201).population >= 0 && map.get(index+201).rootnode == root) continue;
 				
-				//- allow_multi is true, or this one is not beside a castle of the same color
+				//- allow_ambiguous is true, or this one is not beside a castle of the same color
 				//(TODO: allow, but force zero bridges that way)
-				if (!par.allow_multi)
+				if (!par.allow_ambiguous)
 				{
 					for (int tile=0;tile<4;tile++)
 					{
@@ -756,7 +756,7 @@ void gamemap::generator::do_work(workitem& w, gamemap& map)
 	//if (!map.finished()) abort();
 	w.valid = true;
 	if (map.numislands <= 1 && par.width*par.height >= 5) w.valid = false;
-	if (!par.allow_multi && map.solve_another()) w.valid = false;
+	if (!par.allow_ambiguous && map.solve_another()) w.valid = false;
 	
 	if (w.valid) w.diff = map.difficulty();
 }

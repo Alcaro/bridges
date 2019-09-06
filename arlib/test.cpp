@@ -392,6 +392,7 @@ int main(int argc, char* argv[])
 		numtests_iter = numtests_iter->next;
 	}
 	
+	bool show_verbose = (all_tests || numtests < 8);
 	for (int pass = 0; pass < (run_twice ? 2 : 1); pass++)
 	{
 		int count[err_ntype]={0};
@@ -406,7 +407,7 @@ int main(int argc, char* argv[])
 			testnum++;
 			testlist* next = cur_test->next;
 			
-			if (all_tests)
+			if (show_verbose)
 				printf("Testing %s (%s:%d)... ", cur_test->name, cur_test->filename, cur_test->line);
 			else
 				printf(ESC_ERASE_LINE "Test %d/%d (%s)... ", testnum, numtests, cur_test->name);
@@ -435,7 +436,7 @@ int main(int argc, char* argv[])
 				result = e;
 			}
 			
-			if (all_tests && result == err_ok) puts("pass");
+			if (show_verbose && result == err_ok) puts("pass");
 			count[result]++;
 			cur_test = next;
 		}

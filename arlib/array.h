@@ -19,11 +19,7 @@ protected:
 protected:
 	//must be functions, Clang won't like it otherwise
 	static bool trivial_cons() { return std::is_trivial<T>::value; } // constructor is memset(0)
-#if __GNUC__ >= 5
 	static bool trivial_copy() { return std::is_trivially_copyable<T>::value; } // copy constructor is memcpy
-#else
-	static bool trivial_copy() { return trivial_cons(); }
-#endif
 	//static const bool trivial_comp = std::has_unique_object_representations<T>::value;
 	static bool trivial_comp() { return std::is_integral<T>::value; } // equality comparison is memcmp
 	//don't care about destructor being trivial

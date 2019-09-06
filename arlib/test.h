@@ -252,11 +252,9 @@ void socket_test_http(socket* sock, runloop* loop);
 void socket_test_fail(socket* sock, runloop* loop);
 #endif
 
-#ifdef __linux__
-# define HAVE_VALGRIND
-#endif
-#ifdef HAVE_VALGRIND
-# include "deps/valgrind/memcheck.h"
+#if __has_include(<valgrind/memcheck.h>)
+# include <valgrind/memcheck.h>
 #else
 # define RUNNING_ON_VALGRIND false
+# define VALGRIND_PRINTF_BACKTRACE(...) abort()
 #endif

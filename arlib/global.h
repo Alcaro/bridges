@@ -480,15 +480,15 @@ template<typename T> static inline T bitround(T in)
 	if (sizeof(T) == 8) return 1 + ((~(uint64_t)0) >> __builtin_clzll(in-1));
 	abort();
 #endif
-	
 	//TODO: https://stackoverflow.com/q/355967 for msvc
+	
 	in--;
 	in |= in>>1;
 	in |= in>>2;
 	in |= in>>4;
-	in |= in>>(sizeof(in)>1 ?  8 : 0); // ?: rather than if() to avoid 'shift amount out of range' warnings if the condition is false
-	in |= in>>(sizeof(in)>2 ? 16 : 0); // may be gcc bug, but let's just work around it
-	in |= in>>(sizeof(in)>4 ? 32 : 0);
+	if constexpr (sizeof(in) > 1) in |= in>>8;  // silly ifs to avoid 'shift amount out of range' warnings if the condition is false
+	if constexpr (sizeof(in) > 2) in |= in>>16; // arguably a gcc bug, but hard to avoid false positives
+	if constexpr (sizeof(in) > 4) in |= in>>32;
 	in++;
 	return in;
 }

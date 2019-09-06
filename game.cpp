@@ -415,7 +415,7 @@ public:
 		p.use_reef = true;
 		p.use_large = true;
 		//p.use_castle = true;
-		//p.allow_multi = true;
+		//p.allow_ambiguous = true;
 		//p.allow_dense = true;
 		
 		if (id == 100)
@@ -1417,9 +1417,9 @@ to_title(); //TODO
 			this->in = in;
 		
 		this->in_press = (in.keys & ~this->in.keys);
-		if (in.lmousebutton && !this->in.lmousebutton)
+		if (in.lmousedown && !this->in.lmousedown)
 			this->in_press |= 1<<k_click;
-		if (in.rmousebutton && !this->in.rmousebutton)
+		if (in.rmousedown && !this->in.rmousedown)
 			this->in_press |= 1<<k_rclick;
 		this->prev_in = this->in;
 		this->in = in;

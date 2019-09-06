@@ -53,11 +53,19 @@ private:
 	class arg_str : public arg_t<arg_str> {
 		friend class argparse;
 		
-		arg_str(bool* has_target, string* target) : arg_t(has_target, true), has_target(has_target), target(target) {}
+		arg_str(bool* has_target, string* target) : arg_t(has_target, true), has_target(has_target), target(target)
+		{
+			if (has_target) *has_target = false;
+		}
 		~arg_str() {}
 		bool* has_target;
 		string* target;
-		bool parse(bool has_value, cstring arg) { if (has_target) *has_target = true; if (has_value) *target = arg; return true; }
+		bool parse(bool has_value, cstring arg)
+		{
+			if (has_target) *has_target = true;
+			if (has_value) *target = arg;
+			return true;
+		}
 	public:
 		//none
 	};
@@ -202,12 +210,19 @@ public:
 	bool has_gui() { return m_has_gui; }
 	
 private:
+	enum arglevel_t {
+		al_none, // no argument available
+		al_loose, // -f bar, --foo bar; if the option requires an argument, use it; if not, that's the next word
+		al_tight, // -fbar;             if the option can take an argument, use it; if not, that's the next option
+		al_mandatory // --foo=bar;      argument must be used, otherwise error
+	};
+	
 	string get_usage();
 	void usage();
 	void error(cstring why);
-	void single_arg(arg_base& arg, cstring value, bool must_use_value, bool* used_value);
-	void single_arg(cstring name, cstring value, bool must_use_value, bool* used_value);
-	void single_arg(char sname, cstring value, bool must_use_value, bool* used_value);
+	void single_arg(arg_base& arg, const char * value, arglevel_t arglevel, bool* used_value);
+	void single_arg(cstring name, const char * value, arglevel_t arglevel, bool* used_value);
+	void single_arg(char sname, const char * value, arglevel_t arglevel, bool* used_value);
 	
 public:
 	//The handler should not return; if it does, the default handler (print error to stderr and terminate) is called.
@@ -218,9 +233,6 @@ public:
 	}
 	
 private:
-	//if the next argument is an option (starts with - and is not just -), don't use it
-	const char * next_if_appropriate(const char * arg);
-	
 	void parse_pre(const char * const * argv);
 	void parse_post(); // Remember to set m_has_gui.
 	

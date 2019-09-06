@@ -1,7 +1,5 @@
 #include "arlib.h"
 
-extern const char * const game_maps[];
-
 class game : nocopy {
 public:
 	
@@ -10,8 +8,8 @@ public:
 	struct input {
 		int mousex; // if the mouse is not in the game window, use x=-1 y=-1 click=false
 		int mousey;
-		bool lmousebutton;
-		bool rmousebutton;
+		bool lmousedown;
+		bool rmousedown;
 		
 		uint8_t keys; // format: 1<<k_up | 1<<k_confirm
 	};
@@ -29,8 +27,9 @@ public:
 	//All 640*480 pixels will be overwritten. They will be written non-sequentially, multiple times, and may be read.
 	//Return value:
 	// 1 - the frame was rendered
-	// 0 - the frame wasn't rendered, the previous one should be shown for another 16ms.
-	// -1 - the frame wasn't rendered, and there are no ongoing animations; the previous frame should be shown until the next user input
+	// 0 - the frame wasn't rendered, the previous one should be shown for another 16ms
+	// -1 - the frame wasn't rendered, and there are no ongoing animations;
+	//        the previous frame should be shown until the next user input, and there's no need to call run() until then
 	//For the latter two, 'out' remains unchanged; caller is allowed to put the previous frame there and rerender that.
 	//If can_skip is false, return value is always 1.
 	virtual int run(const input& in, image& out, bool can_skip = false) = 0;
@@ -144,7 +143,7 @@ public:
 		bool use_castle; // Include castles in the returned map. If use_large is false, castles are the only large islands.
 		                 // If set, size must be at least 3x3.
 		
-		bool allow_multi; // Allow returning a map with multiple valid solutions. Not recommended.
+		bool allow_ambiguous; // Allow returning a map with multiple valid solutions. Not recommended.
 		float difficulty; // Use a value between 0.0 and 1.0. Higher is harder.
 		                  // The lowest possible values are mostly silly maps with only two islands,
 		                  // because all possible slots nearby are taken by reefs.
@@ -212,3 +211,5 @@ public:
 	
 	string serialize(); // Passing this return value to init() will recreate the map (minus placed bridges).
 };
+
+extern const char * const game_maps[];

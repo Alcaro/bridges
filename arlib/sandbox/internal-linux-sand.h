@@ -3,8 +3,9 @@
 //this is not done here, to allow recvmsg/sendmsg to be redefined
 //#include <sys/socket.h>
 
-//kernel features that aren't used yet, but may be useful here, or the base process:
-//[5.1 / april 2019] pidfd_send_signal
+//kernel features that aren't used yet, but may be useful here, or the underlying process module:
+//[5.0 / march 2019] SECCOMP_RET_USER_NOTIF - one SIGSYS/sigreturn less, but seems less powerful. Worth investigating, at least.
+//[5.1 / may 2019] pidfd_send_signal
 //[5.2 / july 2019] clone(CLONE_PIDFD)
 //[5.3 / unreleased] select() on pidfd, and reading exit status
 //  these three would allow deleting the SIGCHLD handler, killing some nasty code and likely fixing a few corner cases
@@ -16,7 +17,7 @@
 //  this will improve performance by not involving broker for the vast majority of open()s
 //  it's still open/openat/sigreturn, but it's way better than open/sendto/recvfrom/openat/sendmsg/recvmsg/sigreturn
 //  can only be used for readonly open, max_write is mandatory
-//[unavailable] various BPF thingies
+//[unavailable] eBPF
 //  moving some policy from broker to BPF would be an improvement
 //  but to my knowledge, non-classic BPF is still root only (CLONE_NEWUSER isn't enough)
 

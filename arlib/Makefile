@@ -58,6 +58,7 @@ endif
 
 ifneq ($(filter $(MAKECMDGOALS),test test-all test-all-twice check),)
   SELFTEST = 1
+  EXCEPTIONS = 1
 endif
 
 ARTYPE ?= exe
@@ -90,11 +91,9 @@ CCXXFLAGS = -fvisibility=hidden -Wall -Wmissing-declarations -Wimplicit-fallthro
 #doesn't seem to do anything, and CFLAGS is used for c++ too which throws warnings all over
 #CFLAGS += -Wmissing-prototypes
 ifneq ($(EXCEPTIONS),1)
-  ifneq ($(SELFTEST),1)
-    CCXXFLAGS += -fno-exceptions
-    ifeq ($(OS),windows)
-      CONF_LFLAGS += -static-libgcc
-    endif
+  CCXXFLAGS += -fno-exceptions
+  ifeq ($(OS),windows)
+    CONF_LFLAGS += -static-libgcc
   endif
 else
   OPTFLAGS += -fno-enforce-eh-specs
@@ -355,15 +354,13 @@ TRUE_CFLAGS := -std=c99 $(CCXXFLAGS) $(CONF_CFLAGS) $(CFLAGS)
 # C++ version policy: I will switch to a newer version of C++ only if it adds something that
 # - considerably simplifies existing code (everything is doable without that, some things are less painful than others)
 # - works on the default compiler on current Debian stable, latest Ubuntu LTS, and whatever other computers I have at the moment
-# - is functional and non-experimental on a finalized -std= version (c++11 is final, c++0x isn't)
+# - is functional and non-experimental in a finalized -std= version (c++11 is final, c++0x isn't)
 #    it's fine if not every part of that language version is supported in that compiler version
 # I will not switch C++ version because a dependency needs that. Instead, I'll reinvent or clone the dependency.
-# C++14 offers one useful feature, which is not big enough to switch for:
-#   std::<trait>_v (rather than std::<trait>::value)
-# C++17 offers plenty of useful features, and I will switch once Debian 10 releases with a GCC newer than 6.3 on July 6:
+# C++17 offers plenty of useful features, which I will switch to once I find where they belong
 #   template<auto val> (for the function<> member binder, that macro sucks. Though bind_this will likely always be a macro)
 #   Guaranteed copy elision
-#   constexpr if (for the min function, and probably a few others)
+#   constexpr if (for the min and bitround functions, and probably a few others)
 #   Structured binding (auto [ x, y ] = foo() - use in function::decompose)
 #   __has_include (for valgrind.h)
 # The following features would be useful; if enough of them show up, I will switch:
@@ -386,10 +383,10 @@ TRUE_CFLAGS := -std=c99 $(CCXXFLAGS) $(CONF_CFLAGS) $(CFLAGS)
 # The following may or may not be usable, depending on the exact details:
 #   C++2a coroutines (more useful for bsnes than for me; some of my callbacks could become coroutines, but I don't yet know how many)
 #   C++2a modules (it's very easy to produce a bad module system, I don't know if this one avoids the pitfalls)
-# Most other stuff I've seen proposed is uninteresting.
+# Other stuff I've seen proposed is uninteresting, though I haven't seen all proposals.
 # I'm not interested in library features. Most of them lack important functionality, have bad constant factors, and bloat the binary.
 # The compiler-magic ones, like std::move and type traits, do one thing and do it well, and optimize to nothing. I use them.
-TRUE_CXXFLAGS := -std=c++11 -fno-rtti $(CCXXFLAGS) $(CONF_CXXFLAGS) $(CXXFLAGS)
+TRUE_CXXFLAGS := -std=c++17 -fno-rtti $(CCXXFLAGS) $(CONF_CXXFLAGS) $(CXXFLAGS)
 TRUE_LFLAGS := $(LFLAGS) -fvisibility=hidden $(CONF_LFLAGS)
 
 #On Windows, cleaning up the object directory is expected to be done with 'del /q obj\*' in a batch script.

@@ -93,7 +93,7 @@ int main(int argc, char** argv)
 				par.use_reef = false;
 				par.use_large = false;
 				par.use_castle = false;
-				par.allow_multi = true;
+				par.allow_ambiguous = true;
 				par.difficulty = 0.0;
 				par.quality = 1;
 				
@@ -240,15 +240,15 @@ int main(int argc, char** argv)
 			              &in.mousex, &in.mousey, &flags);
 			if (in.mousex >= 0 && in.mousey >= 0 && in.mousex < 640 && in.mousey < 480)
 			{
-				in.lmousebutton = (flags & Button1Mask);
-				in.rmousebutton = (flags & Button3Mask); // why is right 3, middle should be 3
+				in.lmousedown = (flags & Button1Mask);
+				in.rmousedown = (flags & Button3Mask); // why is right 3, middle should be 3
 			}
 			else
 			{
 				in.mousex = -1;
 				in.mousey = -1;
-				in.lmousebutton = false;
-				in.rmousebutton = false;
+				in.lmousedown = false;
+				in.rmousedown = false;
 			}
 			
 #ifdef ARLIB_OPT

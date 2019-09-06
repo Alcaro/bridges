@@ -176,11 +176,6 @@ bool debug_or_abort()
 #include <unistd.h>
 #include <fcntl.h>
 
-//defined by test.h - not completely appropriate, but it is test related
-#ifndef HAVE_VALGRIND
-#define VALGRIND_PRINTF_BACKTRACE(...) ;
-#endif
-
 //method from https://src.chromium.org/svn/trunk/src/base/debug/debugger_posix.cc
 static bool has_debugger()
 {

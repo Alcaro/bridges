@@ -21,10 +21,9 @@ void malloc_fail(size_t size)
 void* operator new(std::size_t n) _GLIBCXX_THROW(std::bad_alloc) { return malloc(n); }
 void operator delete(void* p) noexcept { free(p); }
 #if __cplusplus >= 201402
-void operator delete(void* p, std::size_t n) noexcept { free(p); }
-#endif
-#if __cplusplus >= 201703
-void* operator new(std::size_t n, std::align_val_t al)
+//Valgrind 3.13 overrides operator delete(void*), but not delete(void*,size_t)
+//do not inline into free(p) until it does
+void operator delete(void* p, std::size_t n) noexcept { operator delete(p); }
 #endif
 #endif
 

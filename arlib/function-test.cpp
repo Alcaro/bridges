@@ -26,9 +26,16 @@ int adder::n_adders = 0;
 template<typename Tr, typename... Ta>
 void assert_decompose(function<Tr(Ta...)> fn, bool allowed = true)
 {
-	Tr(*func)(void*, Ta...);
-	void* ctx;
-	assert_eq(fn.try_decompose(&func, &ctx), allowed);
+	Tr(*no_func)(void*, Ta...) = nullptr;
+	auto [ safe, func, ctx ] = fn.try_decompose();
+	assert_eq(safe, allowed);
+	assert_neq(func, no_func);
+	if (allowed)
+	{
+		auto [ func2, ctx2 ] = fn.decompose();
+		assert(func2 == func);
+		assert(ctx2 == ctx);
+	}
 }
 }
 
@@ -160,9 +167,9 @@ test("function", "", "function")
 		assert_eq(sizeof(val_bind), sizeof(int));
 		assert_eq(sizeof(ref_bind), sizeof(int*));
 		
-		assert_eq(std::is_trivially_move_constructible<decltype(no_bind)>::value, true);
-		assert_eq(std::is_trivially_move_constructible<decltype(val_bind)>::value, true);
-		assert_eq(std::is_trivially_move_constructible<decltype(ref_bind)>::value, true);
+		assert_eq(std::is_trivially_move_constructible_v<decltype(no_bind)>, true);
+		assert_eq(std::is_trivially_move_constructible_v<decltype(val_bind)>, true);
+		assert_eq(std::is_trivially_move_constructible_v<decltype(ref_bind)>, true);
 	}
 	
 	/*
