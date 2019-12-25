@@ -11,6 +11,11 @@
     generator isn't enough, I want a few mainlands
     make sure to introduce the new objects in a reasonable way
     ideally, there should be three new worlds with three tilesets; one can be sandy, fg5 can be same as fg0, and the last one is undecided
+    ideas:
+     - map where the entire edge is islands, interior is blank (which direction do they run?)
+     - map that's a checkerboard of islands, except the middle is a plus-shaped island
+     - map with only even-numbered bridges - maybe even only 2s
+     - map with a 7 in the middle, connecting to 4s and 5s at the edges
 - solver.cpp: Implement hint system (remove all incorrect bridges?)
 - solver.cpp: Maps should be considered unambiguous if all solutions have the same number of bridges between islands A and B,
     to avoid handing out "this one is either 0 or 4" hints to people who know how generator works
@@ -23,5 +28,5 @@
     alternatively, just leave it like this, generator will never be perfect
 - resources/kbfocus.png: Needs to be redrawn
 - resources/castle.png: Needs to be redrawn
-- resources/reef.png: Needs to be redrawn, and applicable help messages redrawn
+- resources/reef.png: Needs to be redrawn, and applicable help messages adjusted
 - ui-libretro.cpp: Should be created

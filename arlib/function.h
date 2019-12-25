@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <utility>
+#include <type_traits>
 
 #ifdef __GNUC__
 #define LIKELY(expr)    __builtin_expect(!!(expr), true)
@@ -77,14 +78,14 @@ class function<Tr(Ta...)> {
 	}
 	
 	template<typename Tl>
-	typename std::enable_if< std::is_convertible_v<Tl, Tfpr>>::type
+	typename std::enable_if_t< std::is_convertible_v<Tl, Tfpr>>
 	init_lambda(Tl lambda)
 	{
 		init_free(lambda);
 	}
 	
 	template<typename Tl>
-	typename std::enable_if<!std::is_convertible_v<Tl, Tfpr>>::type
+	typename std::enable_if_t<!std::is_convertible_v<Tl, Tfpr>>
 	init_lambda(Tl lambda)
 	{
 		if (std::is_trivially_move_constructible_v<Tl> &&
@@ -132,9 +133,9 @@ public:
 	
 	template<typename Tl>
 	function(Tl lambda,
-	         typename std::enable_if< // no is_invocable_r until c++17
-	            std::is_convertible_v<decltype(std::declval<Tl>()(std::declval<Ta>()...)), Tr>
-	         , dummy>::type ignore = dummy())
+	         typename std::enable_if_t<
+	            std::is_invocable_r_v<Tr, Tl, Ta...>
+	         , dummy> ignore = dummy())
 	{
 		init_lambda(std::forward<Tl>(lambda));
 	}
@@ -142,9 +143,9 @@ public:
 	template<typename Tl, typename Tc>
 	function(Tl lambda,
 	         Tc* ctx,
-	         typename std::enable_if<
-	            std::is_convertible_v<decltype(std::declval<Tl>()(std::declval<Tc*>(), std::declval<Ta>()...)), Tr>
-	         , dummy>::type ignore = dummy())
+	         typename std::enable_if_t<
+	            std::is_invocable_r_v<Tr, Tl, Tc*, Ta...>
+	         , dummy> ignore = dummy())
 	{
 		this->func = (Tfp)(Tr(*)(Tc*, Ta...))lambda;
 		this->ctx = (void*)ctx;
@@ -154,9 +155,9 @@ public:
 	function(Tl lambda,
 	         Tc* ctx,
 	         void(*destruct)(void* ctx),
-	         typename std::enable_if<
-	            std::is_convertible_v<decltype(std::declval<Tl>()(std::declval<Tc*>(), std::declval<Ta>()...)), Tr>
-	         , dummy>::type ignore = dummy())
+	         typename std::enable_if_t<
+	            std::is_invocable_r_v<Tr, Tl, Tc*, Ta...>
+	         , dummy> ignore = dummy())
 	{
 		this->func = (Tfp)(Tr(*)(Tc*, Ta...))lambda;
 		this->ctx = (void*)ctx;
@@ -200,31 +201,27 @@ public:
 	//The function object owns memory if it refers to a lambda binding more than sizeof(void*) bytes.
 	//In typical cases (a member function, or a lambda binding 'this' or nothing), this is safe.
 	//If you want to decompose but keep the object alive, use try_decompose.
+private:
 	struct binding {
-		Tfp func;
+		bool safe;
+		Tfp fp;
 		void* ctx;
-		operator bool() { return func; }
+		operator bool() { return safe; }
 	};
+public:
 	binding decompose()
 	{
-		if (ref) abort();
-		return binding{ func, ctx };
+		if (ref) __builtin_trap();
+		return { !ref, func, ctx };
 	}
 	
 	//Like the above, but assumes you will keep the object alive, so it always succeeds.
 	//Potentially useful to skip a level of indirection when wrapping a C callback into an Arlib
 	// class, but should be avoided under most circumstances. Direct use of a C API can know what's
 	// being bound, and can safely use the above instead.
-	//Returns true if the function object is safe, i.e. doesn't actually need to remain alive.
-	struct try_binding {
-		bool safe;
-		Tfp func;
-		void* ctx;
-		operator bool() { return safe; }
-	};
-	try_binding try_decompose()
+	binding try_decompose()
 	{
-		return try_binding{ !ref, func, ctx };
+		return { !ref, func, ctx };
 	}
 	
 	//TODO: reenable, and add a bunch of static asserts that every type (including return) is either unchanged,
@@ -279,7 +276,7 @@ fn_wrap(Tr(Tc::*)(Ta...) const)
 	return memb_rewrap_const<Tc, Tr, Ta...>();
 }
 
-#define bind_ptr(fn, ptr) (fn_wrap(fn).get<fn>(ptr))
+#define bind_ptr(fn, ptr) (fn_wrap(fn).template get<fn>(ptr))
 #define bind_this(fn) bind_ptr(fn, this) // reminder: bind_this(&classname::function), not bind_this(function)
 
 //while the function template can be constructed from a lambda, I want bind_lambda(...).decompose(...) to work
@@ -300,4 +297,9 @@ bind_lambda(Tl&& l)
 {
 	return bind_lambda_core<Tl>(std::move(l), &Tl::operator());
 }
-auto decompose_lambda(auto in) { return bind_lambda(std::move(in)).decompose(); }
+
+//I could make this a compile error if the lambda can't safely destructure, but no need. it'll be immediately caught at runtime anyways
+//I could also create a swapped decompose function, userdata at end rather than start, but that'd have to
+// copy half of the function template, and the only one needing userdata at end is GTK which can swap by itself anyways.
+template<typename Tl>
+auto decompose_lambda(Tl&& l) { return bind_lambda(std::move(l)).decompose(); }

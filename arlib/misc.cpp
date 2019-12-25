@@ -19,10 +19,11 @@ void malloc_fail(size_t size)
 //  and valgrind's malloc/delete mismatch detector is also quite valuable
 #if defined(__MINGW32__) || defined(ARLIB_TESTRUNNER)
 void* operator new(std::size_t n) _GLIBCXX_THROW(std::bad_alloc) { return malloc(n); }
+__attribute__((noinline))
 void operator delete(void* p) noexcept { free(p); }
 #if __cplusplus >= 201402
 //Valgrind 3.13 overrides operator delete(void*), but not delete(void*,size_t)
-//do not inline into free(p) until it does
+//do not inline into free(p) until valgrind is fixed
 void operator delete(void* p, std::size_t n) noexcept { operator delete(p); }
 #endif
 #endif
@@ -56,4 +57,26 @@ test("test_nomalloc", "", "")
 {
 	test_skip("unfixable expected-failure");
 	if (RUNNING_ON_VALGRIND) test_expfail("Valgrind doesn't catch new within test_nomalloc, rerun with gdb or standalone");
+}
+
+static int x;
+static int y()
+{
+	using_fn(x=1, x=2)
+	{
+		assert_eq(x, 1);
+		return 42;
+	}
+}
+test("using_fn", "", "")
+{
+	x = 0;
+	using_fn(x=1, x=2)
+	{
+		assert_eq(x, 1);
+	}
+	assert_eq(x, 2);
+	x = 0;
+	assert_eq(y(), 42);
+	assert_eq(x, 2);
 }

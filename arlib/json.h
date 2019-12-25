@@ -35,23 +35,32 @@ public:
 	};
 	struct event {
 		int action;
-		string str; // or error message [TODO: actual error messages]
+		string str; // or error message (TODO: actual error messages)
 		double num;
 		
 		event() : action(unset) {}
 		event(int action) : action(action) {}
+		event(int action, string&& str) : action(action), str(std::move(str)) {}
 		event(int action, cstring str) : action(action), str(str) {}
+		event(int action, const char * str) : action(action), str(str) {} // only needed for tests
 		event(int action, double num) : action(action), num(num) {}
 	};
 	
 	//You can't stream data into this object.
-	jsonparser(cstring json) : m_data(json) {}
+	jsonparser(string&& json)
+	{
+		m_data_holder = std::move(json);
+		m_data = m_data_holder.bytes().ptr();
+		m_data_end = m_data + m_data_holder.length();
+	}
 	event next();
-	bool errored() { return m_errored; }
+	bool errored() const { return m_errored; }
 	
 private:
-	cstring m_data;
-	size_t m_pos = 0;
+	string m_data_holder;
+	const uint8_t * m_data;
+	const uint8_t * m_data_end;
+	
 	bool m_want_key = false; // true if inside {}
 	bool m_need_value = true; // true after a comma or at the start of the object
 	
@@ -69,33 +78,44 @@ private:
 
 
 //This is also streaming.
-//Calling exit() without a matching enter(), or finish() without closing every enter(), is undefined behavior.
+//It is caller's responsibility to match every enter() to the right exit() before calling finish(), and to call map_key() as appropriate.
 class jsonwriter {
 	string m_data;
 	bool m_comma = false;
 	
-	void comma() { if (m_comma) m_data += ','; m_comma = true; }
+	bool m_indent_is_value;
+	uint8_t m_indent_block;
+	uint8_t m_indent_size;
+	int m_indent_depth;
+	
+	void comma()
+	{
+		if (m_comma) m_data += ',';
+		if (UNLIKELY(m_indent_block == 0))
+		{
+			if (m_indent_is_value)
+			{
+				m_data += ' ';
+				m_indent_is_value = false;
+			}
+			else if (m_indent_depth)
+			{
+				cstring indent_str = ("        "+8-m_indent_size);
+				m_data += '\n';
+				for (int i=0;i<m_indent_depth;i++)
+				{
+					m_data += indent_str;
+				}
+			}
+		}
+		m_comma = true;
+	}
 	
 public:
-	static string strwrap(cstring s)
-	{
-		string out = "\"";
-		for (size_t i=0;i<s.length();i++)
-		{
-			uint8_t c = s[i];
-			if(0);
-			else if (c=='\n') out += "\\n";
-			else if (c=='\r') out += "\\r";
-			else if (c=='\t') out += "\\t";
-			else if (c=='\b') out += "\\b";
-			else if (c=='\f') out += "\\f";
-			else if (c=='\"') out += "\\\"";
-			else if (c=='\\') out += "\\\\";
-			else if (c < 32 || c == 0x7F) out += "\\u"+tostringhex<4>(c);
-			else out += (char)c;
-		}
-		return out+"\"";
-	}
+	jsonwriter() { m_indent_block = 1; m_indent_size = 0; }
+	// Max supported indentation depth is 8.
+	jsonwriter(int indent) { m_indent_block = (indent == 0); m_indent_size = indent; m_indent_depth = 0; m_indent_is_value = false; }
+	static string strwrap(cstring s);
 	
 	void null() { comma(); m_data += "null"; }
 	void boolean(bool b) { comma(); m_data += b ? "true" : "false"; }
@@ -103,11 +123,23 @@ public:
 	void num(int n)    { comma(); m_data += tostring(n); }
 	void num(size_t n) { comma(); m_data += tostring(n); }
 	void num(double n) { comma(); m_data += tostring(n); }
-	void list_enter() { comma(); m_data += "["; m_comma = false; }
-	void list_exit() { m_data += "]"; m_comma = true; }
-	void map_enter() { comma(); m_data += "{"; m_comma = false; }
-	void map_key(cstring s) { comma(); m_data += strwrap(s); m_data += ":"; m_comma = false; }
-	void map_exit() { m_data += "}"; m_comma = true; }
+	void list_enter() { comma(); m_data += "["; m_comma = false; if (m_indent_size) m_indent_depth++; }
+	void list_exit() { m_data += "]"; m_comma = true; m_indent_depth--; }
+	void map_enter() { comma(); m_data += "{"; m_comma = false; m_indent_depth++; }
+	void map_key(cstring s) { str(s); m_data += ":"; m_comma = false; if (m_indent_size) m_indent_is_value = true; }
+	void map_exit() { m_data += "}"; m_comma = true; m_indent_depth--; }
+	
+	// If compress(true) has been called more times than compress(false), indentation is removed.
+	// If unindented, does nothing.
+	void compress(bool enable)
+	{
+		if (!enable)
+		{
+			m_indent_block--;
+			m_indent_is_value = false;
+		}
+		else m_indent_block++;
+	}
 	
 	string finish() { return std::move(m_data); }
 };
@@ -124,15 +156,26 @@ class JSON : nocopy {
 	void construct(jsonparser& p, bool* ok, size_t maxdepth);
 	template<bool sort> void serialize(jsonwriter& w) const;
 	
-	static const JSON c_null;
+	static JSON c_null;
+	
+	const JSON& get_from_list(size_t idx) const
+	{
+		if (idx >= chld_list.size()) return c_null;
+		return chld_list[idx];
+	}
+	JSON& get_from_list(size_t idx)
+	{
+		if (idx >= chld_list.size()) return c_null;
+		return chld_list[idx];
+	}
 	
 public:
 	JSON() : ev(jsonparser::jnull) {}
 	explicit JSON(cstring s) { parse(s); }
 	
 	bool parse(cstring s);
-	string serialize() const;
-	string serialize_sorted() const;
+	string serialize(int indent = 0) const;
+	string serialize_sorted(int indent = 0) const;
 	
 	int type() const { return ev.action; }
 	
@@ -142,7 +185,7 @@ public:
 	const map<string,JSON>& assoc() const { return chld_map; }
 	//pointless overloads to allow for (JSON& item : json.list()) without an extra const
 	arrayvieww<JSON> list() { return chld_list; }
-	map<string,JSON>& assoc() { return chld_map; }
+	map<string,JSON>& assoc() { return chld_map; } // the name 'map' is taken, have to use something else
 	
 	bool boolean() const
 	{
@@ -173,6 +216,7 @@ public:
 	bool operator!=(double right) const { return num()!=right; }
 	bool operator!=(const char * right) const { return str()!=right; }
 	bool operator!=(cstring right) const { return str()!=right; }
+	
 	bool operator!() const { return !boolean(); }
 	
 #define JSONOPS(T) \
@@ -182,21 +226,22 @@ public:
 	ALLINTS(JSONOPS)
 #undef JSONOPS
 	
-	JSON& operator[](int n) { return list()[n]; }
-	JSON& operator[](size_t n) { return list()[n]; }
-	JSON& operator[](const char * s) { return assoc().get_create(s); }
-	JSON& operator[](cstring s) { return assoc().get_create(s); }
-	const JSON& operator[](int n) const { return list()[n]; }
-	const JSON& operator[](size_t n) const { return list()[n]; }
+	const JSON& operator[](int n) const { return get_from_list(n); }
+	const JSON& operator[](size_t n) const { return get_from_list(n); }
 	const JSON& operator[](const char * s) const { return assoc().get_or(s, c_null); }
 	const JSON& operator[](cstring s) const { return assoc().get_or(s, c_null); }
 	
-	JSON& operator[](const JSON& right)
+	JSON& operator[](int n) { return get_from_list(n); }
+	JSON& operator[](size_t n) { return get_from_list(n); }
+	JSON& operator[](const char * s) { return assoc().get_or(s, c_null); }
+	JSON& operator[](cstring s) { return assoc().get_or(s, c_null); }
+	
+	const JSON& operator[](const JSON& right) const
 	{
-		if (right.ev.action == jsonparser::str) return assoc().get_create(right.ev.str);
+		if (right.ev.action == jsonparser::str) return assoc().get_or(right.ev.str, c_null);
 		else return list()[right.ev.num];
 	}
-	const JSON& operator[](const JSON& right) const
+	JSON& operator[](const JSON& right)
 	{
 		if (right.ev.action == jsonparser::str) return assoc().get_or(right.ev.str, c_null);
 		else return list()[right.ev.num];
@@ -208,7 +253,7 @@ public:
 	double& num() { ev.action = jsonparser::num; return ev.num; }
 	string& str() { ev.action = jsonparser::str; return ev.str; }
 	array<JSON>& list() { ev.action = jsonparser::enter_list; return chld_list; }
-	map<string,JSON>& assoc() { ev.action = jsonparser::enter_map; return chld_map; } // 'map' is taken
+	map<string,JSON>& assoc() { ev.action = jsonparser::enter_map; return chld_map; }
 	
 	operator double() { return num(); }
 	operator string&() { return str(); }
@@ -226,7 +271,7 @@ public:
 	ALLINTS(JSONOPS)
 #undef JSONOPS
 	
-	//these aren't JSONw, but it works
+	//these technically aren't JSONw, but they act like them
 	JSONw& operator[](int n) { return *(JSONw*)&(list()[n]); }
 	JSONw& operator[](size_t n) { return *(JSONw*)&(list()[n]); }
 	JSONw& operator[](const char * s) { return *(JSONw*)&(assoc().get_create(s)); }

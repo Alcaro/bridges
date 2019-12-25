@@ -44,12 +44,6 @@ public:
 	//Like the above, but does not validate the certificate. Generally a bad idea. Does not exist under all SSL backends.
 	static socket* wrap_ssl_raw_noverify(socket* inner, runloop* loop);
 	
-#ifdef __unix__
-	//Acts like a socket. fds can be -1, meaning that end will never report activity. Having both be -1 is allowed but pointless.
-	//Takes ownership of the fds.
-	static socket* create_from_pipe(int read, int write, runloop* loop);
-#endif
-	
 	
 	enum {
 		e_lazy_dev = -1, // Whoever implemented this socket handler was lazy. Treat it as e_broken or an unknown error.
@@ -101,7 +95,7 @@ public:
 	// Network byte order.
 	static string ip_to_string(arrayview<byte> bytes);
 	static array<byte> string_to_ip(cstring str);
-	// The buffer must be at least 16 bytes. Returns bytes actually used (4 or 16).
+	// The buffer must be at least 16 bytes. Returns bytes actually used (4 or 16, or 0 for error).
 	static int string_to_ip(arrayvieww<byte> out, cstring str);
 	static bool string_to_ip4(arrayvieww<byte> out, cstring str);
 	static bool string_to_ip6(arrayvieww<byte> out, cstring str);

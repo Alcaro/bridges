@@ -5,6 +5,7 @@
 #ifndef _WIN32
 #include <unistd.h> // usleep
 #define TRUE "/bin/true"
+#define FALSE "/bin/false"
 #define ECHO "/bin/echo"
 #define YES "/usr/bin/yes"
 #define LF "\n"
@@ -45,6 +46,16 @@ test("process", "array,string,runloop", "process")
 		loop->enter();
 		assert_eq(status, 0);
 		assert_eq(p.status(), 0);
+	}
+	
+	{
+		process p(loop);
+		p.onexit(break_runloop);
+		
+		assert(p.launch(FALSE));
+		loop->enter();
+		assert_eq(status, 1);
+		assert_eq(p.status(), 1);
 	}
 	
 	{
@@ -121,7 +132,7 @@ test("process", "array,string,runloop", "process")
 		process::output* err = p.set_stderr(process::output::create_buffer());
 		
 		out->callback(bind_lambda([&]() { assert_unreachable(); }));
-		err->callback(bind_lambda([&]() { assert_neq(err->read(), ""); loop->exit(); }));
+		err->callback(bind_lambda([&]() { assert_ne(err->read(), ""); loop->exit(); }));
 		
 		assert(p.launch(CAT_FILE, "nonexist.ent"));
 		
@@ -236,7 +247,7 @@ test("sandbox", "process", "sandbox")
 		loop->enter();
 		
 		assert(has_access_fail);
-		assert_neq(status, 0);
+		assert_ne(status, 0);
 	}
 	
 	{
@@ -254,6 +265,23 @@ test("sandbox", "process", "sandbox")
 		loop->enter();
 		
 		assert_eq(status, 0);
+	}
+	
+	{
+		sandproc p(loop);
+		p.onexit(break_runloop);
+		
+		p.set_access_violation_cb(bind_lambda([&](cstring path, bool write) { assert_unreachable(); } ));
+		//p.set_stdout(process::output::create_stdout());
+		//p.set_stderr(process::output::create_stderr());
+		p.fs_grant_syslibs(FALSE);
+		
+//printf("%lu\n",time_us_ne());
+		assert(p.launch(FALSE));
+//printf("%lu\n",time_us_ne());
+		loop->enter();
+		
+		assert_eq(status, 1); // ensure it can differentiate /bin/true and /bin/false, to prove it actually runs the program
 	}
 	
 	//ensure pid namespace does not interfere with PR_SET_PDEATHSIG (verify with 'ps -ef | grep cat', or TR='strace -f')

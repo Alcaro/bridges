@@ -19,7 +19,8 @@ asm = ""
 for fn in sorted(os.listdir("resources/")):
 	if fn.startswith("x-"): continue
 	with open("resources/"+fn, "rb") as f:
-		sfn,ext = fn.split(".",1)  # split on first period, not last, so 'monospace.font.png' becomes item 'monospace' of extension 'font.png'
+		# split on first period, not last, so 'monospace.font.png' becomes item 'monospace' of extension 'font.png'
+		sfn,ext = fn.split(".",1)
 		sfn = sfn
 		
 		b = bytearray(f.read())  # pointless bytearray conversion because in python2, bytes is str and indexing that is str, not int
@@ -44,6 +45,7 @@ for fn in sorted(os.listdir("resources/")):
 		
 		if use_incbin:
 			asmname = "_ZN9resources"+str(len(varname_raw))+varname_raw+"E"
+			# sticking everything in separate sections doesn't do much when the resources' constructors autodecode them, but why not
 			asm += ".section .rodata."+asmname+',"a",@progbits\n'
 			asm += ".globl "+asmname+"\n"
 			asm += ".size "+asmname+", "+str(len(b))+"\n"

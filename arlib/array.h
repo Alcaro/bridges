@@ -18,11 +18,10 @@ protected:
 	
 protected:
 	//must be functions, Clang won't like it otherwise
-	static bool trivial_cons() { return std::is_trivial<T>::value; } // constructor is memset(0)
-	static bool trivial_copy() { return std::is_trivially_copyable<T>::value; } // copy constructor is memcpy
-	//static const bool trivial_comp = std::has_unique_object_representations<T>::value;
-	static bool trivial_comp() { return std::is_integral<T>::value; } // equality comparison is memcmp
-	//don't care about destructor being trivial
+	static bool trivial_cons() { return std::is_trivial_v<T>; } // constructor is memset(0)
+	static bool trivial_copy() { return std::is_trivially_copyable_v<T>; } // copy constructor is memcpy
+	static bool trivial_comp() { return std::has_unique_object_representations_v<T>; } // equality comparison is memcmp
+	static bool trivial_dtor() { return std::is_trivially_destructible_v<T>; } // destructor does nothing
 	
 public:
 	const T& operator[](size_t n) const { return items[n]; }
@@ -100,8 +99,8 @@ public:
 	{
 		//reject reinterpret<string>()
 		//TODO: allow litend/etc, and T=string T2=cstring
-		static_assert(std::is_fundamental<T>::value);
-		static_assert(std::is_fundamental<T2>::value);
+		static_assert(std::is_fundamental_v<T>);
+		static_assert(std::is_fundamental_v<T2>);
 		
 		size_t newsize = this->count*sizeof(T)/sizeof(T2);
 		return arrayview<T2>((T2*)this->items, newsize);
@@ -214,7 +213,7 @@ public:
 		
 		char tmp[sizeof(T)];
 		memcpy(tmp, this->items+a, sizeof(T));
-		memmove(this->items+b+1, this->items+b, sizeof(T)*(a-b));
+		memcpy(this->items+a, this->items+b, sizeof(T));
 		memcpy(this->items+b, tmp, sizeof(T));
 	}
 	
@@ -424,9 +423,6 @@ public:
 	T& append(T&& item) { return insert(this->count, std::move(item)); }
 	T& append(const T& item) { return insert(this->count, item); }
 	T& append() { return insert(this->count); }
-	T& prepend(T&& item) { return insert(0, std::move(item)); }
-	T& prepend(const T& item) { return insert(0, item); }
-	T& prepend() { return insert(0); }
 	
 	void remove(size_t index)
 	{
@@ -555,7 +551,10 @@ public:
 	
 	~array()
 	{
-		for (size_t i=0;i<this->count;i++) this->items[i].~T();
+		if (!this->trivial_dtor()) // not destructing a million uint8s speeds up debug builds
+		{
+			for (size_t i=0;i<this->count;i++) this->items[i].~T();
+		}
 		free(this->items);
 	}
 	
@@ -585,6 +584,14 @@ inline array<T2> arrayview<T>::cast() const
 	for (const T& tmp : *this) ret.append(tmp);
 	return std::move(ret);
 }
+
+//Sized (or static) array - saves an allocation for string.split<N>. Other than that, not very useful.
+template<typename T, size_t N> class sarray {
+	T storage[N];
+public:
+	T& operator[](size_t n) { return storage[n]; }
+	//TODO: implement and use this
+};
 
 
 template<> class array<bool> {
@@ -637,38 +644,8 @@ protected:
 	}
 	
 	//does not resize
-	void set_slice(size_t start, size_t num, const array<bool>& other, size_t other_start)
-	{
-		if (&other == this)
-		{
-			//TODO: optimize
-			array<bool> copy = other;
-			set_slice(start, num, copy, other_start);
-			return;
-		}
-		//TODO: optimize
-		for (size_t i=0;i<num;i++)
-		{
-			set(start+i, other.get(other_start+i));
-		}
-	}
-	
-	void clear_unused(size_t nbytes)
-	{
-		size_t low = this->nbits;
-		size_t high = nbytes*8;
-		
-		//TODO: figure out what purpose this could've possibly served, given that nbytes is a multiple of 8
-		//high = (high+7)&~7; // wipe the rest of the byte, it doesn't matter
-		
-		if (low == high) return; // don't wipe bits()[8] if they're both 64
-		
-		uint8_t& byte = bits()[low/8];
-		byte &=~ (0xFF<<(low&7));
-		low = (low+7)&~7;
-		
-		memset(bits()+low/8, 0, (high-low)/8);
-	}
+	void set_slice(size_t start, size_t num, const array<bool>& other, size_t other_start);
+	void clear_unused(size_t nbytes);
 	
 	size_t alloc_size(size_t len)
 	{
@@ -697,73 +674,7 @@ public:
 		construct();
 	}
 	
-	void resize(size_t len)
-	{
-		size_t prevlen = this->nbits;
-		this->nbits = len;
-		
-		switch ((prevlen > n_inline)<<1 | (len > n_inline))
-		{
-		case 0: // small->small
-			if (len < prevlen) clear_unused(sizeof(this->bits_inline));
-			break;
-		case 1: // small->big
-			{
-				size_t newbytes = alloc_size(len);
-				uint8_t* newbits = malloc(newbytes);
-				memcpy(newbits, this->bits_inline, sizeof(this->bits_inline));
-				memset(newbits+sizeof(this->bits_inline), 0, newbytes-sizeof(this->bits_inline));
-				bits_outline = newbits;
-			}
-			break;
-		case 2: // big->small
-			{
-				uint8_t* freethis = this->bits_outline;
-				memcpy(this->bits_inline, this->bits_outline, sizeof(this->bits_inline));
-				free(freethis);
-				clear_unused(sizeof(this->bits_inline));
-			}
-			break;
-		case 3: // big->big
-			{
-				size_t prevbytes = alloc_size(prevlen);
-				size_t newbytes = alloc_size(len);
-				if (newbytes > prevbytes)
-				{
-					bits_outline = realloc(this->bits_outline, newbytes);
-					clear_unused(newbytes);
-				}
-				if (len < prevlen)
-				{
-					clear_unused(newbytes);
-				}
-			}
-			break;
-		}
-		
-//printf("%lu->%lu t=%d", prevlen, len, ((prevlen > n_inline)<<1 | (len > n_inline)));
-//size_t bytes;
-//if (len > n_inline) bytes = alloc_size(len);
-//else bytes = sizeof(bits_inline);
-//for (size_t i=0;i<bitround(bytes);i++)
-//{
-//printf(" %.2X", bits()[i]);
-//}
-//puts("");
-//bool fail=false;
-//if (len>prevlen)
-//{
-//for (size_t n=prevlen;n<len;n++)
-//{
-//	if (get(n))
-//	{
-//		printf("%lu->%lu: unexpected at %lu\n", prevlen, len, n);
-//		fail=true;
-//	}
-//}
-//}
-//if(fail)abort();
-	}
+	void resize(size_t len);
 	
 	void append(bool item)
 	{
@@ -771,24 +682,7 @@ public:
 		set(this->nbits-1, item);
 	}
 	
-	array<bool> slice(size_t first, size_t count) const
-	{
-		if ((first&7) == 0)
-		{
-			array<bool> ret;
-			ret.resize(count);
-			memcpy(ret.bits(), this->bits() + first/8, (count+7)/8);
-			return ret;
-		}
-		else
-		{
-			//TODO: optimize
-			array<bool> ret;
-			ret.resize(count);
-			for (size_t i=0;i<count;i++) ret.set(i, this->get(first+i));
-			return ret;
-		}
-	}
+	array<bool> slice(size_t first, size_t count) const;
 	
 private:
 	void destruct()
@@ -800,7 +694,7 @@ private:
 		this->nbits = 0;
 		memset(bits_inline, 0, sizeof(bits_inline));
 	}
-	void construct(const array& other)
+	void construct(const array<bool>& other)
 	{
 		nbits = other.nbits;
 		if (nbits > n_inline)
@@ -814,7 +708,7 @@ private:
 			memcpy(bits_inline, other.bits_inline, sizeof(bits_inline));
 		}
 	}
-	void construct(array&& other)
+	void construct(array<bool>&& other)
 	{
 		memcpy(this, &other, sizeof(*this));
 		other.nbits = 0;
@@ -823,18 +717,18 @@ private:
 public:
 	
 	array() { construct(); }
-	array(const array& other) { construct(other); }
-	array(array&& other) { construct(std::move(other)); }
+	array(const array<bool>& other) { construct(other); }
+	array(array<bool>&& other) { construct(std::move(other)); }
 	~array() { destruct(); }
 	
-	array& operator=(const array& other)
+	array& operator=(const array<bool>& other)
 	{
 		destruct();
 		construct(other);
 		return *this;
 	}
 	
-	array& operator=(array&& other)
+	array& operator=(array<bool>&& other)
 	{
 		destruct();
 		construct(std::move(other));
@@ -842,21 +736,6 @@ public:
 	}
 	
 	explicit operator bool() { return size(); }
-	
-	//missing maybe-useful features from the normal array:
-	
-	//array<bool> skip(size_t n) { return slice(n, size()-n); }
-	//bool contains(bool item) const
-	//bool operator==(array other) const
-	//bool operator!=(array other) const
-	//void swap(array& other)
-	//void insert(size_t index, bool item)
-	//void prepend(bool item) { insert(0, item); }
-	//void remove(size_t index)
-	//array& operator+=(const array<bool>& other)
-	//const T* begin() { return this->items; }
-	//const T* end() { return this->items+this->count; }
-	//array(nullptr_t)
 };
 
 

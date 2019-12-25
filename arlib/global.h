@@ -19,8 +19,8 @@
 #include <stdio.h>
 #include <limits.h>
 #include <inttypes.h>
-#include "function.h"
 #include <utility>
+#include "function.h"
 
 #ifdef _WIN32
 #  ifndef _WIN32_WINNT
@@ -60,8 +60,21 @@
 typedef void(*funcptr)();
 typedef uint8_t byte; // TODO: remove
 
-#define using(obj) for(bool FIRST=true;FIRST;FIRST=false)for(obj;FIRST;FIRST=false)
-//in C++17, this becomes if(obj;true)
+#define using(obj) if(obj;true)
+template<typename T> class using_holder {
+	T fn;
+	bool doit;
+public:
+	using_holder(T fn) : fn(std::move(fn)), doit(true) {}
+	using_holder(using_holder&& other) : fn(std::move(other.fn)), doit(true) { other.doit = false; }
+	~using_holder() { if (doit) fn(); }
+};
+template<typename T>
+using_holder<T> using_bind(T&& f)
+{
+	return f;
+}
+#define using_fn(ct,dt) if(auto USING = using_bind((ct, [&](){ dt; }));true)
 
 #define JOIN_(x, y) x ## y
 #define JOIN(x, y) JOIN_(x, y)
@@ -74,6 +87,7 @@ typedef uint8_t byte; // TODO: remove
 #define UNLIKELY(expr)  __builtin_expect(!!(expr), false)
 #define MAYBE_UNUSED __attribute__((__unused__)) // shut up, stupid warnings
 #define KEEP_OBJECT __attribute__((__used__)) // for static unused variables that shouldn't be optimized out
+#define forceinline inline __attribute__((always_inline))
 #else
 #define LIKELY(expr)    (expr)
 #define UNLIKELY(expr)  (expr)
@@ -82,24 +96,7 @@ typedef uint8_t byte; // TODO: remove
 #define __GNUC__ 0
 #endif
 
-//have to include these too, they include <stddef.h> and define NULL to __null, which doesn't resolve overloads properly
-#include <string.h>
-#ifdef __unix__ // fuck this shit, behave sanely gcc
-#include <unistd.h>
-#include <pthread.h>
-#include <dirent.h>
-#include <signal.h>
-#endif
-
-#undef NULL
-#define NULL nullptr
-
-#if __cplusplus < 201103
-class nullptr_t_impl {};
-#define nullptr_t nullptr_t_impl* // random pointer type nobody will ever use
-#else
 using std::nullptr_t;
-#endif
 
 //some magic stolen from http://blogs.msdn.com/b/the1/archive/2004/05/07/128242.aspx
 //C++ can be so messy sometimes...
@@ -157,7 +154,7 @@ template<typename T, size_t N> char(&ARRAY_SIZE_CORE(T(&x)[N]))[N];
 //- (FAIL) works if compiled as C (tried to design an alternate implementation and ifdef it, but nothing works inside structs)
 //- (PASS) can name assertions, if desired (only under C++11)
 #ifdef __GNUC__
-#define TYPENAME_IF_GCC typename // gcc requires this. msvc rejects this.
+#define TYPENAME_IF_GCC typename // gcc requires this, msvc requires its absense
 #else
 #define TYPENAME_IF_GCC
 #endif
@@ -259,7 +256,7 @@ inline anyptr try_calloc(size_t size, size_t count) { _test_malloc(); _test_free
 inline void malloc_assert(bool cond) { if (!cond) malloc_fail(0); }
 
 
-//if I cast it to void, that means I do not care, so shut the hell up about warn_unused_result
+//if I cast it to void, that means I do not care, so shut up about warn_unused_result
 template<typename T> static inline void ignore(T t) {}
 
 template<typename T> static T min(const T& a) { return a; }
@@ -430,7 +427,7 @@ public:
 	~destructible_lock()
 	{
 		if (!b) parent->pb = prev_pb;
-		else if (prev_pb) *prev_pb = true; // if 'b', 'parent' is poisoned
+		else if (prev_pb) *prev_pb = true; // if 'b' is true, 'parent' is dangling
 	}
 };
 #define MAKE_DESTRUCTIBLE_FROM_CALLBACK() destructible destructible_i
@@ -533,9 +530,20 @@ class initrunner {
 public:
 	initrunner(void(*fn)()) { fn(); }
 };
-#define oninit() static void oninit##__LINE__(); \
-                 static MAYBE_UNUSED initrunner initrun##__LINE__(oninit##__LINE__); \
-                 static void oninit##__LINE__()
+#define oninit() static void JOIN(oninit,__LINE__)(); \
+                 static MAYBE_UNUSED initrunner JOIN(initrun,__LINE__)(JOIN(oninit,__LINE__)); \
+                 static void JOIN(oninit,__LINE__)()
+template<void(*fn)()>
+class deinitrunner {
+public:
+	~deinitrunner() { fn(); }
+};
+#define ondeinit() static void JOIN(ondeinit,__LINE__)(); \
+                   static MAYBE_UNUSED deinitrunner<JOIN(ondeinit,__LINE__)> JOIN(deinitrun,__LINE__); \
+                   static void JOIN(ondeinit,__LINE__)()
+
+#define container_of(ptr, outer_t, member) \
+	((outer_t*)((uint8_t*)(ptr) - (offsetof(outer_t,member))))
 
 
 //If an interface defines a function to set some state, and a callback for when this state changes,

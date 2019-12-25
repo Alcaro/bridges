@@ -4,6 +4,10 @@
 #include "../os.h"
 #include "../set.h"
 #include "../init.h"
+#include "../test.h"
+#ifdef ARLIB_TESTRUNNER
+#include "../process.h"
+#endif
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
@@ -80,7 +84,7 @@ int main(int argc, char** argv)
 struct window_x11_info window_x11;
 #endif
 
-void arlib_init_gui(argparse& args, char** argv)
+void _arlib_init_gui(argparse& args, char** argv)
 {
 //struct rlimit core_limits;core_limits.rlim_cur=core_limits.rlim_max=64*1024*1024;setrlimit(RLIMIT_CORE,&core_limits);
 #ifdef DEBUG
@@ -92,6 +96,7 @@ void arlib_init_gui(argparse& args, char** argv)
 #endif
 	gtk_disable_setlocale(); // go away, you're a library like any other and have no right to mess with libc config
 	// locale sucks, it breaks my json parser and probably 999 other things
+	// for more details, see https://github.com/mpv-player/mpv/commit/1e70e82baa9193f6f027338b0fab0f5078971fbe
 	
 	int argc = 0;
 	while (argv[argc]) argc++;
@@ -154,7 +159,7 @@ void arlib_init_gui(argparse& args, char** argv)
 	if (argv[1])
 	{
 		if (argv[1][0]=='-') args.error((cstring)"unknown argument: "+argv[1]);
-		else args.error("non-arguments not supported");
+		else args.error("positional arguments not supported");
 	}
 	args.parse_post();
 	
@@ -164,14 +169,10 @@ void arlib_init_gui(argparse& args, char** argv)
 		//shitty way to detect if the error is windowing initialization or bad arguments, but gtk doesn't seem to offer anything better
 		//this is, of course, twice the fun with localization enabled
 		if (args.m_accept_cli && strstr(error->message, "annot open display"))
-		{
 			args.m_has_gui = false;
-			g_clear_error(&error);
-		}
 		else
-		{
 			args.error(error->message);
-		}
+		g_clear_error(&error);
 	}
 	
 	//gdk_window_add_filter(NULL,scanfilter,NULL);
@@ -479,6 +480,9 @@ class runloop_gtk : public runloop
 {
 public:
 	struct fd_cbs {
+#ifdef ARLIB_TESTRUNNER
+		char* valgrind_dummy = nullptr; // an uninitialized malloc(1), used to print stack trace of the guilty allocation
+#endif
 		guint source_id;
 		
 		function<void(uintptr_t)> cb_read;
@@ -487,10 +491,14 @@ public:
 	map<uintptr_t,fd_cbs> fdinfo;
 	
 	struct timer_cb {
+#ifdef ARLIB_TESTRUNNER
+		char* valgrind_dummy;
+#endif
 		guint source_id;
 		bool repeat;
 		bool inside = false;
 		bool deleted = false;
+		bool finished = false;
 		runloop_gtk* parent;
 		function<void()> callback;
 	};
@@ -519,9 +527,13 @@ public:
 		return ((runloop_gtk*)user_data)->fd_cb(fd, condition);
 	}
 	
-	uintptr_t set_fd(uintptr_t fd, function<void(uintptr_t)> cb_read, function<void(uintptr_t)> cb_write) override
+	void set_fd(uintptr_t fd, function<void(uintptr_t)> cb_read, function<void(uintptr_t)> cb_write) override
 	{
 		fd_cbs& cbs = fdinfo.get_create(fd);
+#ifdef ARLIB_TESTRUNNER
+		if (!cbs.valgrind_dummy)
+			cbs.valgrind_dummy = malloc(1);
+#endif
 		if (cbs.source_id) g_source_remove(cbs.source_id);
 		
 		guint conds = 0;
@@ -530,15 +542,16 @@ public:
 		
 		if (!conds)
 		{
+#ifdef ARLIB_TESTRUNNER
+			free(cbs.valgrind_dummy);
+#endif
 			fdinfo.remove(fd);
-			return 0;
+			return;
 		}
 		
 		cbs.source_id = g_unix_fd_add(fd, (GIOCondition)conds, &runloop_gtk::fd_cb_s, this);
 		cbs.cb_read = cb_read;
 		cbs.cb_write = cb_write;
-		
-		return cbs.source_id;
 	}
 	
 	
@@ -550,12 +563,17 @@ public:
 		cb->inside = false;
 		
 		if (cb->repeat && !cb->deleted) return G_SOURCE_CONTINUE;
-		cb->parent->remove_full(cb->source_id, false);
+		cb->finished = true;
+		if (cb->deleted)
+			cb->parent->remove_timer(cb->source_id, false);
 		return G_SOURCE_REMOVE;
 	}
-	uintptr_t set_timer_rel(unsigned ms, bool repeat, function<void()> callback) override
+	uintptr_t raw_set_timer_rel(unsigned ms, bool repeat, function<void()> callback) override
 	{
 		timer_cb& cb = timerinfo.append();
+#ifdef ARLIB_TESTRUNNER
+		cb.valgrind_dummy = malloc(1);
+#endif
 		cb.callback = callback;
 		cb.parent = this;
 		cb.repeat = repeat;
@@ -563,9 +581,12 @@ public:
 		else cb.source_id = g_timeout_add_seconds((ms+750)/1000, timer_cb_s, &cb);
 		return cb.source_id;
 	}
-	uintptr_t set_idle(function<void()> callback) override
+	uintptr_t raw_set_idle(function<void()> callback) override
 	{
 		timer_cb& cb = timerinfo.append();
+#ifdef ARLIB_TESTRUNNER
+		cb.valgrind_dummy = malloc(1);
+#endif
 		cb.callback = callback;
 		cb.parent = this;
 		cb.repeat = false;
@@ -574,18 +595,24 @@ public:
 	}
 	
 	
-	/*private*/ void remove_full(uintptr_t id, bool remove_source)
+	/*private*/ void remove_fd(uintptr_t fd, bool remove_source)
 	{
-		if (!id) return;
 		for (auto pair : fdinfo)
 		{
-			if (pair.value.source_id == id)
+			if (pair.key == fd)
 			{
 				if (remove_source) g_source_remove(pair.value.source_id);
+#ifdef ARLIB_TESTRUNNER
+				free(pair.value.valgrind_dummy);
+#endif
 				fdinfo.remove(pair.key);
 				return;
 			}
 		}
+	}
+	/*private*/ void remove_timer(uintptr_t id, bool remove_source)
+	{
+		if (!id) return;
 		for (size_t i=0;i<timerinfo.size();i++)
 		{
 			timer_cb& cb = timerinfo[i];
@@ -597,17 +624,19 @@ public:
 					return;
 				}
 				
-				if (remove_source) g_source_remove(cb.source_id);
+				if (remove_source && !cb.finished) g_source_remove(cb.source_id);
+#ifdef ARLIB_TESTRUNNER
+				free(cb.valgrind_dummy);
+#endif
 				timerinfo.remove(i);
 				return;
 			}
 		}
 		abort(); // removing nonexistent events is bad news
 	}
-	uintptr_t remove(uintptr_t id) override
+	void raw_timer_remove(uintptr_t id) override
 	{
-		remove_full(id, true);
-		return 0;
+		remove_timer(id, true);
 	}
 	
 	
@@ -693,6 +722,41 @@ public:
 			gtk_main();
 		}
 	}
+	
+#ifdef ARLIB_TESTRUNNER
+	void assert_empty() override
+	{
+		bool is_empty = true;
+	again:
+		for (auto& pair : fdinfo)
+		{
+#ifdef ARLIB_THREAD
+			if ((int)pair.key == submit_fds[0]) // leave this fd in the runloop
+				continue;
+#endif
+			if ((int)pair.key == process::sigchld_fd_test_runner_only())
+				continue;
+			
+			if (RUNNING_ON_VALGRIND)
+				free(pair.value.valgrind_dummy); // intentional double free, to make valgrind print a stack trace of the malloc
+			else
+				printf("ERROR: fd %lu left in runloop\n", pair.key);
+			remove_fd(pair.key, true);
+			is_empty = false;
+			goto again;
+		}
+		while (timerinfo.size())
+		{
+			if (RUNNING_ON_VALGRIND)
+				free(timerinfo[0].valgrind_dummy); // intentional double free
+			else
+				printf("ERROR: timer left in runloop\n");
+			remove_timer(timerinfo[0].source_id, true);
+			is_empty = false;
+		}
+		assert(is_empty);
+	}
+#endif
 };
 }
 
@@ -708,7 +772,7 @@ runloop* runloop::global()
 		//so this one most likely gets called early, while gtk is still operational
 		atexit([](){ ret->finalize(); });
 	}
-#ifdef ARLIB_TEST
+#ifdef ARLIB_TESTRUNNER
 	static runloop* ret2 = NULL;
 	if (!ret2) ret2 = runloop_wrap_blocktest(ret);
 	runloop_blocktest_recycle(ret2);
@@ -801,4 +865,11 @@ void file_find_close(void* find)
 	g_object_unref((GFileEnumerator*)find);
 }
 #endif
+
+test("","","")
+{
+	assert(!"this crashes, force fail it for now");
+	string x = file::readallt("https://cdn.discordapp.com/attachments/486247695795879946/651930602635001867/Main.txt");
+	assert_eq(x.length(), 2593);
+}
 #endif

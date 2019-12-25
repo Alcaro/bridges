@@ -57,6 +57,8 @@ enum err_t {
 };
 static err_t result;
 
+static bool show_verbose;
+
 static array<int> callstack;
 void _teststack_push(int line) { callstack.append(line); }
 void _teststack_pop() { callstack.resize(callstack.size()-1); }
@@ -123,21 +125,19 @@ static void _testfail(cstring why)
 
 void _testfail(cstring why, int line)
 {
-	result = err_fail;
 	_testfail(why+stack(line));
 }
 
 void _testcmpfail(cstring name, int line, cstring expected, cstring actual)
 {
-	result = err_fail;
-	if (expected.contains("\n") || actual.contains("\n") || name.length()+expected.length()+actual.length()>240)
+	//if (expected.contains("\n") || actual.contains("\n") || name.length()+expected.length()+actual.length() > 240)
 	{
-		_testfail("\nFailed assertion "+name+stack(line)+"\nexpected:\n"+expected+"\nactual:\n"+actual);
+		_testfail("\nFailed assertion "+name+stack(line)+"\nexpected: "+expected+"\nactual:   "+actual);
 	}
-	else
-	{
-		_testfail("\nFailed assertion "+name+stack(line)+": expected "+expected+", got "+actual);
-	}
+	//else
+	//{
+	//	_testfail("\nFailed assertion "+name+stack(line)+": expected "+expected+", got "+actual);
+	//}
 }
 
 void _test_skip(cstring why)
@@ -145,8 +145,7 @@ void _test_skip(cstring why)
 	if (result!=err_ok) return;
 	if (!all_tests)
 	{
-		//yes, dead code
-		if (all_tests) puts("skipped: "+why);
+		if (show_verbose) puts("skipped: "+why);
 		test_throw(err_skip);
 	}
 }
@@ -154,7 +153,7 @@ void _test_skip(cstring why)
 void _test_skip_force(cstring why)
 {
 	if (result!=err_ok) return;
-	if (all_tests) puts("skipped: "+why);
+	if (show_verbose) puts("skipped: "+why);
 	test_throw(err_skip);
 }
 
@@ -311,7 +310,7 @@ static testlist* list_reverse(testlist* list)
 int main(int argc, char* argv[])
 {
 	setvbuf(stdout, NULL, _IONBF, 0);
-	puts("Initializing Arlib...");
+	printf("Initializing Arlib...");
 	bool run_twice = false;
 	
 #ifdef __linux__
@@ -331,7 +330,7 @@ int main(int argc, char* argv[])
 	args.add("filter", &filter);
 	arlib_init(args, argv);
 	
-	puts("Sorting tests...");
+	printf(ESC_ERASE_LINE "Sorting tests...");
 	g_testlist = list_reverse(g_testlist); // with gcc's initializer run order, this makes them better ordered
 	
 	testlist* alltests = sort_tests(g_testlist);
@@ -353,7 +352,7 @@ int main(int argc, char* argv[])
 			}
 			if (!found)
 			{
-				puts("error: dependency on nonexistent feature");
+				puts("error: dependency on nonexistent feature "+required[i]);
 				err_print(outer);
 				abort();
 			}
@@ -379,6 +378,7 @@ int main(int argc, char* argv[])
 			}
 		}
 	}
+	g_testlist = alltests; // so valgrind doesn't report leaks
 #else
 	arlib_init(NULL, argv);
 	testlist* alltests = g_testlist;
@@ -391,8 +391,9 @@ int main(int argc, char* argv[])
 		numtests++;
 		numtests_iter = numtests_iter->next;
 	}
+	printf(ESC_ERASE_LINE);
 	
-	bool show_verbose = (all_tests || numtests < 8);
+	show_verbose = (all_tests || numtests < 8);
 	for (int pass = 0; pass < (run_twice ? 2 : 1); pass++)
 	{
 		int count[err_ntype]={0};
@@ -427,6 +428,7 @@ int main(int argc, char* argv[])
 				uint64_t end_time = time_us_ne();
 				uint64_t time_us = end_time - start_time;
 				uint64_t time_lim = (all_tests ? 5000*1000 : 500*1000);
+				runloop::global()->assert_empty();
 				if (time_us > time_lim)
 				{
 					printf("too slow: max %uus, got %uus\n", (unsigned)time_lim, (unsigned)time_us);
@@ -441,14 +443,7 @@ int main(int argc, char* argv[])
 			cur_test = next;
 		}
 		
-		printf(ESC_ERASE_LINE "Passed %d, failed %d", count[err_ok], count[err_fail]);
-		if (count[err_tooslow]) printf(", too-slow %d", count[err_tooslow]);
-		if (count[err_skip]) printf(", skipped %d", count[err_skip]);
-		if (count[err_inconclusive]) printf(", inconclusive %d", count[err_inconclusive]);
-		if (count[err_expfail]) printf(", expected-fail %d", count[err_expfail]);
-		if (n_filtered_tests) printf(", filtered %d", n_filtered_tests);
-		puts("");
-		
+		printf(ESC_ERASE_LINE);
 		for (size_t i=1;i<ARRAY_SIZE(max_latencies_us);i++)
 		{
 			uint64_t max_latency_us = (RUNNING_ON_VALGRIND ? 100 : 3) * 1000;
@@ -462,6 +457,14 @@ int main(int argc, char* argv[])
 				       max_latencies_us[i].line);
 			}
 		}
+		
+		printf("Passed %d, failed %d", count[err_ok], count[err_fail]);
+		if (count[err_tooslow]) printf(", too-slow %d", count[err_tooslow]);
+		if (count[err_skip]) printf(", skipped %d", count[err_skip]);
+		if (count[err_inconclusive]) printf(", inconclusive %d", count[err_inconclusive]);
+		if (count[err_expfail]) printf(", expected-fail %d", count[err_expfail]);
+		if (n_filtered_tests) printf(", filtered %d", n_filtered_tests);
+		puts("");
 		
 #ifdef HAVE_VALGRIND
 		if (run_twice)
@@ -489,7 +492,7 @@ void free_test(void* ptr) { _test_free(); free(ptr); }
 
 #ifdef ARLIB_TEST_ARLIB
 static int testnum = 0;
-//funny order to ensure their initializers run in a funny order
+//install them in a weird order, to ensure the sorter works
 test("tests themselves (1/8)", "", "test1")
 {
 	assert_eq(testnum, 0);

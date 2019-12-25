@@ -78,11 +78,11 @@ class bmlserializer {
 	template<typename T> friend string bmlserialize(T& item);
 	
 	template<typename T>
-	typename std::enable_if<
-		!std::is_same<
+	typename std::enable_if_t<
+		!std::is_same_v<
 			decltype(std::declval<T>().serialize(std::declval<bmlserializer&>())),
-			void* // can't find a std::can_evaluate, so check if it doesn't yield <some arbitrary type it doesn't return>
-		>::value>::type
+			void* // can't find a std::can_evaluate, so ensure that it doesn't yield <some arbitrary type it doesn't return>
+		>>
 	add_node(cstring name, T& item, int ov_resolut1) // ov_resolut1 is always 1, to enforce the desired overload resolution
 	{
 		w.enter(bmlwriter::escape(name), "");
@@ -91,22 +91,22 @@ class bmlserializer {
 	}
 	
 	template<typename T>
-	typename std::enable_if<
-		!std::is_same<
+	typename std::enable_if_t<
+		!std::is_same_v<
 			typename T::serialize_as,
 			void*
-		>::value>::type
+		>>
 	add_node(cstring name, T& item, int ov_resolut1)
 	{
 		w.node(bmlwriter::escape(name), tostring((typename T::serialize_as)item));
 	}
 	
 	template<typename T>
-	typename std::enable_if<
-		std::is_same<
+	typename std::enable_if_t<
+		std::is_same_v<
 			decltype(tostring(std::declval<T>())),
 			string
-		>::value>::type
+		>>
 	add_node(cstring name, T& item, float ov_resolut1)
 	{
 		w.node(bmlwriter::escape(name), tostring(item));
@@ -190,11 +190,11 @@ class bmldeserializer {
 	template<typename T> friend void bmldeserialize_to(cstring bml, T& to);
 	
 	template<typename T>
-	typename std::enable_if<
-		!std::is_same<
+	typename std::enable_if_t<
+		!std::is_same_v<
 			decltype(std::declval<T>().serialize(std::declval<bmlserializer&>())),
 			void*
-		>::value>::type
+		>>
 	read_item(T& out, int ov_resolut1)
 	{
 		while (pdepth >= thisdepth)
@@ -216,11 +216,11 @@ class bmldeserializer {
 	}
 	
 	template<typename T>
-	typename std::enable_if<
-		!std::is_same<
+	typename std::enable_if_t<
+		!std::is_same_v<
 			typename T::serialize_as,
 			void*
-		>::value>::type
+		>>
 	read_item(T& out, int ov_resolut1)
 	{
 		typename T::serialize_as tmp;
@@ -229,11 +229,11 @@ class bmldeserializer {
 	}
 	
 	template<typename T>
-	typename std::enable_if<
-		!std::is_same<
+	typename std::enable_if_t<
+		!std::is_same_v<
 			decltype(try_fromstring(std::declval<cstring>(), std::declval<T&>())),
 			void*
-		>::value>::type
+		>>
 	read_item(T& out, float ov_resolut1)
 	{
 		try_fromstring(thisval, out);
@@ -377,54 +377,86 @@ template<typename T> void bmldeserialize_to(cstring bml, T& to)
 
 
 
+template<int indent = 0, typename T> string jsonserialize(T& item);
+template<int indent = 0, typename T> string jsonserialize(const T& item);
+
 class jsonserializer {
 	jsonwriter w;
-	template<typename T> friend string jsonserialize(T& item);
-	template<typename T> friend string jsonserialize(const T& item);
+	template<int indent, typename T> friend string jsonserialize(T& item);
+	template<int indent, typename T> friend string jsonserialize(const T& item);
 	
-	template<typename T>
-	typename std::enable_if<
-		!std::is_same<
-			decltype(std::declval<T>().serialize(std::declval<jsonserializer&>())),
-			void*
-		>::value>::type
-	add_node(T& inner, int ov_resolut1)
+	int indent_max = 999999;
+	
+	jsonserializer(int indent) : w(indent) {}
+	
+	void list_enter()
+	{
+		w.list_enter();
+		indent_max--;
+		if (indent_max == -1) w.compress(true);
+	}
+	void list_exit()
+	{
+		if (indent_max == -1) w.compress(false);
+		indent_max++;
+		w.list_exit();
+	}
+	void map_enter()
 	{
 		w.map_enter();
-		inner.serialize(*this);
+		indent_max--;
+		if (indent_max == -1) w.compress(true);
+	}
+	void map_exit()
+	{
+		if (indent_max == -1) w.compress(false);
+		indent_max++;
 		w.map_exit();
 	}
 	
 	template<typename T>
-	typename std::enable_if<
-		!std::is_same<
+	typename std::enable_if_t<
+		!std::is_same_v<
+			decltype(std::declval<T>().serialize(std::declval<jsonserializer&>())),
+			void*
+		>>
+	add_node(T& inner, int ov_resolut1)
+	{
+		map_enter();
+		inner.serialize(*this);
+		map_exit();
+	}
+	
+	template<typename T>
+	typename std::enable_if_t<
+		!std::is_same_v<
 			typename T::serialize_as,
 			void*
-		>::value>::type
+		>>
 	add_node(const T& inner, int ov_resolut1)
 	{
 		add_node((typename T::serialize_as)inner, 1);
 	}
 	
 	template<typename T>
-	typename std::enable_if<
-		!std::is_same<
+	typename std::enable_if_t<
+		!std::is_same_v<
 			decltype(std::declval<T>()(std::declval<jsonserializer&>())),
 			void*
-		>::value>::type
+		>>
 	add_node(const T& inner, int ov_resolut1)
 	{
-		w.map_enter();
+		map_enter();
 		inner(*this);
-		w.map_exit();
+		map_exit();
 	}
 	
 	template<typename T>
-	typename std::enable_if<
-		std::is_same<
+	typename std::enable_if_t<
+		std::is_same_v<
 			decltype(tostring(std::declval<T>())),
 			string
-		>::value>::type
+		>>
 	add_node(const T& inner, float ov_resolut1)
 	{
 		add_node(tostring(inner), 1);
@@ -437,23 +469,23 @@ class jsonserializer {
 	template<typename T, size_t size>
 	void add_node(T(&inner)[size], int ov_resolut1)
 	{
-		w.list_enter();
+		list_enter();
 		for (auto& child : inner) add_node(child, 1);
-		w.list_exit();
+		list_exit();
 	}
 	
 	template<typename T> void add_node(array<T>& inner, int ov_resolut1)
 	{
-		w.list_enter();
+		list_enter();
 		for (auto& child : inner) add_node(child, 1);
-		w.list_exit();
+		list_exit();
 	}
 	
 	template<typename T> void add_node(set<T>& inner, int ov_resolut1)
 	{
-		w.list_enter();
+		list_enter();
 		for (auto& child : inner) add_node(child, 1);
-		w.list_exit();
+		list_exit();
 	}
 	
 	void add_node(bool inner, int ov_resolut1) { w.boolean(inner); }
@@ -468,30 +500,28 @@ class jsonserializer {
 	
 	template<typename T, typename Tc> void add_node(array<T>& inner, Tc& conv)
 	{
-		w.list_enter();
+		list_enter();
 		for (auto& child : inner) add_node(conv(child), 1);
-		w.list_exit();
+		list_exit();
 	}
 	
 	template<typename T, typename Tc> void add_node(set<T>& inner, Tc& conv)
 	{
-		w.list_enter();
+		list_enter();
 		for (auto& child : inner) add_node(conv(child), 1);
-		w.list_exit();
+		list_exit();
 	}
 	
 	template<typename T, typename Ts> void add_node(T& inner, Ts& ser)
 	{
-		w.map_enter();
+		map_enter();
 		ser(*this);
-		w.map_exit();
+		map_exit();
 	}
 	
 public:
 	
 	static const bool serializing = true;
-	
-	void comment(cstring c) {}
 	
 	template<typename T> void item(cstring name, T& inner) { w.map_key(name); add_node(inner, 1); }
 	template<typename T> void hex( cstring name, T& inner) { w.map_key(name); add_node_hex(inner); }
@@ -504,35 +534,54 @@ public:
 		add_node(inner, conv);
 	}
 	
+	template<typename... Args> void item_compact(int newmax, Args&&... args)
+	{
+		int prev_depth = indent_max;
+		indent_max = min(newmax, indent_max);
+		item(std::forward<Args>(args)...);
+		indent_max = prev_depth;
+	}
+	
 	template<typename T> void item_next(T& out) { abort(); } // illegal
 	cstring next() const { abort(); }
+	
+	void comment(cstring c) {}
 };
 
-template<typename T> string jsonserialize(T& item)
+template<int indent /* = 0 */, typename T> string jsonserialize(T& item)
 {
-	jsonserializer s;
+	jsonserializer s(indent);
 	s.add_node(item, 1);
 	return s.w.finish();
 }
 
-template<typename T> string jsonserialize(const T& item)
+template<int indent /* = 0 */, typename T> string jsonserialize(const T& item)
 {
-	jsonserializer s;
+	jsonserializer s(indent);
 	s.add_node(item, 1);
 	return s.w.finish();
 }
 
 
 
+template<typename T> T jsondeserialize(cstring json, bool* valid = nullptr);
 class jsondeserializer {
 	jsonparser p;
 	jsonparser::event ev;
 	bool matchagain;
+	bool valid = true;
 	
 	jsondeserializer(cstring json) : p(json) {}
-	template<typename T> friend T jsondeserialize(cstring json);
-	template<typename T> friend void jsondeserialize(cstring json, T& out);
-	template<typename T> friend void jsondeserialize(cstring json, const T& out); // this is super dumb, but lambdas need it somehow
+	template<typename T> friend T jsondeserialize(cstring json, bool* valid);
+	template<typename T> friend bool jsondeserialize(cstring json, T& out);
+	template<typename T> friend bool jsondeserialize(cstring json, const T& out); // this is super dumb, but lambdas need it somehow
+	
+	void next_ev()
+	{
+		ev = p.next();
+		if (ev.action == jsonparser::error)
+			valid = false;
+	}
 	
 	//input: ev points to any node
 	//output: if ev pointed to enter_map or enter_list, ev now points to corresponding exit; if not, no change
@@ -544,11 +593,11 @@ class jsondeserializer {
 			if (ev.action == jsonparser::enter_map || ev.action == jsonparser::enter_list) nest++;
 			if (ev.action == jsonparser::exit_map || ev.action == jsonparser::exit_list) nest--;
 			if (!nest) break;
-			ev = p.next();
+			next_ev();
 		}
 	}
 	
-#define LEAF(T) void read_item(T& out, int ov_resolut1) { if (ev.action == jsonparser::num) out = ev.num; finish_item(); ev = p.next(); }
+#define LEAF(T) void read_item(T& out, int ov_resolut1) { if (ev.action == jsonparser::num) out = ev.num; finish_item(); next_ev(); }
 	ALLNUMS(LEAF);
 #undef LEAF
 	
@@ -556,7 +605,7 @@ class jsondeserializer {
 	{
 		if (ev.action == jsonparser::str) out = ev.str;
 		finish_item();
-		ev = p.next();
+		next_ev();
 	}
 	
 	void read_item(bool& out, int ov_resolut1)
@@ -564,7 +613,7 @@ class jsondeserializer {
 		if (ev.action == jsonparser::jtrue) out = true;
 		if (ev.action == jsonparser::jfalse) out = false;
 		finish_item();
-		ev = p.next();
+		next_ev();
 	}
 	
 	template<typename T> void read_item(arrayvieww<T>& out, int ov_resolut1)
@@ -572,7 +621,7 @@ class jsondeserializer {
 		size_t pos = 0;
 		if (ev.action == jsonparser::enter_list)
 		{
-			ev = p.next();
+			next_ev();
 			while (ev.action != jsonparser::exit_list)
 			{
 				if (pos < out.size())
@@ -582,7 +631,7 @@ class jsondeserializer {
 			}
 		}
 		else finish_item();
-		ev = p.next();
+		next_ev();
 	}
 	
 	template<typename T, size_t size>
@@ -597,14 +646,14 @@ class jsondeserializer {
 		out.reset();
 		if (ev.action == jsonparser::enter_list)
 		{
-			ev = p.next();
+			next_ev();
 			while (ev.action != jsonparser::exit_list)
 			{
 				read_item(out.append(), 1);
 			}
 		}
 		else finish_item();
-		ev = p.next();
+		next_ev();
 	}
 	
 	template<typename T> void read_item(set<T>& out, int ov_resolut1)
@@ -612,7 +661,7 @@ class jsondeserializer {
 		out.reset();
 		if (ev.action == jsonparser::enter_list)
 		{
-			ev = p.next();
+			next_ev();
 			while (ev.action != jsonparser::exit_list)
 			{
 				T tmp;
@@ -621,20 +670,20 @@ class jsondeserializer {
 			}
 		}
 		else finish_item();
-		ev = p.next();
+		next_ev();
 	}
 	
 	template<typename T>
-	typename std::enable_if<
-		std::is_same<
+	typename std::enable_if_t<
+		std::is_same_v<
 			decltype(std::declval<T>().serialize(std::declval<jsonserializer&>())),
 			void
-		>::value>::type
+		>>
 	read_item(T& out, int ov_resolut1)
 	{
 		if (ev.action == jsonparser::enter_map)
 		{
-			ev = p.next();
+			next_ev();
 			while (ev.action != jsonparser::exit_map)
 			{
 				matchagain = false;
@@ -643,26 +692,26 @@ class jsondeserializer {
 				if (!matchagain)
 				{
 					if (ev.action == jsonparser::map_key) // always true unless document is broken
-						ev = p.next();
+						next_ev();
 					if (ev.action == jsonparser::exit_map) break; // can happen if document is broken
 					//ev = enter_map or whatever
 					finish_item();
 					//ev = exit_map or whatever
-					ev = p.next();
+					next_ev();
 					//ev = map_key or exit_map
 				}
 			}
 		}
 		else finish_item();
-		ev = p.next();
+		next_ev();
 	}
 	
 	template<typename T>
-	typename std::enable_if<
-		!std::is_same<
+	typename std::enable_if_t<
+		!std::is_same_v<
 			typename T::serialize_as,
 			void*
-		>::value>::type
+		>>
 	read_item(T& out, int ov_resolut1)
 	{
 		typename T::serialize_as tmp{};
@@ -671,29 +720,29 @@ class jsondeserializer {
 	}
 	
 	template<typename T>
-	typename std::enable_if<
-		!std::is_same<
+	typename std::enable_if_t<
+		!std::is_same_v<
 			decltype(std::declval<T&>() = std::declval<cstring>()),
 			void*
-		>::value>::type
+		>>
 	read_item(T& out, float ov_resolut1)
 	{
 		if (ev.action == jsonparser::str) out = ev.str;
 		finish_item();
-		ev = p.next();
+		next_ev();
 	}
 	
 	template<typename T>
-	typename std::enable_if<
-		std::is_same<
+	typename std::enable_if_t<
+		std::is_same_v<
 			decltype(std::declval<T>()(std::declval<jsondeserializer&>())),
 			void
-		>::value>::type
+		>>
 	read_item(const T& inner, int ov_resolut1)
 	{
 		if (ev.action == jsonparser::enter_map)
 		{
-			ev = p.next();
+			next_ev();
 			while (ev.action != jsonparser::exit_map)
 			{
 				matchagain = false;
@@ -701,19 +750,19 @@ class jsondeserializer {
 				inner(*this);
 				if (!matchagain)
 				{
-					ev = p.next();
+					next_ev();
 					if (ev.action == jsonparser::exit_map) break; // can happen if document is broken
 					//ev = enter_map or whatever
 					finish_item();
 					//ev = exit_map or whatever
-					ev = p.next();
+					next_ev();
 					//ev = map_key or exit_map
 				}
 //if(ev.action==jsonparser::finish)*(char*)0=0;
 			}
 		}
 		else finish_item();
-		ev = p.next();
+		next_ev();
 	}
 	
 public:
@@ -725,10 +774,10 @@ public:
 		first = false;
 		
 		//ev = map_key
-		ev = p.next();
+		next_ev();
 		if (ev.action == jsonparser::enter_map)
 		{
-			ev = p.next();
+			next_ev();
 			while (ev.action != jsonparser::exit_map)
 			{
 				matchagain = false;
@@ -737,12 +786,12 @@ public:
 			l_matchagain: ;
 				if (!matchagain)
 				{
-					ev = p.next();
+					next_ev();
 					if (ev.action == jsonparser::exit_map) break; // can happen if document is broken
 					//ev = enter_map or whatever
 					finish_item();
 					//ev = exit_map or whatever
-					ev = p.next();
+					next_ev();
 					//ev = map_key or exit_map
 				}
 //if(ev.action==jsonparser::finish)*(char*)0=0;
@@ -750,7 +799,7 @@ public:
 		}
 		else finish_item();
 		
-		ev = p.next();
+		next_ev();
 		matchagain = true;
 		
 		return false;
@@ -770,32 +819,34 @@ public:
 		//this should be a loop, in case of documents like '{ "foo": 1, "foo": 2, "foo": 3 }'
 		while (ev.action == jsonparser::map_key && ev.str == name)
 		{
-			ev = p.next();
+			next_ev();
 			read_item(out, 1);
 			matchagain = true;
 //puts("::"+tostring(ev.action)+": "+tostring(jsonparser::map_key)+","+tostring(jsonparser::exit_map));
 		}
 	}
 	
+	template<typename... Ts> void item_compact(int newmax, Ts&&... args) { item(std::forward<Ts>(args)...); }
+	
 	template<typename T> void item_next(T& out)
 	{
 		if (ev.action != jsonparser::map_key)
 			abort();
-		ev = p.next();
+		next_ev();
 		read_item(out, 1);
 		matchagain = true;
 	}
 	
 	template<typename T>
-	typename std::enable_if<std::is_integral<T>::value>::type
+	typename std::enable_if_t<std::is_integral_v<T>>
 	hex(cstring name, T& out)
 	{
 		while (ev.action == jsonparser::map_key && ev.str == name)
 		{
-			ev = p.next();
+			next_ev();
 			if (ev.action == jsonparser::num) out = ev.num;
 			finish_item();
-			ev = p.next();
+			next_ev();
 			matchagain = true;
 		}
 	}
@@ -804,13 +855,13 @@ public:
 	{
 		while (ev.action == jsonparser::map_key && ev.str == name)
 		{
-			ev = p.next();
+			next_ev();
 			if (ev.action == jsonparser::str)
 			{
 				fromstringhex(ev.str, out);
 			}
 			finish_item();
-			ev = p.next();
+			next_ev();
 			matchagain = true;
 		}
 	}
@@ -819,13 +870,13 @@ public:
 	{
 		while (ev.action == jsonparser::map_key && ev.str == name)
 		{
-			ev = p.next();
+			next_ev();
 			if (ev.action == jsonparser::str)
 			{
 				fromstringhex(ev.str, out);
 			}
 			finish_item();
-			ev = p.next();
+			next_ev();
 			matchagain = true;
 		}
 	}
@@ -839,25 +890,28 @@ public:
 	void comment(cstring c) {}
 };
 
-template<typename T> T jsondeserialize(cstring json)
+template<typename T> T jsondeserialize(cstring json, bool* valid /*= nullptr*/)
 {
 	T out{};
 	jsondeserializer s(json);
 	s.ev = s.p.next();
 	s.read_item(out, 1);
+	if (valid) *valid = s.valid;
 	return out;
 }
 
-template<typename T> void jsondeserialize(cstring json, T& out)
+template<typename T> bool jsondeserialize(cstring json, T& out)
 {
 	jsondeserializer s(json);
 	s.ev = s.p.next();
 	s.read_item(out, 1);
+	return s.valid;
 }
 
-template<typename T> void jsondeserialize(cstring json, const T& out)
+template<typename T> bool jsondeserialize(cstring json, const T& out)
 {
 	jsondeserializer s(json);
 	s.ev = s.p.next();
 	s.read_item(out, 1);
+	return s.valid;
 }

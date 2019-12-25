@@ -10,7 +10,7 @@ inline string tostring(cstring s) { return s; }
 //printf has PRIi32, but the native ones are defined in terms of int/long
 inline string tostring(  signed char val)     { char ret[32]; sprintf(ret, "%d",   val); return ret; } // the C++ standard says
 inline string tostring(unsigned char val)     { char ret[32]; sprintf(ret, "%u",   val); return ret; } // (un)signed char/short are
-//signless char isn't integral, so not here
+//signless char isn't integral, so not here. If anything, it should be returned as character.
 inline string tostring(  signed short val)    { char ret[32]; sprintf(ret, "%d",   val); return ret; } // promoted to (un)signed int
 inline string tostring(unsigned short val)    { char ret[32]; sprintf(ret, "%u",   val); return ret; } // in ellipsis
 inline string tostring(  signed int val)      { char ret[32]; sprintf(ret, "%d",   val); return ret; }
@@ -41,16 +41,16 @@ template<int n> inline string tostring(unsigned long val)    { char ret[32]; spr
 template<int n> inline string tostringhex(unsigned long val) { char ret[32]; sprintf(ret, "%.*lX", n, val); return ret; }
 
 string tostring(double val);
-inline string tostring(float val) { return tostring((double)val); }
+string tostring(float val);
 inline string tostring(bool val) { return val ? "true" : "false"; }
 //inline string tostring(char val); // not sure if this one makes sense
 
 inline string tostring(const char * s) { return s; } // only exists as tostring, fromstring would be a memory leak
 
 template<typename T>
-typename std::enable_if<
+typename std::enable_if_t<
 	sizeof((string)std::declval<T>()) != 0
-	, string>::type
+	, string>
 tostring(const T& val)
 {
 	return (string)val;
@@ -92,20 +92,19 @@ bool fromstringhex(cstring s, array<byte>& val);
 
 //Same as fromstring, but can't report failure; in exchange, it also tries T::operator=(cstring).
 template<typename T>
-typename std::enable_if<
-	std::is_assignable_v<T, string>
-	>::type
+typename std::enable_if_t<
+	std::is_assignable_v<T, string>>
 try_fromstring(cstring s, T& out)
 {
 	out = s;
 }
 
 template<typename T>
-typename std::enable_if<
-	std::is_same<
+typename std::enable_if_t<
+	std::is_same_v<
 		decltype(fromstring(std::declval<cstring>(), std::declval<T&>())),
 		bool // it returning bool isn't necessary, but I couldn't find a std::can_call
-	>::value && !std::is_assignable_v<T, string>>::type // extra is_assignable test so try_fromstring(cstring,string&) isn't ambiguous
+	> && !std::is_assignable_v<T, string>> // extra is_assignable test so try_fromstring(cstring,string&) isn't ambiguous
 try_fromstring(cstring s, T& out)
 {
 	fromstring(s, out);

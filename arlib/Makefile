@@ -1,9 +1,9 @@
 #object filename structure:
 #obj/RULE___OBJNAME___PATH.o
-#RULE is the set of build flags for this file, probably DEFAULT
+#RULE is the set of build flags for this file, probably DEFAULT or ARLIB
 #OBJNAME is the OBJNAME= make parameter, or a default value
 #PATH is the source filename, including extension, relative to project root, with slashes replaced with double underscore
-#example: obj/DEFAULT___linux___arlib__file-posix.cpp.o
+#example: obj/ARLIB___linux___arlib__file-posix.cpp.o
 
 #to create a profiled build:
 #make clean
@@ -12,9 +12,24 @@
 #make clean-prof
 #make OPT=1 PROFILE=use
 
-arlib-default: arlib-default2
+#TODO: if a config script is needed,
+#obj/config-$(OBJNAME).mk:
+#	truncate -s0 obj/config-$(OBJNAME).mk
+#	
+#	pkg-config --exists gtk+-3.0 && \
+#		echo ARGUI := gtk3 >> obj/config-$(OBJNAME).mk && \
+#		echo CFLAGS += `pkg-config --cflags gtk+-3.0` >> obj/config-$(OBJNAME).mk || \
+#		true
+#
+#and find some way to auto include the correct one
+#(config depends on platform, so it must have OBJNAME)
 
+all: arlib-default
+
+MAKEFLAGS := Rr
 .SUFFIXES:
+.SECONDEXPANSION:
+.DELETE_ON_ERROR:
 
 ifeq (,$(wildcard arlib/string.cpp))
   $(error wrong build directory, go up one level)
@@ -56,7 +71,7 @@ else
   endif
 endif
 
-ifneq ($(filter $(MAKECMDGOALS),test test-all test-all-twice check),)
+ifneq ($(filter $(MAKECMDGOALS),test test-all test-all-twice test-cg check),)
   SELFTEST = 1
   EXCEPTIONS = 1
 endif
@@ -96,7 +111,7 @@ ifneq ($(EXCEPTIONS),1)
     CONF_LFLAGS += -static-libgcc
   endif
 else
-  OPTFLAGS += -fno-enforce-eh-specs
+  OPTFLAGS_CXX += -fno-enforce-eh-specs
 endif
 
 CC_FAMILY := gcc
@@ -122,7 +137,9 @@ endif
 # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=53431
 CCXXFLAGS += -Wno-comment
 #every Arlib class is memmovable, I'm not interested in 99999 gcc warnings
-CONF_CXXFLAGS += -Wno-class-memaccess
+ifeq ($(CC_FAMILY),gcc)
+  CONF_CXXFLAGS += -Wno-class-memaccess
+endif
 
 EXESUFFIX =
 CONF_CXXFLAGS += $(CONF_CFLAGS)
@@ -143,7 +160,12 @@ ifeq ($(OS),linux)
     CONF_LFLAGS += -pthread
   endif
   OBJNAME = linux
-  TR = valgrind --num-callers=100
+  TR = valgrind --num-callers=100 --leak-check=full
+  ifeq ($(ARGUI),1)
+    # Gtk leaves over 9000 'possibly lost' objects around. not interested
+    TR += --show-possibly-lost=no
+    #envs G_SLICE=always-malloc G_DEBUG=gc-friendly look useful, but don't make any difference in practice
+  endif
 endif
 ifeq ($(TR),gdb)
   override TR = gdb --args
@@ -221,20 +243,14 @@ DOMAINNAME = $(firstword $(subst ___,$(SPACE),$(patsubst obj/%.o,%,$1)))
 CFLAGS_DEFAULT ?=
 CFLAGS_NOWARN += -w
 
-.SECONDEXPANSION:
-.DELETE_ON_ERROR:
-
 SOURCES += *.cpp
 SOURCES_ARLIB := arlib/*.cpp
 
 ifneq ($(SELFTEST),)
-  ifeq ($(ARLIB_MAIN),)
-    CONF_CFLAGS += -DARLIB_TEST
-    CFLAGS_ARLIB += -UARLIB_TEST -DARLIB_TESTRUNNER
-  else
-    # with SOURCES blanked, the real main isn't compiled
-    SOURCES :=
-    CFLAGS_ARLIB += -DARLIB_TEST -DARLIB_TESTRUNNER -DARLIB_TEST_ARLIB
+  CONF_CFLAGS += -DARLIB_TEST
+  CFLAGS_ARLIB += -UARLIB_TEST -DARLIB_TESTRUNNER
+  ifneq ($(ARLIB_MAIN),)
+    CFLAGS_ARLIB += -DARLIB_TEST -DARLIB_TEST_ARLIB
   endif
   OBJNAME := $(OBJNAME)-test
 endif
@@ -357,29 +373,28 @@ TRUE_CFLAGS := -std=c99 $(CCXXFLAGS) $(CONF_CFLAGS) $(CFLAGS)
 # - is functional and non-experimental in a finalized -std= version (c++11 is final, c++0x isn't)
 #    it's fine if not every part of that language version is supported in that compiler version
 # I will not switch C++ version because a dependency needs that. Instead, I'll reinvent or clone the dependency.
-# C++17 offers plenty of useful features, which I will switch to once I find where they belong
-#   template<auto val> (for the function<> member binder, that macro sucks. Though bind_this will likely always be a macro)
-#   Guaranteed copy elision
-#   constexpr if (for the min and bitround functions, and probably a few others)
-#   Structured binding (auto [ x, y ] = foo() - use in function::decompose)
-#   __has_include (for valgrind.h)
 # The following features would be useful; if enough of them show up, I will switch:
 #   C++2a template lambdas (for the PNG decoder)
 #   C++2a designated initializers (foo_t foo { .a = 42, .b = 123 })
+#   C++2a template string literals (for the regex parser)
+#   C++2a concepts (also for the regex parser)
 #   C++2a down with typename
 #   C++2a [[likely]]
 #   C++2a [[no_unique_address]]
 #   C++2a ban non-twos-complement signed
 #   C++2a consteval
 #   C++2a void foo(auto arg) (shorthand for template<typename T> void foo(T arg) - simplifies function::bind_member)
+#   C++17 <charconv> in libc (not libstdc++) - will speed up tostring(float), and probably simplify it too
 #   [[trivially_relocatable]] http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2019/p1144r3.html
-#   Lambdas without braces/return; function<int(int)> foo = [](int i) => i*2;
+#   Lambdas without braces/return; function<int(int)> foo = [](int i) => i*2; (useful for LINQ)
+#   Sufficient constexpr improvements to rewrite the regex parser into normal code, that template mess is terrible
 #   Zero-overhead deterministic exceptions http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p0709r0.pdf
-#   String literals as template parameters http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0424r2.pdf
-#   Compile-time reflection (that SERIALIZE macro is a little too limited)
+#   Compile-time reflection (that SERIALIZE macro is a little too limited, and the error messages are the worst I've ever seen)
 #   Single-implementation interfaces (public functions and nothing else in header, member variables hidden; useful for the GUI classes)
 #     the $class proposal would most likely permit this, as well as most or all of the reflection I want
 #   Demote or, and, bitand, etc from keyword to predefined macro (or even better, banish them to the <ciso646> they should've never left)
+#   std::embed http://open-std.org/JTC1/SC22/WG21/docs/papers/2018/p1040r0.html
+#   Allow int x(int y=0); int x(int y=0) { return y*2; } (only if default value is identical on both ends, of course)
 # The following may or may not be usable, depending on the exact details:
 #   C++2a coroutines (more useful for bsnes than for me; some of my callbacks could become coroutines, but I don't yet know how many)
 #   C++2a modules (it's very easy to produce a bad module system, I don't know if this one avoids the pitfalls)
@@ -389,7 +404,16 @@ TRUE_CFLAGS := -std=c99 $(CCXXFLAGS) $(CONF_CFLAGS) $(CFLAGS)
 TRUE_CXXFLAGS := -std=c++17 -fno-rtti $(CCXXFLAGS) $(CONF_CXXFLAGS) $(CXXFLAGS)
 TRUE_LFLAGS := $(LFLAGS) -fvisibility=hidden $(CONF_LFLAGS)
 
-#On Windows, cleaning up the object directory is expected to be done with 'del /q obj\*' in a batch script.
+obj:
+	mkdir obj
+
+ifeq ($(OS),windows)
+clean:
+	del /q obj\*
+
+clean-prof:
+	del /q obj\*.o
+else
 clean:
 	rm -f obj/*
 
@@ -399,9 +423,7 @@ clean-prof:
 superclean: clean
 	rm -f arlib/deps/bearssl-0.6/build/obj/*
 	rm -f arlib/deps/bearssl-0.6/build/libbearssl.a
-
-obj:
-	mkdir obj
+endif
 
 #ARLIB_H := $(patsubst %,\#define %$(LF),$(DEFINES))
 #arlib.h: Makefile
@@ -418,12 +440,12 @@ DOMAINS += DEFAULT NOWARN
 #--start-lib could replace this .a on gold and lld, but ld.bfd doesn't support that option
 USE_AR_OPT := 0
 ifeq ($(SELFTEST),)
-ifneq ($(OPT),0)
-USE_AR_OPT := 1
-endif
+ ifneq ($(OPT),0)
+  USE_AR_OPT := 1
+ endif
 endif
 ifeq ($(USE_AR_OPT),0)
-DOMAINS += ARLIB
+ DOMAINS += ARLIB
 endif
 
 SOURCES_DEFAULT := $(SOURCES)
@@ -431,13 +453,12 @@ wild2 = $(or $(wildcard $(word)),$(word))
 OBJS += $(foreach domain,$(sort $(DOMAINS)),$(call OBJMANGLE,$(domain),$(foreach word,$(SOURCES_$(domain)),$(wild2))))
 OBJS := $(sort $(OBJS))
 ifeq ($(USE_AR_OPT),1)
-#.a are order sensitive, do not sort or rearrange these
-OBJS += obj/$(OBJNAME)-arlib.a
+ # .a are order sensitive, do not rearrange
+ OBJS += obj/$(OBJNAME)-arlib.a
 endif
 OBJS += $(sort $(OBJS_LATE))
 
-all: $(OUTNAME)
-arlib-default2: $(OUTNAME)
+arlib-default: $(OUTNAME)
 
 
 obj/%.c.o: $$(call SOURCENAME,$$@) arlib.h | obj
@@ -449,7 +470,7 @@ obj/%.cpp.o: $$(call SOURCENAME,$$@) arlib.h | obj
 obj/%.S.o: $$(call SOURCENAME,$$@) arlib.h | obj
 	$(ECHOQ) AS $<
 	$(Q)$(AS) $(TRUE_ASFLAGS) $(ASFLAGS_$(call DOMAINNAME,$@)) $< -o $@
-#do not make this rule generic (obj/%.a.o), that hits some ridiculous unkillable 'chain of implicit rules'
+#do not make this rule generic (obj/%.a.o), it hits some ridiculous unkillable 'chain of implicit rules'
 # clause that deletes and refuses to rebuild object files
 #https://www.gnu.org/software/make/manual/html_node/Chained-Rules.html
 #if genericity is needed, stamp out the rules with eval
@@ -478,6 +499,10 @@ test-all: obj/arlibtest$(EXESUFFIX)
 	$(TR) obj/arlibtest$(EXESUFFIX) --all $(TESTFILTER)
 test-all-twice: obj/arlibtest$(EXESUFFIX)
 	$(TR) obj/arlibtest$(EXESUFFIX) --all --twice $(TESTFILTER)
+test-cg: obj/arlibtest$(EXESUFFIX)
+	-rm obj/callgrind.log
+	valgrind --tool=callgrind --dump-instr=yes --callgrind-out-file=obj/callgrind.log obj/arlibtest$(EXESUFFIX) $(TESTFILTER)
+	kcachegrind obj/callgrind.log
 endif
 
 
