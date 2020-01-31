@@ -389,3 +389,24 @@ test("time", "", "time")
 	assert_range(time2_une_fm-time_une_fm, 40000, 60000);
 	assert_range(time2_une_fu-time_une_fu, 40000, 60000);
 }
+
+void not_a_function(); // linker error if the uses aren't optimized out
+DECL_DYLIB_T(libc_t, fread, isalpha, mktime, not_a_function);
+
+test("dylib", "", "dylib")
+{
+	libc_t libc;
+	assert(!libc.fread);
+#ifdef __linux__
+	assert(!libc.init("libc.so.6"));
+#endif
+#ifdef _WIN32
+	assert(!libc.init("msvcrt.dll"));
+#endif
+	assert(libc.fread); // these guys must exist, despite not_a_function failing
+	assert(libc.isalpha);
+	assert(libc.mktime);
+	assert(libc.isalpha('a'));
+	assert(!libc.isalpha('1'));
+	assert(!libc.not_a_function);
+}

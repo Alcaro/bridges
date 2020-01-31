@@ -11,27 +11,19 @@
 #define __STDC_LIMIT_MACROS //how many of these stupid things exist
 #define __STDC_FORMAT_MACROS // if I include a header, it's because I want to use its contents
 #define __STDC_CONSTANT_MACROS
-#define _USE_MATH_DEFINES // needed for M_PI on Windows
-
-#include <stdint.h>
-#include <stddef.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <limits.h>
-#include <inttypes.h>
-#include <utility>
-#include "function.h"
+#define _USE_MATH_DEFINES // needed for M_PI on windows
 
 #ifdef _WIN32
+// Arlib recommends discarding XP/Vista support, but it does work.
 #  ifndef _WIN32_WINNT
-#    define _WIN32_WINNT 0x0600
-#    define NTDDI_VERSION NTDDI_VISTA
+#    define _WIN32_WINNT _WIN32_WINNT_WIN7
+#    define NTDDI_VERSION NTDDI_WIN7
+#    define _WIN32_IE _WIN32_IE_WIN7
 #  elif _WIN32_WINNT < 0x0600
 #    undef _WIN32_WINNT
-#    define _WIN32_WINNT 0x0502 // 0x0501 excludes SetDllDirectory, so I need to put it at 0x0502
+#    define _WIN32_WINNT _WIN32_WINNT_WS03 // 0x0501 excludes SetDllDirectory, so I need to put it at 0x0502
 #    define NTDDI_VERSION NTDDI_WS03 // actually NTDDI_WINXPSP2, but MinGW sddkddkver.h gets angry about that
 #  endif
-#  define _WIN32_IE 0x0600
 //the namespace pollution this causes is massive, but without it, there's a bunch of functions that
 // just tail call kernel32.dll. With it, they can be inlined.
 #  define WIN32_LEAN_AND_MEAN
@@ -48,6 +40,15 @@
 #  include <windows.h>
 #  undef STRICT
 #endif
+
+#include <stdint.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <limits.h>
+#include <inttypes.h>
+#include <utility>
+#include "function.h"
 
 #ifdef _MSC_VER
 #pragma warning(disable:4800) // forcing value to bool 'true' or 'false' (performance warning)
@@ -526,6 +527,10 @@ template<typename T> static inline T bitround(T in)
 #define SIMD_LOOP_TAIL // nop
 #endif
 
+#ifdef __GNUC__
+#define oninit() __attribute__((constructor)) static void JOIN(oninit,__LINE__)()
+#define ondeinit() __attribute__((destructor)) static void JOIN(ondeinit,__LINE__)()
+#else
 class initrunner {
 public:
 	initrunner(void(*fn)()) { fn(); }
@@ -541,6 +546,7 @@ public:
 #define ondeinit() static void JOIN(ondeinit,__LINE__)(); \
                    static MAYBE_UNUSED deinitrunner<JOIN(ondeinit,__LINE__)> JOIN(deinitrun,__LINE__); \
                    static void JOIN(ondeinit,__LINE__)()
+#endif
 
 #define container_of(ptr, outer_t, member) \
 	((outer_t*)((uint8_t*)(ptr) - (offsetof(outer_t,member))))

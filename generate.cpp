@@ -21,7 +21,7 @@
 //During generate_one, towalk is
 // 0 if there can't be any island here because it wouldn't connect to anything (or would be too long)
 // 1 if it may be possible to place an island here
-// 2 if that's right beside an island and allow_dense is false
+// 2 if that's right beside an island and dense is false
 // 3 if that's an island, bridge or reef
 // 80..83 if that's an island or bridge, and it's connected to a castle of the given color
 
@@ -32,9 +32,9 @@ public:
 gamemap& map;
 const gamemap::genparams& par;
 
-//use a per-thread RNG, to avoid thread safety issues (or, if rand() is mutexed, avoid the associated cacheline bouncing)
-//I could've used rand_r instead, but I'd need something else on windows, so let's just do said something else everywhere.
-random_t rand;
+//custom RNG because rand() is slow on Linux and shitty on Windows
+//one per thread so pack() and unpack() work, and to avoid pointless cacheline bouncing
+random_t rand{0}; // hardcode a seed, so it doesn't seed itself from the system CSPRNG
 
 loc_generator(gamemap& map, const gamemap::genparams& par) : map(map), par(par) {}
 
@@ -182,12 +182,12 @@ bool add_island_sub(int x, int y, uint16_t root, bool force, uint16_t color)
 		}
 	} while (force && !any);
 	
-	if (!par.allow_dense)
+	if (!par.dense)
 	{
-		if (x<map.width-1  && map.towalk[y*100+x+1  ]<=1) map.towalk[y*100+x+1  ]=2;
-		if (y<map.height-1 && map.towalk[y*100+x+100]<=1) map.towalk[y*100+x+100]=2;
-		if (x>0            && map.towalk[y*100+x-1  ]<=1) map.towalk[y*100+x-1  ]=2;
-		if (y>0            && map.towalk[y*100+x-100]<=1) map.towalk[y*100+x-100]=2;
+		if (x<map.width-1  && map.towalk[y*100+x+1  ]<=1 && rand()%100 < 80) map.towalk[y*100+x+1  ]=2;
+		if (y<map.height-1 && map.towalk[y*100+x+100]<=1 && rand()%100 < 80) map.towalk[y*100+x+100]=2;
+		if (x>0            && map.towalk[y*100+x-1  ]<=1 && rand()%100 < 80) map.towalk[y*100+x-1  ]=2;
+		if (y>0            && map.towalk[y*100+x-100]<=1 && rand()%100 < 80) map.towalk[y*100+x-100]=2;
 	}
 	
 	return true;
@@ -330,7 +330,7 @@ void generate_one(uint64_t seed)
 		map.has_castles = true;
 		
 		//minimum sizes with 2 castles, such that there's always a place to put the last castle,
-		// no matter where the first ones ended up, even with allow_dense false:
+		// no matter where the first ones ended up, even with dense false:
 		//2x? - 2x7
 		//3x? - 3x7
 		//4x? - 4x7
@@ -750,15 +750,36 @@ bool gamemap::generator::get_work(bool first, workitem& w)
 //Should be called while not holding the mutex.
 void gamemap::generator::do_work(workitem& w, gamemap& map)
 {
-	loc_generator gen(map, par);
-	gen.generate_one(w.seed);
+	loc_generator lgen(map, par);
+	lgen.generate_one(w.seed);
 	
 	//if (!map.finished()) abort();
 	w.valid = true;
 	if (map.numislands <= 1 && par.width*par.height >= 5) w.valid = false;
 	if (!par.allow_ambiguous && map.solve_another()) w.valid = false;
 	
-	if (w.valid) w.diff = map.difficulty();
+	if (w.valid)
+	{
+		w.diff = map.difficulty();
+		
+		w.penalty = 0;
+		if (!par.dense)
+		{
+			unsigned n_close = 0;
+			
+			for (int y=0;y<map.height;y++)
+			for (int x=0;x<map.width;x++)
+			{
+				int idx = y*100+x;
+				gamemap::island& here = map.get(idx);
+				
+				if (here.population < 0) continue;
+				n_close += (here.bridgelen[0] == 1) + (here.bridgelen[3] == 1);
+			}
+			w.penalty += (unsigned)(5 * pow(n_close, 1.5));
+//if(rand()%400==0)printf("PEN=%u,%u\n",n_close,w.penalty);
+		}
+	}
 }
 //Must be called while holding the mutex.
 void gamemap::generator::finish_work(workitem& w)
@@ -767,18 +788,22 @@ void gamemap::generator::finish_work(workitem& w)
 	
 	if (w.valid)
 	{
+		auto absdiff = [](unsigned a, unsigned b)->unsigned { if (a > b) return a-b; else return b-a; };
+		
 		n_valid++;
 		
 		if (w.diff > diff_max) diff_max = w.diff;
 		if (w.diff < diff_min) diff_min = w.diff;
 		
-		//these two can be NaN or negative if only one difficulty has been observed, but then diff_max<=diff_min and the NaNs aren't used
-		float diff_scale = (w.diff-diff_min) / (float)(diff_max-diff_min);
-		float best_diff_scale = (best_diff-diff_min) / (float)(diff_max-diff_min);
-		if (diff_max<=diff_min || fabs(diff_scale - par.difficulty) <= fabs(best_diff_scale - par.difficulty))
+		unsigned ideal_diff = (diff_max-diff_min)*par.difficulty + diff_min;
+//printf("%u,%u,%u=%u ",w.diff,ideal_diff,w.penalty,absdiff(w.diff,ideal_diff) + w.penalty);
+//printf("%u,%u,%u=%u\n",best_diff, ideal_diff, best_pen,absdiff(best_diff,ideal_diff) + best_pen);
+		if (diff_max<=diff_min || absdiff(w.diff, ideal_diff) + w.penalty <= absdiff(best_diff, ideal_diff) + best_pen)
 		{
-			best_diff = w.diff;
 			best_seed = w.seed;
+			best_diff = w.diff;
+			best_pen = w.penalty;
+//printf("%u-%u (#%u)\n",best_diff,w.penalty,n_valid);
 		}
 	}
 }
@@ -792,11 +817,13 @@ void gamemap::generator::threadproc()
 	{
 		get_work(true, w);
 		
+#ifdef ARLIB_THREAD
 		if (n_more_threads)
 		{
 			thread_create(bind_this(&generator::threadproc), pri_idle);
 			n_more_threads--;
 		}
+#endif
 	}
 	
 	while (true)
@@ -876,42 +903,5 @@ void gamemap::generator::cancel()
 }
 
 
-test("generator","solver","generator")
-{
-//assert(0);
-	for (int i=0;true;i++)
-	{
-//srand(i);
-//printf("EEE=%i\n",i);
-		if (i == 1000) assert(!"game generator needs to contain loops in its intended solutions");
-		gamemap m;
-		gamemap::genparams p = {};
-		p.width=2;
-		p.height=2;
-		p.allow_dense=true;
-		p.density=1.0;
-		p.quality=1;
-		m.generate(p);
-		assert(m.finished());
-		m.reset();
-		assert(m.solve());
-		
-		if (m.map[0][0].bridges[0] && m.map[0][0].bridges[3] &&
-		    m.map[1][0].bridges[0] && m.map[0][1].bridges[3])
-		{
-			break;
-		}
-	}
-	
-	{
-		gamemap m;
-		gamemap::genparams p = {};
-		p.width=2;
-		p.height=2;
-		p.density=1.0;
-		p.quality=1;
-		m.generate(p);
-		
-		assert_eq(m.numislands, 1); // with allow_dense=false, only one island can fit
-	}
-}
+//test("generator","solver","generator")
+// it's near impossible to test anything as subjective as this

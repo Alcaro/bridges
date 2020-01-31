@@ -663,20 +663,21 @@ test("png", "array,imagebase,file", "png")
 		
 		if (tests[i].endswith("-n.png") || !tests[i].endswith(".png")) continue;
 		
-		string refname = tests[i];
-		string testname = tests[i].replace("/test/png/", "/test/png/reference/");
-		
-		bool expect = ref.init_decode_png(file::readall(refname));
-		
-		if (expect)
-		{
-			assert(im.init_decode_png(file::readall(testname)));
-			assert_eq(im.width, ref.width);
-			assert_eq(im.height, ref.height);
+		testctx(tests[i]) {
+			string refname = tests[i];
+			string testname = tests[i].replace("/test/png/", "/test/png/reference/");
 			
-			uint32_t* imp = im.pixels32;
-			uint32_t* refp = ref.pixels32;
+			bool expect = ref.init_decode_png(file::readall(refname));
 			
+			if (expect)
+			{
+				assert(im.init_decode_png(file::readall(testname)));
+				assert_eq(im.width, ref.width);
+				assert_eq(im.height, ref.height);
+				
+				uint32_t* imp = im.pixels32;
+				uint32_t* refp = ref.pixels32;
+				
 //if(tests[i].contains("unknown"))
 //{
 //for (size_t i=0;i<ref.height*ref.width;i++)
@@ -692,16 +693,17 @@ test("png", "array,imagebase,file", "png")
 //}
 //puts("\n");
 //}
-			for (size_t i=0;i<ref.height*ref.width;i++)
-			{
+				for (size_t i=0;i<ref.height*ref.width;i++)
+				{
 //printf("%lu,%u,%u\n",i,imp[i],refp[i]);
-				if (refp[i]&0xFF000000) assert_eq(imp[i], refp[i]);
-				else assert_eq(imp[i]&0xFF000000, 0);
+					if (refp[i]&0xFF000000) assert_eq(imp[i], refp[i]);
+					else assert_eq(imp[i]&0xFF000000, 0);
+				}
 			}
-		}
-		else
-		{
-			assert(!im.init_decode_png(file::readall(testname)));
+			else
+			{
+				assert(!im.init_decode_png(file::readall(testname)));
+			}
 		}
 	}
 }

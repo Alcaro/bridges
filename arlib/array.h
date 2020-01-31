@@ -645,7 +645,7 @@ protected:
 	
 	//does not resize
 	void set_slice(size_t start, size_t num, const array<bool>& other, size_t other_start);
-	void clear_unused(size_t nbytes);
+	void clear_unused(size_t start, size_t nbytes);
 	
 	size_t alloc_size(size_t len)
 	{

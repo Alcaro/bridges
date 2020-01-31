@@ -89,7 +89,7 @@ int main(int argc, char** argv)
 				par.width = side;
 				par.height = side;
 				par.density = 0.4;
-				par.allow_dense = true;
+				par.dense = true;
 				par.use_reef = false;
 				par.use_large = false;
 				par.use_castle = false;

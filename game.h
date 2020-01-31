@@ -130,13 +130,13 @@ public:
 	void hint();
 	
 	struct genparams {
-		uint8_t width; // Size must be at least 1x1, though larger is needed to create actually useful maps
+		uint8_t width; // Size must be at least 1x1, though larger is needed to create actually useful maps.
 		uint8_t height;
 		
 		float density; // Use a value between 0.0 and 1.0; it will attempt to fill that fraction of the map with islands.
 		               // Since some tiles will be taken by bridges, anything above (roughly) 0.4 will act identical.
 		               // Reducing it further will considerably reduce difficulty.
-		bool allow_dense; // Don't try to avoid maps where two islands are exactly beside each other.
+		bool dense; // Don't deprioritize maps where two islands are exactly beside each other.
 		
 		bool use_reef; // Include reefs in the returned map.
 		bool use_large; // Include large islands in the returned map.
@@ -147,8 +147,8 @@ public:
 		float difficulty; // Use a value between 0.0 and 1.0. Higher is harder.
 		                  // The lowest possible values are mostly silly maps with only two islands,
 		                  // because all possible slots nearby are taken by reefs.
-		unsigned quality; // Higher quality takes longer to generate, but better matches
-		                  // the requested parameters. 1000 to 5000 is recommended.
+		unsigned quality; // Higher quality takes longer to generate, but better matches the
+		                  // requested parameters. 1000 to 5000 is recommended.
 		function<bool(unsigned iter)> progress; // Will be called with 'iter' increasing until it reaches 'quality'.
 		                                        // Not guaranteed to increase monotonically.
 		                                        // Can be called with iter > quality if the requested parameters
@@ -173,15 +173,19 @@ public:
 		unsigned diff_min = 999999;
 		unsigned diff_max = 0;
 		uint64_t best_seed;
-		unsigned best_diff = 999999;
+		unsigned best_diff = 0;
+		unsigned best_pen = 999999;
 		
 		bool stop = false;
+#ifdef ARLIB_THREAD
 		uint8_t n_more_threads;
+#endif
 		
 		struct workitem {
 			uint64_t seed;
 			bool valid;
 			unsigned diff;
+			unsigned penalty;
 		};
 		
 		bool get_work(bool first, workitem& w);

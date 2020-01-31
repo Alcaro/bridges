@@ -5,8 +5,9 @@
 - game.cpp: The pop_welldone_kb message needs k_confirm named (and spaces to recenter it)
 - game.cpp: I believe keybol <http://www.notdoppler.com/kingofbridges.php> is not the sole author of the original game.
     This suspicion is mostly based on how the original King of Bridges puts all tutorials in the first five levels,
-      but the first five levels only need the 'right number of bridges' rule, and the 'all must be connected' isn't needed until the 11th.
+      but the first five levels only need the 'right number of bridges' rule, and 'all must be connected' isn't needed until the 11th.
     I want to know who did, so I can provide proper credit.
+- game.cpp: In-game level editor
 - maps.cpp: Need to design some levels containing the new objects
     generator isn't enough, I want a few mainlands
     make sure to introduce the new objects in a reasonable way
@@ -23,7 +24,7 @@
       2 2
       ^ ^
     to do that, make solver always move same-island-pair bridges up/left, if possible
-      and if both edges are straight (to avoid issues with L-shaped islands where the bridge in the hole must go the other way)
+      only if both edges are straight, to avoid issues with L-shaped islands where the bridge in the hole must go the other way
     alternatively, ban generator from creating maps where the situation shows up
     alternatively, just leave it like this, generator will never be perfect
 - resources/kbfocus.png: Needs to be redrawn

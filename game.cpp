@@ -416,7 +416,7 @@ public:
 		p.use_large = true;
 		//p.use_castle = true;
 		//p.allow_ambiguous = true;
-		//p.allow_dense = true;
+		//p.dense = true;
 		
 		if (id == 100)
 		{

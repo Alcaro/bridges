@@ -8,16 +8,20 @@
 //- Tests are subordinate to the interface, implementation, and callers.
 //    The latter three should be as simple as possible; as much complexity as possible should be in the tests.
 //- As a corollary, tests may do weird things in order to exercise deeply-buried code paths of the implementation.
-//- All significant functionality should be tested. However, it's allowed (though not encouraged) for a module to
-//    rely on its dependents for complete testing. For example, the UDP socket module has no tests; the DNS client covers both.
+//- All significant functionality should be tested.
+//- Tests shall not distrust any module they depend on, unless that module relies on this one for testing.
 //- Tests may assume that the implementation tries to do what it should.
 //    There's no need to e.g. verify that a file object actually hits the disk. If it hardcodes what the tests expect, it's malicious.
-//    As a corollary, if it's obviously correct, there's no need to test it. Various small helpers remain untested.
+//    As a corollary, if it's obviously correct, there's no need to test it.
 //- Mocking should generally be avoided. Prefer testing against real services. Mocks can simplify configuration and speed things up,
 //    but they're also nontrivial effort to write, can be buggy or inaccurate, can displace things that should be tested,
-//    and injecting them usually involves moving complexity from tests to implementation and/or interface.
-//    For example, the HTTP client assumes the presense of a network.
-//Rare exceptions are permitted, such as the runloop blocking test.
+//    and injecting them usually involves adding complexity to implementation and/or interface.
+//    For example, the HTTP client tests will poke the internet.
+//Rare exceptions can be permitted, such as various ifdefs in the runloop implementations (they catch significant amount of issues,
+//    with zero additional header complexity or release-mode bloat), or UDP sockets being untested (DNS client covers both).
+
+// ARLIB_TEST and ARLIB_TESTRUNNER are both defined in the main program if compiling for tests.
+// In Arlib itself, only ARLIB_TESTRUNNER is defined.
 
 #undef assert
 
@@ -194,7 +198,7 @@ void _assert_range(const T&  actual, const char * actual_exp,
 #define test_fail(msg) do { _testfail((string)"\n"+msg, __LINE__); } while(0)
 #define test_inconclusive(x) do { _test_inconclusive(x); } while(0)
 #define test_expfail(x) do { _test_expfail(x); } while(0)
-#define test_nothrow(x) do { using_fn(_test_nothrow(+1), _test_nothrow(-1)) { x; } } while(0)
+#define test_nothrow using_fn(_test_nothrow(+1), _test_nothrow(-1))
 
 #define main not_quite_main
 int not_quite_main(int argc, char** argv);
@@ -220,7 +224,7 @@ int not_quite_main(int argc, char** argv);
 #define test_inconclusive(x) return
 #define test_expfail(x) return
 #define assert_unreachable() return
-#define test_nothrow(x) x
+#define test_nothrow
 
 #endif
 
