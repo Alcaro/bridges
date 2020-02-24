@@ -12,6 +12,10 @@ git clone
 make OPT=1
 ```
 
-## Compilation - Anything else
+## Compilation - other Linux
 
-💩
+Adjust the above.
+
+## Compilation - other
+
+Not supported.
