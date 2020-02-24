@@ -589,8 +589,16 @@ inline array<T2> arrayview<T>::cast() const
 template<typename T, size_t N> class sarray {
 	T storage[N];
 public:
+	template<typename... Ts> sarray(Ts... args) : storage{ (T)args... }
+	{
+		static_assert(sizeof...(Ts) == N);
+	}
 	T& operator[](size_t n) { return storage[n]; }
-	//TODO: implement and use this
+	const T& operator[](size_t n) const { return storage[n]; }
+	operator arrayvieww<T>() { return storage; }
+	operator arrayview<T>() const { return storage; }
+	size_t size() const { return N; }
+	//TODO: implement more missing features
 };
 
 
@@ -744,13 +752,16 @@ public:
 template<typename T> class refarray {
 	array<autoptr<T>> items;
 public:
+	explicit operator bool() const { return (bool)items; }
+	
 	T& operator[](size_t n)
 	{
 		return *items[n];
 	}
-	T& append()
+	template<typename... Ts>
+	T& append(Ts... args)
 	{
-		T* ret = new T();
+		T* ret = new T(std::move(args)...);
 		items.append(ret);
 		return *ret;
 	}
@@ -785,3 +796,8 @@ class cstring;
 extern template class array<cstring>;
 class string;
 extern template class array<string>;
+
+// TODO: find proper names - I can't use bytes, lots of objects use that as a function name.
+using bytesr = arrayview<uint8_t>;
+using bytesw = arrayvieww<uint8_t>;
+using bytearray = array<uint8_t>;

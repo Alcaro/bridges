@@ -31,13 +31,13 @@ public:
 		
 		if (iplen)
 		{
-			if (inner->send(arrayview<byte>(ipbytes, iplen)) < 0) return false;
+			if (inner->send(arrayview<uint8_t>(ipbytes, iplen)) < 0) return false;
 		}
 		else
 		{
 			uint8_t len = param.target.length();
 			if (len != param.target.length()) return false; // truncation?
-			if (inner->send(arrayview<byte>(&len, 1)) < 0) return false;
+			if (inner->send(arrayview<uint8_t>(&len, 1)) < 0) return false;
 			if (inner->send(param.target.bytes()) < 0) return false;
 		}
 		
@@ -48,7 +48,7 @@ public:
 		return true;
 	}
 	
-	int recv(arrayvieww<byte> data)
+	int recv(arrayvieww<uint8_t> data)
 	{
 		if (LIKELY(phase == 3)) return inner->recv(data);
 		
@@ -57,7 +57,7 @@ public:
 			// expected response:
 			// (ver)05 (auth)00 (ver)05 (reply=success)00 (reserved)00 (atyp)01 (ip)00 00 00 00 (port)00 00
 			uint8_t buf[258];
-			int n = inner->recv(arrayvieww<byte>(buf, phase_bytes));
+			int n = inner->recv(arrayvieww<uint8_t>(buf, phase_bytes));
 			if (n < 0) { phase = 4; return -1; }
 			
 			if (phase == 0)
@@ -102,7 +102,7 @@ public:
 		
 		return -1;
 	}
-	int send(arrayview<byte> data)
+	int send(arrayview<uint8_t> data)
 	{
 		return inner->send(data);
 	}

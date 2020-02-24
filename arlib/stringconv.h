@@ -79,9 +79,9 @@ bool fromstringhex(cstring s, unsigned int & out);
 bool fromstringhex(cstring s, unsigned long & out);
 bool fromstringhex(cstring s, unsigned long long & out);
 
-string tostringhex(arrayview<byte> val);
-bool fromstringhex(cstring s, arrayvieww<byte> val);
-bool fromstringhex(cstring s, array<byte>& val);
+string tostringhex(arrayview<uint8_t> val);
+bool fromstringhex(cstring s, arrayvieww<uint8_t> val);
+bool fromstringhex(cstring s, array<uint8_t>& val);
 
 #define ALLSTRINGABLE(x) \
 	ALLNUMS(x) \

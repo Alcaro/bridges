@@ -83,7 +83,7 @@ bool process::launch(cstring prog, arrayview<string> args)
 }
 
 //returns whether it did anything
-static bool update_piperead(HANDLE h, array<byte>& out, size_t limit)
+static bool update_piperead(HANDLE h, array<uint8_t>& out, size_t limit)
 {
 	if (!h) return false;
 	DWORD newbytes;

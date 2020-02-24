@@ -135,15 +135,15 @@ public:
 		void terminate();
 		
 	public:
-		void write(arrayview<byte> data) { buf.push(data); update(); }
+		void write(arrayview<uint8_t> data) { buf.push(data); update(); }
 		void write(cstring data) { write(data.bytes()); }
 		//Sends EOF to the child, after all bytes have been written. Call only after the last write().
 		void close() { do_close = true; update(); }
 		
-		static input& create_pipe(arrayview<byte> data = NULL);
+		static input& create_pipe(arrayview<uint8_t> data = NULL);
 		static input& create_pipe(cstring data) { return create_pipe(data.bytes()); }
 		// Like create_pipe, but auto closes the pipe once everything has been written.
-		static input& create_buffer(arrayview<byte> data = NULL);
+		static input& create_buffer(arrayview<uint8_t> data = NULL);
 		static input& create_buffer(cstring data) { return create_buffer(data.bytes()); }
 		
 		//Can't write/close these two. Just don't store them anywhere.
@@ -167,7 +167,7 @@ public:
 #endif
 		friend class process;
 		
-		array<byte> buf;
+		array<uint8_t> buf;
 		size_t maxbytes = SIZE_MAX;
 		
 		void init(runloop* loop);
@@ -186,7 +186,7 @@ public:
 		
 		void callback(function<void()> cb);
 		
-		array<byte> readb()
+		array<uint8_t> readb()
 		{
 			update();
 			return std::move(buf);

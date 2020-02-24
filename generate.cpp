@@ -184,10 +184,10 @@ bool add_island_sub(int x, int y, uint16_t root, bool force, uint16_t color)
 	
 	if (!par.dense)
 	{
-		if (x<map.width-1  && map.towalk[y*100+x+1  ]<=1 && rand()%100 < 80) map.towalk[y*100+x+1  ]=2;
-		if (y<map.height-1 && map.towalk[y*100+x+100]<=1 && rand()%100 < 80) map.towalk[y*100+x+100]=2;
-		if (x>0            && map.towalk[y*100+x-1  ]<=1 && rand()%100 < 80) map.towalk[y*100+x-1  ]=2;
-		if (y>0            && map.towalk[y*100+x-100]<=1 && rand()%100 < 80) map.towalk[y*100+x-100]=2;
+		if (x<map.width-1  && map.towalk[y*100+x+1  ]<=1 && rand()%100 < 90) map.towalk[y*100+x+1  ]=2;
+		if (y<map.height-1 && map.towalk[y*100+x+100]<=1 && rand()%100 < 90) map.towalk[y*100+x+100]=2;
+		if (x>0            && map.towalk[y*100+x-1  ]<=1 && rand()%100 < 90) map.towalk[y*100+x-1  ]=2;
+		if (y>0            && map.towalk[y*100+x-100]<=1 && rand()%100 < 90) map.towalk[y*100+x-100]=2;
 	}
 	
 	return true;

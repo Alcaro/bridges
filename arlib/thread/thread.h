@@ -44,7 +44,7 @@ public:
 	void unlock() { pthread_mutex_unlock(&mut); }
 	~mutex() { pthread_mutex_destroy(&mut); }
 	
-#elif _WIN32_WINNT >= 0x0600
+#elif _WIN32_WINNT >= _WIN32_WINNT_LONGHORN
 #if !defined(_MSC_VER) || _MSC_VER > 1600
 	SRWLOCK srwlock = SRWLOCK_INIT;
 #else
@@ -59,7 +59,7 @@ public:
 	bool try_lock() { return TryAcquireSRWLockExclusive(&srwlock); }
 	void unlock() { ReleaseSRWLockExclusive(&srwlock); }
 	
-#elif _WIN32_WINNT >= 0x0501
+#elif _WIN32_WINNT >= _WIN32_WINNT_WINXP
 	
 	CRITICAL_SECTION cs;
 	
@@ -128,7 +128,7 @@ class runonce : nomove {
 public:
 	void run(function<void()> fn);
 	// pthread_once would make sense on other Unix, but it only has a void(*)(), no way to pass userdata
-#elif defined(_WIN32) && _WIN32_WINNT >= 0x0600
+#elif defined(_WIN32) && _WIN32_WINNT >= _WIN32_WINNT_LONGHORN
 	INIT_ONCE once = INIT_ONCE_STATIC_INIT;
 	static BOOL CALLBACK wrap(INIT_ONCE* once, void* param, void** context)
 	{

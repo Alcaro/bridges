@@ -325,7 +325,7 @@ public:
 		else items.get_create(node(key, value), true);
 	}
 	
-	//if nonexistent, undefined behavior
+	//if nonexistent, null deref (undefined behavior, segfault in practice)
 	template<typename Tk2>
 	Tvalue& get(const Tk2& key)
 	{
@@ -366,7 +366,7 @@ public:
 		node* ret = items.get_or_null(key);
 		if (ret) return ret->value;
 		else return def;
-		//else return cstring(arrayview<byte>((byte*)def, N));
+		//else return cstring(arrayview<uint8_t>((byte*)def, N));
 	}
 	template<typename Tk2>
 	Tvalue* get_or_null(const Tk2& key)

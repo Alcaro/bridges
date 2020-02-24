@@ -10,7 +10,7 @@
 // - And, most importantly, every feature I implement is a feature I fully understand, so I can
 //     debug it, debug other instances of the same protocol or format, know which edge cases are
 //     likely to cause bugs (for example to write a test suites, or research potential security
-//     vulnerabilities), and appreciate the hidden complexity of something that seems simple.
+//     vulnerabilities), and appreciate the true complexity of something that seems simple.
 
 //if anyone whines about antivirus, https://arstechnica.com/information-technology/2017/01/antivirus-is-bad/
 //  and linked:

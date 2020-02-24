@@ -32,7 +32,7 @@
 
 bool dylib::init(const char * filename)
 {
-	if (handle) abort();
+	deinit();
 	//synchronized(dylib_lock)
 	{
 		handle = dlopen(filename, RTLD_LAZY);
@@ -73,7 +73,7 @@ static mutex dylib_lock;
 
 static HANDLE dylib_init(const char * filename, bool uniq)
 {
-	synchronized(dylib_lock)
+	synchronized(dylib_lock) // two threads racing on SetDllDirectory is bad news
 	{
 		HANDLE handle;
 		
@@ -104,17 +104,17 @@ bool dylib::init(const char * filename)
 	return handle;
 }
 
-bool dylib::init_uniq(const char * filename)
-{
-	deinit();
-	handle = dylib_init(filename, true);
-	return handle;
-}
-
-bool dylib::init_uniq_force(const char * filename)
-{
-	return init_uniq(filename);
-}
+//bool dylib::init_uniq(const char * filename)
+//{
+//	deinit();
+//	handle = dylib_init(filename, true);
+//	return handle;
+//}
+//
+//bool dylib::init_uniq_force(const char * filename)
+//{
+//	return init_uniq(filename);
+//}
 
 void* dylib::sym_ptr(const char * name)
 {
@@ -392,21 +392,26 @@ test("time", "", "time")
 
 void not_a_function(); // linker error if the uses aren't optimized out
 DECL_DYLIB_T(libc_t, fread, isalpha, mktime, not_a_function);
+DECL_DYLIB_PREFIX_T(libc_f_t, f, open, read, close);
 
 test("dylib", "", "dylib")
 {
 	libc_t libc;
+	libc_f_t f;
 	assert(!libc.fread);
 #ifdef __linux__
-	assert(!libc.init("libc.so.6"));
+	const char * libc_so = "libc.so.6";
 #endif
 #ifdef _WIN32
-	assert(!libc.init("msvcrt.dll"));
+	const char * libc_so = "msvcrt.dll";
 #endif
+	assert(!libc.init(libc_so));
+	assert(f.init(libc_so));
 	assert(libc.fread); // these guys must exist, despite not_a_function failing
 	assert(libc.isalpha);
 	assert(libc.mktime);
 	assert(libc.isalpha('a'));
 	assert(!libc.isalpha('1'));
 	assert(!libc.not_a_function);
+	assert(f.read == libc.fread);
 }

@@ -14,14 +14,13 @@
 #define _USE_MATH_DEFINES // needed for M_PI on windows
 
 #ifdef _WIN32
-// Arlib recommends discarding XP/Vista support, but it does work.
 #  ifndef _WIN32_WINNT
 #    define _WIN32_WINNT _WIN32_WINNT_WIN7
 #    define NTDDI_VERSION NTDDI_WIN7
 #    define _WIN32_IE _WIN32_IE_WIN7
-#  elif _WIN32_WINNT < 0x0600
+#  elif _WIN32_WINNT <= 0x0600 // don't replace with _WIN32_WINNT_LONGHORN, windows.h isn't included yet
 #    undef _WIN32_WINNT
-#    define _WIN32_WINNT _WIN32_WINNT_WS03 // 0x0501 excludes SetDllDirectory, so I need to put it at 0x0502
+#    define _WIN32_WINNT _WIN32_WINNT_WS03 // _WIN32_WINNT_WINXP excludes SetDllDirectory, so I need to put it at 0x0502
 #    define NTDDI_VERSION NTDDI_WS03 // actually NTDDI_WINXPSP2, but MinGW sddkddkver.h gets angry about that
 #  endif
 //the namespace pollution this causes is massive, but without it, there's a bunch of functions that
@@ -35,6 +34,26 @@
 #  ifdef _MSC_VER
 #    define _CRT_NONSTDC_NO_DEPRECATE
 #    define _CRT_SECURE_NO_WARNINGS
+#  endif
+#  ifdef __MINGW32__
+// mingw *really* wants to define its own printf/scanf, which adds ~20KB random stuff to the binary
+// extra kilobytes is the opposite of what I want, and I want harder, so here's some shenanigans
+// (on some 32bit mingw versions, it also adds a dependency on libgcc_s_sjlj-1.dll - I want that even less)
+// comments say libstdc++ demands a POSIX printf, but I don't use libstdc++'s text functions, so I don't care
+// msvcrt strtod also rounds wrong sometimes, but only for unrealistic inputs, so I don't care about that either
+#    define __USE_MINGW_ANSI_STDIO 0 // first, trigger a warning if it's enabled already - probably wrong include order
+#    include <stdlib.h>              // second, include this specific header; it includes <bits/c++config.h>,
+#    undef __USE_MINGW_ANSI_STDIO    // which sets this flag, which must be turned off
+#    define __USE_MINGW_ANSI_STDIO 0 // (subsequent includes of c++config.h are harmless, there's an include guard)
+#    undef strtof
+#    define strtof strtof_arlib // third, redefine these functions, they pull in mingw's scanf
+#    undef strtod               // (strtod not acting like scanf is creepy, anyways)
+#    define strtod strtod_arlib // this is why stdlib.h is chosen, rather than cstdbool - they live in stdlib.h
+#    undef strtold
+#    define strtold strtold_arlib
+float strtof_arlib(const char * str, char** str_end);
+double strtod_arlib(const char * str, char** str_end);
+long double strtold_arlib(const char * str, char** str_end);
 #  endif
 #  define STRICT
 #  include <windows.h>
@@ -59,7 +78,6 @@
 #endif
 
 typedef void(*funcptr)();
-typedef uint8_t byte; // TODO: remove
 
 #define using(obj) if(obj;true)
 template<typename T> class using_holder {
@@ -102,6 +120,7 @@ using std::nullptr_t;
 //some magic stolen from http://blogs.msdn.com/b/the1/archive/2004/05/07/128242.aspx
 //C++ can be so messy sometimes...
 template<typename T, size_t N> char(&ARRAY_SIZE_CORE(T(&x)[N]))[N];
+template<typename T> typename std::enable_if<sizeof(T)==0, T&>::type ARRAY_SIZE_CORE(T& x); // for size-zero arrays
 #define ARRAY_SIZE(x) (sizeof(ARRAY_SIZE_CORE(x)))
 
 //just to make C++ an even bigger mess. based on https://github.com/swansontec/map-macro with some changes:
@@ -109,11 +128,11 @@ template<typename T, size_t N> char(&ARRAY_SIZE_CORE(T(&x)[N]))[N];
 //- merged https://github.com/swansontec/map-macro/pull/3
 //- merged http://stackoverflow.com/questions/6707148/foreach-macro-on-macros-arguments#comment62878935_13459454, plus ifdef
 #define PPFE_EVAL0(...) __VA_ARGS__
-#define PPFE_EVAL1(...) PPFE_EVAL0 (PPFE_EVAL0 (PPFE_EVAL0 (__VA_ARGS__)))
-#define PPFE_EVAL2(...) PPFE_EVAL1 (PPFE_EVAL1 (PPFE_EVAL1 (__VA_ARGS__)))
-#define PPFE_EVAL3(...) PPFE_EVAL2 (PPFE_EVAL2 (PPFE_EVAL2 (__VA_ARGS__)))
-#define PPFE_EVAL4(...) PPFE_EVAL3 (PPFE_EVAL3 (PPFE_EVAL3 (__VA_ARGS__)))
-#define PPFE_EVAL(...)  PPFE_EVAL4 (PPFE_EVAL4 (PPFE_EVAL4 (__VA_ARGS__)))
+#define PPFE_EVAL1(...) PPFE_EVAL0(PPFE_EVAL0(PPFE_EVAL0(__VA_ARGS__)))
+#define PPFE_EVAL2(...) PPFE_EVAL1(PPFE_EVAL1(PPFE_EVAL1(__VA_ARGS__)))
+#define PPFE_EVAL3(...) PPFE_EVAL2(PPFE_EVAL2(PPFE_EVAL2(__VA_ARGS__)))
+#define PPFE_EVAL4(...) PPFE_EVAL3(PPFE_EVAL3(PPFE_EVAL3(__VA_ARGS__)))
+#define PPFE_EVAL(...)  PPFE_EVAL4(PPFE_EVAL4(PPFE_EVAL4(__VA_ARGS__)))
 #define PPFE_MAP_END(...)
 #define PPFE_MAP_OUT
 #define PPFE_MAP_GET_END2() 0, PPFE_MAP_END
@@ -123,19 +142,24 @@ template<typename T, size_t N> char(&ARRAY_SIZE_CORE(T(&x)[N]))[N];
 #ifdef _MSC_VER
 //this version doesn't work on GCC, it makes PPFE_MAP0 not get expanded the second time and quite effectively stops everything.
 //but completely unknown guy says it's required on MSVC, so I'll trust that and ifdef it
-//pretty sure one of them violate the C99/C++ specifications, but I have no idea which of them, nor what Clang does
-#define PPFE_MAP_NEXT1(test, next) PPFE_EVAL0(PPFE_MAP_NEXT0 (test, next, 0))
+//pretty sure one of them violate the C99/C++ specifications, but I have no idea which of them (Clang seems to follow GCC)
+#define PPFE_MAP_NEXT1(test, next) PPFE_EVAL0(PPFE_MAP_NEXT0(test, next, 0))
 #else
-#define PPFE_MAP_NEXT1(test, next) PPFE_MAP_NEXT0 (test, next, 0)
+#define PPFE_MAP_NEXT1(test, next) PPFE_MAP_NEXT0(test, next, 0)
 #endif
-#define PPFE_MAP_NEXT(test, next)  PPFE_MAP_NEXT1 (PPFE_MAP_GET_END test, next)
-#define PPFE_MAP0(f, x, peek, ...) f(x) PPFE_MAP_NEXT (peek, PPFE_MAP1) (f, peek, __VA_ARGS__)
-#define PPFE_MAP1(f, x, peek, ...) f(x) PPFE_MAP_NEXT (peek, PPFE_MAP0) (f, peek, __VA_ARGS__)
-#define PPFOREACH(f, ...) PPFE_EVAL (PPFE_MAP1 (f, __VA_ARGS__, ()()(), ()()(), ()()(), 0))
+#define PPFE_MAP_NEXT(test, next)  PPFE_MAP_NEXT1(PPFE_MAP_GET_END test, next)
+#define PPFE_MAP0(f, x, peek, ...) f(x) PPFE_MAP_NEXT(peek, PPFE_MAP1)(f, peek, __VA_ARGS__)
+#define PPFE_MAP1(f, x, peek, ...) f(x) PPFE_MAP_NEXT(peek, PPFE_MAP0)(f, peek, __VA_ARGS__)
+#define PPFE_MAP0A(f, arg, x, peek, ...) f(arg, x) PPFE_MAP_NEXT(peek, PPFE_MAP1A)(f, arg, peek, __VA_ARGS__)
+#define PPFE_MAP1A(f, arg, x, peek, ...) f(arg, x) PPFE_MAP_NEXT(peek, PPFE_MAP0A)(f, arg, peek, __VA_ARGS__)
+
 //usage:
 //#define STRING(x) const char * x##_string = #x;
 //PPFOREACH(STRING, foo, bar, baz)
 //limited to 365 entries, but that's enough.
+#define PPFOREACH(f, ...)        PPFE_EVAL(PPFE_MAP1(f,        __VA_ARGS__, ()()(), ()()(), ()()(), 0))
+// Same as the above, but the given macro takes two arguments, of which the first is 'arg' here.
+#define PPFOREACH_A(f, arg, ...) PPFE_EVAL(PPFE_MAP1A(f, arg, __VA_ARGS__, ()()(), ()()(), ()()(), 0))
 
 
 
@@ -305,26 +329,27 @@ template<typename T, typename... Args> static T max(const T& a, Args... args)
 
 
 
+// Inherit from nocopy or nomove if possible, so you won't need a custom constructor.
+#define NO_COPY(type) \
+	type(const type&) = delete; \
+	const type& operator=(const type&) = delete; \
+	type(type&&) = default; \
+	type& operator=(type&&) = default
 class nocopy {
 protected:
 	nocopy() = default; // do not use {}, it optimizes poorly
-	nocopy(const nocopy&) = delete;
-	const nocopy& operator=(const nocopy&) = delete;
-#if !defined(_MSC_VER) || _MSC_VER >= 1900 // error C2610: is not a special member function which can be defaulted
-                                           // deleting the copies deletes the moves on gcc, but does nothing on msvc2013; known bug
-                                           // luckily, those two bugs cancel out pretty well, so we can do this
-	nocopy(nocopy&&) = default;
-	nocopy& operator=(nocopy&&) = default;
-#endif
+	NO_COPY(nocopy);
 };
 
+#define NO_MOVE(type) \
+	type(const type&) = delete; \
+	const type& operator=(const type&) = delete; \
+	type(type&&) = delete; \
+	type& operator=(type&&) = delete
 class nomove {
 protected:
 	nomove() = default;
-	nomove(const nomove&) = delete;
-	const nomove& operator=(const nomove&) = delete;
-	nomove(nomove&&) = delete;
-	nomove& operator=(nomove&&) = delete;
+	NO_MOVE(nomove);
 };
 
 template<typename T>
@@ -464,6 +489,7 @@ size_t memcmp_d(const void * a, const void * b, size_t len) __attribute__((pure)
 //typedef unsigned int size_t;
 
 //undefined behavior if 'in' is 0 or negative, or if the output would be out of range
+//TODO: investigate replacing this with std::ceil2 or std::bit_ceil
 template<typename T> static inline T bitround(T in)
 {
 #if defined(__GNUC__) && defined(__x86_64__)
@@ -551,6 +577,24 @@ public:
 #define container_of(ptr, outer_t, member) \
 	((outer_t*)((uint8_t*)(ptr) - (offsetof(outer_t,member))))
 
+class range_iter_t {
+	size_t n;
+public:
+	range_iter_t(size_t n) : n(n) {}
+	bool operator!=(const range_iter_t& other) { return n != other.n; }
+	void operator++() { n++; }
+	size_t operator*() { return n; }
+};
+class range_t {
+	size_t a;
+	size_t b;
+public:
+	range_t(size_t a, size_t b) : a(a), b(b) {}
+	range_iter_t begin() const { return a; }
+	range_iter_t end() const { return b; }
+};
+static inline range_t range(size_t n) { return range_t(0, n); }
+static inline range_t range(size_t a, size_t b) { return range_t(a, b); }
 
 //If an interface defines a function to set some state, and a callback for when this state changes,
 // calling that function will not trigger the state callback.

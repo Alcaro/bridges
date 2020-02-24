@@ -42,7 +42,7 @@ struct {
 	void* lib;
 } static glx;
 #define GLX_SYM(ret, name, args) "glX" #name "\0"
-static const char glx_proc_names[]={ GLX_SYMS() };
+static const char glx_proc_names[] = { GLX_SYMS() };
 #undef GLX_SYM
 
 static bool libLoad()
@@ -91,7 +91,7 @@ public:
 		
 		int glx_major = 0;
 		int glx_minor = 0;
-		if (!glx.QueryVersion( window_x11.display, &glx_major, &glx_minor )) return false;
+		if (!glx.QueryVersion(window_x11.display, &glx_major, &glx_minor)) return false;
 		if (glx_major != 1 || glx_minor < 3) return false;
 		
 		int visual_attribs[] = {
@@ -141,6 +141,7 @@ public:
 			GLX_CONTEXT_MAJOR_VERSION_ARB, (int)version/100,
 			GLX_CONTEXT_MINOR_VERSION_ARB, (int)version/10%10,
 			GLX_CONTEXT_FLAGS_ARB, debug ? GLX_CONTEXT_DEBUG_BIT_ARB : 0,
+			//GLX_CONTEXT_PROFILE_MASK_ARB, GLX_CONTEXT_CORE_PROFILE_BIT_ARB,
 			None
 		};
 		

@@ -25,11 +25,11 @@ public:
 	
 	//if called multiple times on the same object, undefined behavior, call deinit() first
 	bool init(const char * filename);
-	//like init, but if the library is loaded already, it fails
-	//does not protect against a subsequent init() loading the same thing
-	bool init_uniq(const char * filename);
-	//like init_uniq, but if the library is loaded already, it loads a new instance, if supported by the platform
-	bool init_uniq_force(const char * filename);
+	////like init, but if the library is loaded already, it fails
+	////does not protect against a subsequent init() loading the same thing
+	//bool init_uniq(const char * filename);
+	////like init_uniq, but if the library is loaded already, it loads a new instance, if supported by the platform
+	//bool init_uniq_force(const char * filename);
 	//guaranteed to return NULL if initialization failed
 	void* sym_ptr(const char * name);
 	//separate function because
@@ -46,32 +46,39 @@ public:
 	
 	//Fetches multiple symbols. 'names' is expected to be a NUL-separated list of names, terminated with a blank one.
 	// (This is easiest done by using multiple NUL-terminated strings, and let compiler append another NUL.)
-	//Returns whether all of them were successfully fetched. If not, failures are NULL; some of them may exist despite x.
+	//Returns whether all of them were successfully fetched. If not, failures are NULL. All are still attempted.
 	bool sym_multi(funcptr* out, const char * names);
 	
 	void deinit();
 	~dylib() { deinit(); }
 };
 
-#define DECL_DYLIB_MEMB(name) decltype(::name)* name;
-#define DECL_DYLIB_RESET(name) name = nullptr;
-#define DECL_DYLIB_NAME(name) #name "\0"
-#define DECL_DYLIB_T(name, ...) \
+#define DECL_DYLIB_MEMB(prefix, name) decltype(::prefix##name)* name;
+#define DECL_DYLIB_RESET(prefix, name) name = nullptr;
+#define DECL_DYLIB_NAME(prefix, name) #prefix #name "\0"
+#define DECL_DYLIB_PREFIX_T(name, prefix, ...) \
 	class name { \
 	public: \
-		PPFOREACH(DECL_DYLIB_MEMB, __VA_ARGS__); \
+		PPFOREACH_A(DECL_DYLIB_MEMB, prefix, __VA_ARGS__); \
 		\
-		name() { PPFOREACH(DECL_DYLIB_RESET, __VA_ARGS__) } \
+		name() { PPFOREACH_A(DECL_DYLIB_RESET, prefix, __VA_ARGS__) } \
 		name(const char * filename) { init(filename); } \
 		bool init(const char * filename) \
 		{ \
 			_internal_dylib.init(filename); \
 			/* call this even on failure, to ensure members are nulled */ \
-			return _internal_dylib.sym_multi((funcptr*)this, PPFOREACH(DECL_DYLIB_NAME, __VA_ARGS__)); \
+			return _internal_dylib.sym_multi((funcptr*)this, PPFOREACH_A(DECL_DYLIB_NAME, prefix, __VA_ARGS__)); \
 		} \
 	private: \
 		dylib _internal_dylib; \
 	}
+//The intended usecase of the prefixed one is a DLL exporting multiple functions, for example isalpha, isdigit, and isalnum.
+//DECL_DYLIB_PREFIX_T(is_t, is, alpha, digit, alnum);
+//is_t is("libc.so.6");
+//if (is.alpha('a')) {}
+//If your functions don't have any plausible prefix, or you want the prefix on the members, feel free to instead use
+#define DECL_DYLIB_T(name, ...) DECL_DYLIB_PREFIX_T(name, , __VA_ARGS__)
+//which is just the above without the second argument.
 
 
 //If the program is run under a debugger, this triggers a breakpoint. If not, does nothing.

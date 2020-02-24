@@ -29,7 +29,6 @@
 void _test_runloop_latency(uint64_t us);
 #endif
 
-#ifdef ARLIB_TEST
 template<typename T>
 string tostring_dbg(const T& item) { return tostring(item); }
 template<typename T>
@@ -50,6 +49,22 @@ string tostring_dbg(const map<Tkey,Tvalue>& item)
 		+"}";
 }
 
+template<typename T>
+string tostringhex_dbg(const T& item) { return tostringhex(item); }
+static inline string tostringhex_dbg(const arrayview<uint8_t>& item)
+{
+	string ret = tostringhex(item)+" ";
+	for (char c : item)
+	{
+		if (c >= 0x20 && c <= 0x7e) ret += c;
+		else ret += '.';
+	}
+	return ret;
+}
+static inline string tostringhex_dbg(const arrayvieww<uint8_t>& item) { return tostringhex_dbg((arrayview<uint8_t>)item); }
+static inline string tostringhex_dbg(const array<uint8_t>& item) { return tostringhex_dbg((arrayview<uint8_t>)item); }
+
+#ifdef ARLIB_TEST
 class _testdecl {
 public:
 	_testdecl(void(*func)(), const char * filename, int line, const char * name, const char * requires, const char * provides);

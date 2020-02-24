@@ -547,22 +547,22 @@ void convert_scanline_rgb888_nrgb8888(uint32_t* out, const uint8_t* in, size_t n
 	}
 }
 template<>
-void image::convert_scanline<ifmt_rgb888, ifmt_0rgb8888>(void* out, const void* in, size_t npx)
+void image::convert_scanline<ifmt_rgb888_by, ifmt_0rgb8888>(void* out, const void* in, size_t npx)
 {
 	convert_scanline_rgb888_nrgb8888<0x00000000>((uint32_t*)out, (const uint8_t*)in, npx);
 }
 template<>
-void image::convert_scanline<ifmt_rgb888, ifmt_argb8888>(void* out, const void* in, size_t npx)
+void image::convert_scanline<ifmt_rgb888_by, ifmt_argb8888>(void* out, const void* in, size_t npx)
 {
 	convert_scanline_rgb888_nrgb8888<0xFF000000>((uint32_t*)out, (const uint8_t*)in, npx);
 }
 template<>
-void image::convert_scanline<ifmt_rgb888, ifmt_bargb8888>(void* out, const void* in, size_t npx)
+void image::convert_scanline<ifmt_rgb888_by, ifmt_bargb8888>(void* out, const void* in, size_t npx)
 {
 	convert_scanline_rgb888_nrgb8888<0xFF000000>((uint32_t*)out, (const uint8_t*)in, npx);
 }
 template<>
-void image::convert_scanline<ifmt_rgb888, ifmt_xrgb8888>(void* out, const void* in, size_t npx)
+void image::convert_scanline<ifmt_rgb888_by, ifmt_xrgb8888>(void* out, const void* in, size_t npx)
 {
 	convert_scanline_rgb888_nrgb8888<(uint32_t)-1>((uint32_t*)out, (const uint8_t*)in, npx);
 }
@@ -571,7 +571,7 @@ void image::convert_scanline<ifmt_rgb888, ifmt_xrgb8888>(void* out, const void* 
 #ifdef ARGUI_GTK3
 #include <gtk/gtk.h>
 
-static bool image_decode_gtk(image* out, arrayview<byte> data)
+static bool image_decode_gtk(image* out, arrayview<uint8_t> data)
 {
 	GInputStream* is = g_memory_input_stream_new_from_data(data.ptr(), data.size(), NULL);
 	GdkPixbuf* pix = gdk_pixbuf_new_from_stream(is, NULL, NULL);
@@ -595,7 +595,7 @@ static bool image_decode_gtk(image* out, arrayview<byte> data)
 		out->fmt = ifmt_0rgb8888;
 		for (uint32_t y=0;y<out->height;y++)
 		{
-			image::convert_scanline<ifmt_rgb888, ifmt_0rgb8888>(
+			image::convert_scanline<ifmt_rgb888_by, ifmt_0rgb8888>(
 				out->pixels8 + y*out->stride, bytes + y*instride, out->width);
 		}
 	}
@@ -637,7 +637,7 @@ out->fmt = ifmt_0rgb8888;
 //or maybe it's better to keep my homebrew, so I know it'll work the same way everywhere
 
 
-bool image::init_decode(arrayview<byte> data)
+bool image::init_decode(arrayview<uint8_t> data)
 {
 	this->fmt = ifmt_none;
 	return
@@ -646,7 +646,7 @@ bool image::init_decode(arrayview<byte> data)
 		false;
 }
 
-bool image::init_decode_extern(arrayview<byte> data)
+bool image::init_decode_extern(arrayview<uint8_t> data)
 {
 	this->fmt = ifmt_none;
 	return
@@ -656,7 +656,7 @@ bool image::init_decode_extern(arrayview<byte> data)
 		false;
 }
 
-bool image::init_decode_permissive(arrayview<byte> data)
+bool image::init_decode_permissive(arrayview<uint8_t> data)
 {
 	this->fmt = ifmt_none;
 	return
@@ -671,14 +671,18 @@ bool image::init_decode_permissive(arrayview<byte> data)
 
 test("image byte per pixel", "", "imagebase")
 {
-	assert_eq(image::byteperpix(ifmt_rgb565), 2);
-	assert_eq(image::byteperpix(ifmt_rgb888), 3);
-	assert_eq(image::byteperpix(ifmt_xrgb1555), 2);
+	assert_eq(image::byteperpix(ifmt_rgb888_by), 3);
+	assert_eq(image::byteperpix(ifmt_rgba8888_by), 4);
+	assert_eq(image::byteperpix(ifmt_argb8888_by), 4);
+	assert_eq(image::byteperpix(ifmt_abgr8888_by), 4);
+	assert_eq(image::byteperpix(ifmt_bgra8888_by), 4);
 	assert_eq(image::byteperpix(ifmt_xrgb8888), 4);
-	assert_eq(image::byteperpix(ifmt_0rgb1555), 2);
 	assert_eq(image::byteperpix(ifmt_0rgb8888), 4);
-	assert_eq(image::byteperpix(ifmt_argb1555), 2);
 	assert_eq(image::byteperpix(ifmt_argb8888), 4);
-	assert_eq(image::byteperpix(ifmt_bargb1555), 2);
 	assert_eq(image::byteperpix(ifmt_bargb8888), 4);
+	assert_eq(image::byteperpix(ifmt_rgb565), 2);
+	assert_eq(image::byteperpix(ifmt_xrgb1555), 2);
+	assert_eq(image::byteperpix(ifmt_0rgb1555), 2);
+	assert_eq(image::byteperpix(ifmt_argb1555), 2);
+	assert_eq(image::byteperpix(ifmt_bargb1555), 2);
 }

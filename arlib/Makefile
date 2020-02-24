@@ -53,6 +53,9 @@ define LF
 
 endef
 
+ifeq ($(OS),Windows_NT)
+  OS = windows
+endif
 ifeq ($(OS),)
   dumpmachine := $(shell $(CXX) -dumpmachine)
   ifneq ($(findstring mingw,$(dumpmachine)),)
@@ -102,6 +105,8 @@ else
 endif
 
 CCXXFLAGS = -fvisibility=hidden -Wall -Wmissing-declarations -Wimplicit-fallthrough -Wvla -pipe
+#to silence for (size_t n : range(42))
+CCXXFLAGS += -Wno-unused-variable
 #doesn't seem to do anything, and CFLAGS is used for c++ too which throws warnings all over
 #CFLAGS += -Wmissing-prototypes
 ifneq ($(EXCEPTIONS),1)
@@ -426,7 +431,7 @@ TRUE_CFLAGS := -std=c99 $(CCXXFLAGS) $(CONF_CFLAGS) $(CFLAGS)
 #   C++2a void foo(auto arg) (shorthand for template<typename T> void foo(T arg) - simplifies function::bind_member)
 #   C++17 <charconv> in libc (not libstdc++) - will speed up tostring(float), and probably simplify it too
 #   [[trivially_relocatable]] http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2019/p1144r3.html
-#   Lambdas without braces/return; function<int(int)> foo = [](int i) => i*2; (useful for LINQ)
+#   Lambdas without braces/return; function<int(int)> mul2 = [](int i) => i*2; (useful for LINQ)
 #   Sufficient constexpr improvements to rewrite the regex parser into normal code, that template mess is terrible
 #   Zero-overhead deterministic exceptions http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p0709r0.pdf
 #   Compile-time reflection (that SERIALIZE macro is a little too limited, and the error messages are worse than from the regexes)
@@ -436,6 +441,7 @@ TRUE_CFLAGS := -std=c99 $(CCXXFLAGS) $(CONF_CFLAGS) $(CFLAGS)
 #   std::embed http://open-std.org/JTC1/SC22/WG21/docs/papers/2018/p1040r0.html, to get rid of rescompile.py's assembly shenanigans
 #     may allow some other optimizations/simplifications too
 #   Allow int x(int y=0); int x(int y=0) { return y*2; } (only if default value is identical on both ends, of course)
+#   Ranges TS - not because I want it as is, but because it'll get rid of the unused variable warning from for (size_t n : range(42)).
 # The following may or may not be usable, depending on the exact details:
 #   C++2a coroutines, for anything involving the runloop
 #   C++2a modules (it's very easy to produce a bad module system, I don't know if this one avoids the pitfalls)
