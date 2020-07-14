@@ -14,15 +14,6 @@ public:
 		uint8_t keys; // format: 1<<k_up | 1<<k_confirm
 	};
 	
-	//Callers should treat savedat as an opaque binary blob.
-	//The only permitted operations are passing pointers to memcpy/fwrite/etc, and passing them to a game object.
-	struct savedat {
-		uint8_t unlocked;
-		bool seen_random_tutorial;
-		
-		litend<uint64_t> gen_seeds[3];
-	};
-	
 	//'out' should be a 640x480 image. 0rgb8888 or xrgb8888 is recommended, xrgb is slightly faster.
 	//All 640*480 pixels will be overwritten. They will be written non-sequentially, multiple times, and may be read.
 	//Return value:
@@ -34,14 +25,16 @@ public:
 	//If can_skip is false, return value is always 1.
 	virtual int run(const input& in, image& out, bool can_skip = false) = 0;
 	
+	static const size_t savedat_size = 2+8*3; // This is the size of the save data in save() and create().
+	
 	//Call this before exiting the game, and save the result to disk. Next session, pass that struct to create().
 	//For the first run, call create() without a savedat.
-	virtual void save(savedat& dat) = 0;
+	virtual bytearray save() = 0;
 	
 	virtual ~game() {}
 	
 	static game* create();
-	static game* create(const savedat& dat);
+	static game* create(bytesr dat);
 };
 
 

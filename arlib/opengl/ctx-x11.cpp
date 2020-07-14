@@ -115,7 +115,7 @@ public:
 		XVisualInfo* vi = glx.GetVisualFromFBConfig(window_x11.display, fbc);
 		
 		XSetWindowAttributes swa;
-		swa.colormap = XCreateColormap(window_x11.display, parent, vi->visual, AllocNone );
+		swa.colormap = XCreateColormap(window_x11.display, parent, vi->visual, AllocNone);
 		swa.background_pixmap = None;
 		swa.border_pixel      = 0;
 		swa.event_mask        = // StructureNotifyMask | // doesn't seem needed (anymore?)

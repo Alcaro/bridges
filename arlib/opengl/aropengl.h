@@ -56,7 +56,7 @@ public:
 		//- May be slightly slower, especially with vsync off; it does an extra render pass
 		//    (this pass contains only a single Direct3DDevice9Ex->StretchRect, so it's fast, but nonzero)
 		//The flag is ignored on non-Windows systems.
-		//It is safe to use gl.defaultFramebuffer and gl.notifyResize on non-d3dsync objects, even outside Windows.
+		//It is safe to use gl.outputFramebuffer and gl.notifyResize on non-d3dsync objects, even outside Windows.
 # ifdef _WIN32
 		t_direct3d_vsync = 0x004000,
 # else
@@ -71,6 +71,7 @@ public:
 	// TODO: make GL work without the GUI, going for straight GLX and ignoring GTK
 	// probably requires rewriting the runloop system, definitely requires XAddConnectionWatch (XCB can't GL, and manually is even worse)
 	// probably easier on Windows first, but that definitely requires a runloop rewrite
+	// for X, requires deciding who's responsible for XOpenDisplay, and how to pass it to the other side (needed to process other events)
 	class context : nocopy {
 	public:
 		//this is basically the common subset of WGL/GLX/etc

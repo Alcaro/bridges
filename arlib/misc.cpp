@@ -1,9 +1,6 @@
 #include "global.h"
+#include "endian.h"
 #include <new>
-
-#if __FLT_EVAL_METHOD__ != 0
-#warning "platform-specific floating-point rounding detected; consider adding -ffloat-store, -mfpmath=sse, or similar"
-#endif
 
 // trigger a warning if it doesn't stay disabled
 #define __USE_MINGW_ANSI_STDIO 0
@@ -18,7 +15,7 @@ void malloc_fail(size_t size)
 #if defined(__MINGW32__)
 float strtof_arlib(const char * str, char** str_end)
 {
-	int n;
+	int n = 0;
 	float ret;
 	sscanf(str, "%f%n", &ret, &n);
 	if (str_end) *str_end = (char*)str+n;
@@ -26,14 +23,14 @@ float strtof_arlib(const char * str, char** str_end)
 }
 double strtod_arlib(const char * str, char** str_end)
 {
-	int n;
+	int n = 0;
 	double ret;
 	sscanf(str, "%lf%n", &ret, &n);
 	if (str_end) *str_end = (char*)str+n;
 	return ret;
 }
 // gcc doesn't acknowledge scanf("%Lf") as legitimate
-// I can agree that long double is creepy, I'll just leave it like this
+// I can agree that long double is creepy, I'll just leave it commented out until (if) I use ld
 //long double strtold_arlib(const char * str, char** str_end)
 //{
 //	int n;
@@ -68,13 +65,14 @@ void operator delete(void* p, std::size_t n) noexcept { operator delete(p); }
 
 #ifdef __MINGW32__
 extern "C" void __cxa_pure_virtual(); // predeclaration for -Wmissing-declarations
-extern "C" void __cxa_pure_virtual() { puts("__cxa_pure_virtual"); abort(); }
+extern "C" void __cxa_pure_virtual() { __builtin_trap(); }
 #endif
 
 #include "test.h"
 
 test("bitround", "", "")
 {
+	assert_eq(bitround((unsigned)0), 1);
 	assert_eq(bitround((unsigned)1), 1);
 	assert_eq(bitround((unsigned)2), 2);
 	assert_eq(bitround((unsigned)3), 4);
@@ -82,6 +80,7 @@ test("bitround", "", "")
 	assert_eq(bitround((unsigned)640), 1024);
 	assert_eq(bitround((unsigned)0x7FFFFFFF), 0x80000000);
 	assert_eq(bitround((unsigned)0x80000000), 0x80000000);
+	assert_eq(bitround((signed)0), 1);
 	assert_eq(bitround((signed)1), 1);
 	assert_eq(bitround((signed)2), 2);
 	assert_eq(bitround((signed)3), 4);
@@ -89,6 +88,26 @@ test("bitround", "", "")
 	assert_eq(bitround((signed)640), 1024);
 	assert_eq(bitround((signed)0x3FFFFFFF), 0x40000000);
 	assert_eq(bitround((signed)0x40000000), 0x40000000);
+	assert_eq(bitround<uint8_t>(0), 1);
+	assert_eq(bitround<uint8_t>(1), 1);
+	assert_eq(bitround<uint8_t>(2), 2);
+	assert_eq(bitround<uint8_t>(3), 4);
+	assert_eq(bitround<uint8_t>(4), 4);
+	assert_eq(bitround<uint16_t>(0), 1);
+	assert_eq(bitround<uint16_t>(1), 1);
+	assert_eq(bitround<uint16_t>(2), 2);
+	assert_eq(bitround<uint16_t>(3), 4);
+	assert_eq(bitround<uint16_t>(4), 4);
+	assert_eq(bitround<uint32_t>(0), 1);
+	assert_eq(bitround<uint32_t>(1), 1);
+	assert_eq(bitround<uint32_t>(2), 2);
+	assert_eq(bitround<uint32_t>(3), 4);
+	assert_eq(bitround<uint32_t>(4), 4);
+	assert_eq(bitround<uint64_t>(0), 1);
+	assert_eq(bitround<uint64_t>(1), 1);
+	assert_eq(bitround<uint64_t>(2), 2);
+	assert_eq(bitround<uint64_t>(3), 4);
+	assert_eq(bitround<uint64_t>(4), 4);
 }
 
 test("test_nomalloc", "", "")
@@ -100,16 +119,17 @@ test("test_nomalloc", "", "")
 static int x;
 static int y()
 {
-	using_fn(x=1, x=2)
+	x = 0;
+	contextmanager(x=1, x=2)
 	{
 		assert_eq(x, 1);
 		return 42;
 	}
 }
-test("using_fn", "", "")
+test("contextmanager", "", "")
 {
 	x = 0;
-	using_fn(x=1, x=2)
+	contextmanager(x=1, x=2)
 	{
 		assert_eq(x, 1);
 	}
@@ -117,4 +137,10 @@ test("using_fn", "", "")
 	x = 0;
 	assert_eq(y(), 42);
 	assert_eq(x, 2);
+}
+test("endian", "", "")
+{
+	union { uint8_t a[2]; uint16_t b; } c;
+	c.b = 0x0100;
+	assert_eq(c.a[0], END_BIG);
 }

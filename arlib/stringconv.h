@@ -1,6 +1,7 @@
 #pragma once
 #include "global.h"
 #include "string.h"
+#include "set.h"
 #include <stdio.h>
 
 inline string tostring(string s) { return s; }
@@ -10,7 +11,7 @@ inline string tostring(cstring s) { return s; }
 //printf has PRIi32, but the native ones are defined in terms of int/long
 inline string tostring(  signed char val)     { char ret[32]; sprintf(ret, "%d",   val); return ret; } // the C++ standard says
 inline string tostring(unsigned char val)     { char ret[32]; sprintf(ret, "%u",   val); return ret; } // (un)signed char/short are
-//signless char isn't integral, so not here. If anything, it should be returned as character.
+//signless char isn't integral, so not here
 inline string tostring(  signed short val)    { char ret[32]; sprintf(ret, "%d",   val); return ret; } // promoted to (un)signed int
 inline string tostring(unsigned short val)    { char ret[32]; sprintf(ret, "%u",   val); return ret; } // in ellipsis
 inline string tostring(  signed int val)      { char ret[32]; sprintf(ret, "%d",   val); return ret; }
@@ -43,7 +44,7 @@ template<int n> inline string tostringhex(unsigned long val) { char ret[32]; spr
 string tostring(double val);
 string tostring(float val);
 inline string tostring(bool val) { return val ? "true" : "false"; }
-//inline string tostring(char val); // not sure if this one makes sense
+//inline string tostring(char val); // there's no obvious interpretation of this
 
 inline string tostring(const char * s) { return s; } // only exists as tostring, fromstring would be a memory leak
 
@@ -109,3 +110,39 @@ try_fromstring(cstring s, T& out)
 {
 	fromstring(s, out);
 }
+
+
+template<typename T>
+string tostring_dbg(const T& item) { return tostring(item); }
+template<typename T>
+string tostring_dbg(const arrayview<T>& item)
+{
+	return "[" + item.join((string)",", [](const T& i){ return tostring_dbg(i); }) + "]";
+}
+template<typename T> string tostring_dbg(const arrayvieww<T>& item) { return tostring_dbg((arrayview<T>)item); }
+template<typename T> string tostring_dbg(const array<T>& item) { return tostring_dbg((arrayview<T>)item); }
+template<typename Tkey, typename Tvalue>
+string tostring_dbg(const map<Tkey,Tvalue>& item)
+{
+	return "{"+
+		item
+			.select([](const typename map<Tkey,Tvalue>::node& n){ return tostring_dbg(n.key)+" => "+tostring_dbg(n.value); })
+			.as_array()
+			.join(", ")
+		+"}";
+}
+
+template<typename T>
+string tostringhex_dbg(const T& item) { return tostringhex(item); }
+static inline string tostringhex_dbg(const arrayview<uint8_t>& item)
+{
+	string ret = tostringhex(item)+" ";
+	for (char c : item)
+	{
+		if (c >= 0x20 && c <= 0x7e) ret += c;
+		else ret += '.';
+	}
+	return ret;
+}
+static inline string tostringhex_dbg(const arrayvieww<uint8_t>& item) { return tostringhex_dbg((arrayview<uint8_t>)item); }
+static inline string tostringhex_dbg(const array<uint8_t>& item) { return tostringhex_dbg((arrayview<uint8_t>)item); }

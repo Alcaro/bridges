@@ -3,12 +3,11 @@
 #include "array.h"
 #include "hash.h"
 #include <string.h>
-#include <ctype.h>
 
 //A string is a mutable byte container. It usually represents UTF-8 text, but can be arbitrary binary data, including NULs.
 //All string functions taking or returning a char* assume/guarantee NUL termination. Anything using uint8_t* does not.
 
-//cstring is an immutable sequence of bytes that does not own its storage. If the storage is modified, the cstring may not be used.
+//cstring is an immutable sequence of bytes that does not own its storage; it usually points to a string constant, or part of a string.
 //In most contexts, it's called stringview, but I feel that's too long.
 //Long ago, cstring was just a typedef to 'const string&', hence its name.
 
@@ -19,6 +18,40 @@ class string;
                     // minimum 16 (pointer + various members + alignment)
                     //  (actually minimum 12 on 32bit, but who needs 32bit)
 #define MAX_INLINE (OBJ_SIZE-1) // macros instead of static const to make gdb not print them every time
+
+
+// define my own, to guarantee I won't get any surprises in high ascii,
+// and because inline means doesn't shred caller preserve regs aka smaller
+// (also inline is faster)
+
+#define iscntrl my_iscntrl // don't bother defining the ones I don't use
+#define isprint my_isprint
+#define isspace my_isspace
+#define isblank my_isblank
+#define isgraph my_isgraph
+#define ispunct my_ispunct
+#define isalnum my_isalnum
+#define isalpha my_isalpha
+#define isupper my_isupper
+#define islower my_islower
+#define isdigit my_isdigit
+#define isxdigit my_isxdigit
+#define tolower my_tolower
+#define toupper my_toupper
+
+extern const uint8_t char_props[256];
+static inline int isspace(uint8_t c) { return char_props[c] & 0x01; } // C standard says \f \v are space, but this one disagrees
+static inline int isdigit(uint8_t c) { return char_props[c] & 0x40; }
+static inline int isalpha(uint8_t c) { return char_props[c] & 0x30; }
+static inline int islower(uint8_t c) { return char_props[c] & 0x20; }
+static inline int isupper(uint8_t c) { return char_props[c] & 0x10; }
+static inline int isalnum(uint8_t c) { return char_props[c] & 0x70; }
+static inline int isualpha(uint8_t c) { return char_props[c] & 0x38; }
+static inline int isualnum(uint8_t c) { return char_props[c] & 0x78; }
+static inline int isxdigit(uint8_t c) { return char_props[c] & 0x80; }
+static inline int tolower(uint8_t c) { return c|((char_props[c]&0x10)<<1);}
+static inline int toupper(uint8_t c) { return c&~(char_props[c]&0x20); }
+
 
 class cstring {
 	friend class string;
@@ -69,7 +102,8 @@ public:
 		else
 			return arrayview<uint8_t>(m_data, m_len);
 	}
-	//If this is true, bytes()[bytes().length()] is '\0'. If false, it's undefined behavior.
+	//If this is true, bytes()[bytes().size()] is '\0'. If false, it's undefined behavior.
+	//this[this->length()] is always '\0', even if this is false.
 	bool bytes_hasterm() const
 	{
 		return (inlined() || m_nul);
@@ -160,80 +194,14 @@ public:
 	{
 		return memmem(this->ptr(), this->length(), other.ptr(), other.length()) != NULL;
 	}
-	size_t indexof(cstring other) const
-	{
-		uint8_t* ptr = (uint8_t*)memmem(this->ptr(), this->length(), other.ptr(), other.length());
-		if (ptr) return ptr - this->ptr();
-		else return (size_t)-1;
-	}
-	size_t lastindexof(cstring other) const
-	{
-		size_t ret = -1;
-		const uint8_t* start = this->ptr();
-		const uint8_t* find = start;
-		const uint8_t* find_end = find + this->length();
-		if (!other) return this->length();
-		
-		while (true)
-		{
-			find = (uint8_t*)memmem(find, find_end-find, other.ptr(), other.length());
-			if (!find) return ret;
-			ret = find-start;
-			find += 1;
-		}
-	}
-	bool startswith(cstring other) const
-	{
-		if (other.length() > this->length()) return false;
-		return (!memcmp(this->ptr(), other.ptr(), other.length()));
-	}
-	bool endswith(cstring other) const
-	{
-		if (other.length() > this->length()) return false;
-		return (!memcmp(this->ptr()+this->length()-other.length(), other.ptr(), other.length()));
-	}
-	bool icontains(cstring other) const
-	{
-		if (other.length() > this->length()) return false;
-		const char* a = (char*)this->ptr();
-		const char* b = (char*)other.ptr();
-		for (size_t start=0;start<=this->length()-other.length();start++)
-		{
-			size_t i;
-			for (i=0;i<other.length();i++)
-			{
-				if (tolower(a[start+i]) != tolower(b[i])) break;
-			}
-			if (i==other.length()) return true;
-		}
-		return false;
-	}
-	bool istartswith(cstring other) const
-	{
-		if (other.length() > this->length()) return false;
-		const char* a = (char*)this->ptr();
-		const char* b = (char*)other.ptr();
-		for (size_t i=0;i<other.length();i++)
-		{
-			if (tolower(a[i]) != tolower(b[i])) return false;
-		}
-		return true;
-	}
-	bool iendswith(cstring other) const
-	{
-		if (other.length() > this->length()) return false;
-		const char* a = (char*)this->ptr()+this->length()-other.length();
-		const char* b = (char*)other.ptr();
-		for (size_t i=0;i<other.length();i++)
-		{
-			if (tolower(a[i]) != tolower(b[i])) return false;
-		}
-		return true;
-	}
-	bool iequals(cstring other) const
-	{
-		return (this->length() == other.length() && this->istartswith(other));
-	}
+	size_t indexof(cstring other, size_t start = 0) const;
+	size_t lastindexof(cstring other) const;
+	bool startswith(cstring other) const;
+	bool endswith(cstring other) const;
+	bool icontains(cstring other) const;
+	bool istartswith(cstring other) const;
+	bool iendswith(cstring other) const;
+	bool iequals(cstring other) const;
 	
 	string replace(cstring in, cstring out) const;
 	
@@ -337,8 +305,11 @@ public:
 		return substr(start, end);
 	}
 	
-	inline string lower() const; // Only considers ASCII.
-	inline string upper() const;
+	string lower() const; // Only considers ASCII. "ägg".upper() is äGG, not ÄGG.
+	string upper() const;
+	
+	// Whether the string contains one or more embedded NUL bytes.
+	bool contains_nul() const;
 	
 	bool isutf8() const; // NUL is considered valid UTF-8. U+D800, overlong encodings, etc are not.
 	// Treats the string as UTF-8 and returns the codepoint there.
@@ -387,7 +358,6 @@ private:
 		~c_string() { if (do_free) free(ptr); }
 	};
 public:
-	bool contains_nul() const { return memchr(ptr(), '\0', length()); }
 	//no operator const char *, a cstring doesn't necessarily have a NUL terminator
 	c_string c_str() const { return c_string(bytes(), bytes_hasterm()); }
 };
@@ -538,7 +508,7 @@ public:
 		init_from(chars.reinterpret<uint8_t>());
 	}
 	string(array<uint8_t>&& bytes);
-	string(nullptr_t) { init_empty(); }
+	string(nullptr_t) : cstring(noinit()) { init_empty(); }
 	string& operator=(const string& other) { reinit_from(other); return *this; }
 	string& operator=(const cstring& other) { reinit_from(other); return *this; }
 	string& operator=(string&& other) { reinit_from(std::move(other)); return *this; }
@@ -605,37 +575,25 @@ bool operator<(const char * left, cstring right     ) = delete;
 
 inline string operator+(cstring left,      cstring right     ) { string ret=left; ret+=right; return ret; }
 inline string operator+(cstring left,      const char * right) { string ret=left; ret+=right; return ret; }
-inline string operator+(string&& left,     cstring right     ) { left+=right; return std::move(left); }
-inline string operator+(string&& left,     const char * right) { left+=right; return std::move(left); }
+inline string operator+(string&& left,     cstring right     ) { left+=right; return left; }
+inline string operator+(string&& left,     const char * right) { left+=right; return left; }
 inline string operator+(const char * left, cstring right     ) { string ret=left; ret+=right; return ret; }
 
-//inline explicit string operator+(string&& left, char right) { left+=right; return std::move(left); }
+//inline explicit string operator+(string&& left, char right) { left+=right; return left; }
 //inline explicit string operator+(cstring left, char right) { string ret=left; ret+=right; return ret; }
 //inline explicit string operator+(char left, cstring right) { string ret; ret[0]=left; ret+=right; return ret; }
 inline string operator+(string&& left, char right) = delete;
 inline string operator+(cstring left, char right) = delete;
 inline string operator+(char left, cstring right) = delete;
 
-inline string cstring::lower() const
-{
-	string ret = *this;
-	uint8_t * chars = ret.ptr();
-	for (size_t i=0;i<length();i++) chars[i] = tolower(chars[i]);
-	return ret;
-}
-
-inline string cstring::upper() const
-{
-	string ret = *this;
-	uint8_t * chars = ret.ptr();
-	for (size_t i=0;i<length();i++) chars[i] = toupper(chars[i]);
-	return ret;
-}
-
 //Checks if needle is one of the 'separator'-separated words in the haystack. The needle may not contain 'separator' or be empty.
 //For example, haystack "GL_EXT_FOO GL_EXT_BAR GL_EXT_QUUX" (with space as separator) contains needles
 // 'GL_EXT_FOO', 'GL_EXT_BAR' and 'GL_EXT_QUUX', but not 'GL_EXT_QUU'.
 bool strtoken(const char * haystack, const char * needle, char separator);
 
-static inline int isualpha(int c) { return c=='_' || isalpha(c); }
-static inline int isualnum(int c) { return c=='_' || isalnum(c); }
+template<typename T>
+cstring arrayview<T>::get_or(size_t n, const char * def) const
+{
+	if (n < count) return items[n];
+	else return def;
+};

@@ -48,7 +48,7 @@ public:
 	
 	//It's fine to call both of those if you need to keep text/binary data apart. If you don't, both will go to the same one.
 	//Do this before connect(), or you may miss events, for example if the target is unparseable.
-	void callback(function<void(cstring        )> cb_str, function<void()> cb_error) { this->cb_str = cb_str; this->cb_error = cb_error; }
+	void callback(function<void(cstring           )> cb_str, function<void()> cb_error) { this->cb_str = cb_str; this->cb_error = cb_error; }
 	void callback(function<void(arrayview<uint8_t>)> cb_bin, function<void()> cb_error) { this->cb_bin = cb_bin; this->cb_error = cb_error; }
 	
 	bool isOpen() { return sock; }

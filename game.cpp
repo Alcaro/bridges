@@ -950,6 +950,7 @@ public:
 				{
 					game_kb_state = 3-game_kb_state; // toggle
 				}
+				game_kb_visible = 1;
 			}
 			
 			if (in.keys & 1<<k_confirm || game_kb_state == 2)
@@ -1351,32 +1352,38 @@ to_title(); //TODO
 		return 1;
 	}
 	
-	void load(const savedat& dat)
+	void load(bytesr dat)
 	{
-		unlocked = dat.unlocked;
-		seen_random_tutorial = dat.seen_random_tutorial;
+		if (dat.size() != savedat_size) return; // discard bad saves
+		
+		bytestream b(dat);
+		unlocked = b.u8();
+		seen_random_tutorial = b.u8();
 		
 #ifdef ARLIB_THREAD
-		gamegen_next[0] = dat.gen_seeds[0];
-		gamegen_next[1] = dat.gen_seeds[1];
-		gamegen_next[2] = dat.gen_seeds[2];
+		gamegen_next[0] = b.u64l();
+		gamegen_next[1] = b.u64l();
+		gamegen_next[2] = b.u64l();
+#else
+		b.u64l(); b.u64l(); b.u64l();
 #endif
 	}
 	
-	void save(savedat& dat)
+	bytearray save()
 	{
-		dat.unlocked = unlocked;
-		dat.seen_random_tutorial = seen_random_tutorial;
+		bytestreamw b;
+		b.u8(unlocked);
+		b.u8(seen_random_tutorial);
 		
 #ifdef ARLIB_THREAD
-		dat.gen_seeds[0] = gamegen_next[0];
-		dat.gen_seeds[1] = gamegen_next[1];
-		dat.gen_seeds[2] = gamegen_next[2];
+		b.u64l(gamegen_next[0]);
+		b.u64l(gamegen_next[1]);
+		b.u64l(gamegen_next[2]);
 #else
-		dat.gen_seeds[0] = 0;
-		dat.gen_seeds[1] = 0;
-		dat.gen_seeds[2] = 0;
+		b.u64l(0); b.u64l(0); b.u64l(0);
 #endif
+		
+		return b.finish();
 	}
 	
 	void gamegen_step()
@@ -1450,4 +1457,4 @@ to_title(); //TODO
 }
 
 game* game::create() { return new game_impl(); }
-game* game::create(const savedat& dat) { game_impl* ret = new game_impl(); ret->load(dat); return ret; }
+game* game::create(bytesr dat) { game_impl* ret = new game_impl(); ret->load(dat); return ret; }

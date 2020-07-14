@@ -1,11 +1,6 @@
 #include "json.h"
 #include "stringconv.h"
-#ifdef __SSE2__
-#include <emmintrin.h>
-#endif
-#ifdef _MSC_VER
-#error test, especially whether msvc uses __SSE2__
-#endif
+#include "simd.h"
 
 // TODO: find some better place for this
 // if input is 0, undefined behavior
@@ -28,17 +23,12 @@ static inline int ctz32(uint32_t in)
 #endif
 }
 
-static bool l_isspace(char ch)
-{
-	return (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n');
-}
-
 uint8_t jsonparser::nextch()
 {
 again: ;
 	uint8_t ret = *(m_data++);
 	if (ret >= 33) return ret;
-	if (l_isspace(ret)) goto again;
+	if (isspace(ret)) goto again;
 	if (m_data > m_data_end)
 	{
 		m_data--;

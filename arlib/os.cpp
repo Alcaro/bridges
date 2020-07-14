@@ -32,7 +32,7 @@
 
 bool dylib::init(const char * filename)
 {
-	deinit();
+	if (handle) abort();
 	//synchronized(dylib_lock)
 	{
 		handle = dlopen(filename, RTLD_LAZY);
@@ -71,16 +71,16 @@ void dylib::deinit()
 #ifdef _WIN32
 static mutex dylib_lock;
 
-static HANDLE dylib_init(const char * filename, bool uniq)
+bool dylib::init(const char * filename)
 {
+	if (handle) abort();
+	
 	synchronized(dylib_lock) // two threads racing on SetDllDirectory is bad news
 	{
-		HANDLE handle;
-		
-		if (uniq)
-		{
-			if (GetModuleHandleEx(0, filename, (HMODULE*)&handle)) return NULL;
-		}
+		//if (uniq)
+		//{
+		//	if (GetModuleHandleEx(0, filename, (HMODULE*)&handle)) return NULL;
+		//}
 		
 		//this is so weird dependencies, for example winpthread-1.dll, can be placed beside the dll where they belong
 		char * filename_copy = strdup(filename);
@@ -90,17 +90,9 @@ static HANDLE dylib_init(const char * filename, bool uniq)
 		SetDllDirectory(filename_copy);
 		free(filename_copy);
 		
-		handle = (dylib*)LoadLibrary(filename);
+		handle = LoadLibrary(filename);
 		SetDllDirectory(NULL);
-		
-		return handle;
 	}
-}
-
-bool dylib::init(const char * filename)
-{
-	deinit();
-	handle = dylib_init(filename, false);
 	return handle;
 }
 
@@ -245,6 +237,14 @@ bool debug_or_abort()
 
 
 #ifdef _WIN32
+// Returns a*b/c, but gives the correct answer if a*b doesn't fit in uint64_t.
+// (Still gives wrong answer if a*b/c doesn't fit, or if b*c > UINT64_MAX.)
+static uint64_t muldiv64(uint64_t a, uint64_t b, uint64_t c)
+{
+	// doing it in __int128 would be easier, but that ends up calling __udivti3 which is a waste of time.
+	return (a/c*b) + (a%c*b/c);
+}
+
 uint64_t time_us_ne()
 {
 	////this one has an accuracy of 10ms by default
@@ -257,7 +257,7 @@ uint64_t time_us_ne()
 	
 	LARGE_INTEGER timer_now;
 	QueryPerformanceCounter(&timer_now);
-	return 1000000*timer_now.QuadPart/timer_freq.QuadPart;
+	return muldiv64(timer_now.QuadPart, 1000000, timer_freq.QuadPart);
 }
 uint64_t time_ms_ne()
 {
@@ -282,8 +282,8 @@ uint64_t time_ms()
 
 //these functions calculate n/1000 and n/1000000, respectively
 //-O2 optimizes this automatically, but I want -Os on most of the program, only speed-optimizing the hottest spots
-//this is one of said hotspots; the size penalty is tiny (2 bytes, 4 for both), and it's about twice as fast
-//attribute optimize -O2 is ignored
+//this is one of said hotspots; the size penalty is tiny (4 bytes, 8 for both), and it's about twice as fast
+//attribute optimize -O2 makes no difference
 static inline uint32_t div1000(uint32_t n)
 {
 	return 274877907*(uint64_t)n >> 38;
@@ -384,14 +384,19 @@ test("time", "", "time")
 	uint64_t time2_une_fu = time_us_ne();
 	assert_range(time2_une_fu, time2_une_fm-1100,    time2_une_fm+1500);
 	
+#ifndef _WIN32
 	assert_range(time2_u_fm-time_u_fm, 40000, 60000);
 	assert_range(time2_u_fu-time_u_fu, 40000, 60000);
+#else
+	assert_range(time2_u_fm-time_u_fm, 40000, 70000); // Windows time is low resolution by default
+	assert_range(time2_u_fu-time_u_fu, 40000, 70000);
+#endif
 	assert_range(time2_une_fm-time_une_fm, 40000, 60000);
 	assert_range(time2_une_fu-time_une_fu, 40000, 60000);
 }
 
 void not_a_function(); // linker error if the uses aren't optimized out
-DECL_DYLIB_T(libc_t, fread, isalpha, mktime, not_a_function);
+DECL_DYLIB_T(libc_t, not_a_function, fread, mktime, atoi);
 DECL_DYLIB_PREFIX_T(libc_f_t, f, open, read, close);
 
 test("dylib", "", "dylib")
@@ -408,10 +413,9 @@ test("dylib", "", "dylib")
 	assert(!libc.init(libc_so));
 	assert(f.init(libc_so));
 	assert(libc.fread); // these guys must exist, despite not_a_function failing
-	assert(libc.isalpha);
 	assert(libc.mktime);
-	assert(libc.isalpha('a'));
-	assert(!libc.isalpha('1'));
+	assert(libc.atoi);
+	assert_eq(libc.atoi("123"), 123);
 	assert(!libc.not_a_function);
 	assert(f.read == libc.fread);
 }

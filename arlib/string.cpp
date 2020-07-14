@@ -1,5 +1,38 @@
 #include "string.h"
 #include "test.h"
+#include "simd.h"
+
+/*
+static inline int isspace(uint8_t c) { return char_props[c] & 0x01; }
+static inline int isdigit(uint8_t c) { return char_props[c] & 0x40; }
+static inline int isalpha(uint8_t c) { return char_props[c] & 0x30; }
+static inline int islower(uint8_t c) { return char_props[c] & 0x10; }
+static inline int isupper(uint8_t c) { return char_props[c] & 0x20; }
+static inline int isalnum(uint8_t c) { return char_props[c] & 0x70; }
+static inline int isualpha(uint8_t c) { return char_props[c] & 0x38; }
+static inline int isualnum(uint8_t c) { return char_props[c] & 0x78; }
+static inline int isxdigit(uint8_t c) { return char_props[c] & 0x80; }
+// bits 0x02 and 0x04 are unused
+*/
+extern const uint8_t char_props[256] = {
+	//x0    x1    x2    x3    x4    x5    x6    x7    x8    x9    xA    xB    xC    xD    xE    xF
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, // 0x
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 1x
+	0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 2x
+	0xC0, 0xC0, 0xC0, 0xC0, 0xC0, 0xC0, 0xC0, 0xC0, 0xC0, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 3x
+	0x00, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, // 4x
+	0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x00, 0x00, 0x00, 0x00, 0x08, // 5x
+	0x00, 0xA0, 0xA0, 0xA0, 0xA0, 0xA0, 0xA0, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, // 6x
+	0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, // 7x
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 8x
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 9x
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Ax
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Bx
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Cx
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Dx
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Ex
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Fx
+};
 
 void string::resize(uint32_t newlen)
 {
@@ -132,6 +165,81 @@ void string::replace_set(uint32_t pos, uint32_t len, cstring newdat)
 	}
 	
 	memcpy(ptr()+pos, newdat.ptr(), newlength);
+}
+
+size_t cstring::indexof(cstring other, size_t start) const
+{
+	uint8_t* ptr = (uint8_t*)memmem(this->ptr()+start, this->length()-start, other.ptr(), other.length());
+	if (ptr) return ptr - this->ptr();
+	else return (size_t)-1;
+}
+size_t cstring::lastindexof(cstring other) const
+{
+	size_t ret = -1;
+	const uint8_t* start = this->ptr();
+	const uint8_t* find = start;
+	const uint8_t* find_end = find + this->length();
+	if (!other) return this->length();
+	
+	while (true)
+	{
+		find = (uint8_t*)memmem(find, find_end-find, other.ptr(), other.length());
+		if (!find) return ret;
+		ret = find-start;
+		find += 1;
+	}
+}
+bool cstring::startswith(cstring other) const
+{
+	if (other.length() > this->length()) return false;
+	return (!memcmp(this->ptr(), other.ptr(), other.length()));
+}
+bool cstring::endswith(cstring other) const
+{
+	if (other.length() > this->length()) return false;
+	return (!memcmp(this->ptr()+this->length()-other.length(), other.ptr(), other.length()));
+}
+bool cstring::icontains(cstring other) const
+{
+	if (other.length() > this->length()) return false;
+	const char* a = (char*)this->ptr();
+	const char* b = (char*)other.ptr();
+	for (size_t start=0;start<=this->length()-other.length();start++)
+	{
+		size_t i;
+		for (i=0;i<other.length();i++)
+		{
+			if (tolower(a[start+i]) != tolower(b[i])) break;
+		}
+		if (i==other.length()) return true;
+	}
+	return false;
+}
+bool cstring::istartswith(cstring other) const
+{
+	if (other.length() > this->length()) return false;
+	const char* a = (char*)this->ptr();
+	const char* b = (char*)other.ptr();
+	for (size_t i=0;i<other.length();i++)
+	{
+		if (tolower(a[i]) != tolower(b[i])) return false;
+	}
+	return true;
+}
+bool cstring::iendswith(cstring other) const
+{
+	if (other.length() > this->length()) return false;
+	const char* a = (char*)this->ptr()+this->length()-other.length();
+	const char* b = (char*)other.ptr();
+	for (size_t i=0;i<other.length();i++)
+	{
+		if (tolower(a[i]) != tolower(b[i])) return false;
+	}
+	return true;
+}
+bool cstring::iequals(cstring other) const
+{
+	return (this->length() == other.length() && this->istartswith(other));
 }
 
 string cstring::replace(cstring in, cstring out) const
@@ -448,6 +556,39 @@ int string::natcompare3(cstring a, cstring b, bool case_insensitive)
 	return 0;
 }
 
+string cstring::lower() const
+{
+	string ret = *this;
+	uint8_t * chars = ret.ptr();
+	for (size_t i=0;i<length();i++) chars[i] = tolower(chars[i]);
+	return ret;
+}
+
+string cstring::upper() const
+{
+	string ret = *this;
+	uint8_t * chars = ret.ptr();
+	for (size_t i=0;i<length();i++) chars[i] = toupper(chars[i]);
+	return ret;
+}
+
+bool cstring::contains_nul() const
+{
+#ifdef __SSE2__
+	static_assert(sizeof(cstring) == 16);
+	if (inlined())
+	{
+		int iszero = _mm_movemask_epi8(_mm_cmpeq_epi8(_mm_loadu_si128((__m128i*)this), _mm_setzero_si128()));
+		// m_inline[0] becomes the 0001 bit, [1] -> 0002, etc
+		// m_inline_len is number of bytes at the end of the object we don't care about, not counting the NUL terminator
+		// iszero << m_inline_len puts the NUL at the 0x8000 bit; if anything lower is also true, that's a NUL in the input
+		return ((iszero << m_inline_len) & 0x7FFF);
+	}
+	else return memchr(m_data, '\0', m_len);
+#else
+	return memchr(ptr(), '\0', length());
+#endif
+}
 
 string string::codepoint(uint32_t cp)
 {
@@ -666,6 +807,38 @@ bool strtoken(const char * haystack, const char * needle, char separator)
 }
 
 
+
+static inline int alt_isspace(int c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
+static inline int alt_isdigit(int c) { return c >= '0' && c <= '9'; }
+static inline int alt_isalpha(int c) { return (c&~0x20) >= 'A' && (c&~0x20) <= 'Z'; }
+static inline int alt_islower(int c) { return c >= 'a' && c <= 'z'; }
+static inline int alt_isupper(int c) { return c >= 'A' && c <= 'Z'; }
+static inline int alt_isalnum(int c) { return alt_isalpha(c) || alt_isdigit(c); }
+static inline int alt_isualpha(int c) { return c == '_' || alt_isalpha(c); }
+static inline int alt_isualnum(int c) { return c == '_' || alt_isalnum(c); }
+static inline int alt_isxdigit(int c) { return alt_isdigit(c) || ((c&~0x20) >= 'A' && (c&~0x20) <= 'F'); }
+static inline int alt_tolower(int c) { if (alt_isupper(c)) return c|0x20; else return c; }
+static inline int alt_toupper(int c) { if (alt_islower(c)) return c&~0x20; else return c; }
+
+test("ctype", "", "string")
+{
+	for (int i=0;i<=255;i++)
+	{
+		testctx(tostring(i)) {
+			assert_eq(!!isspace(i), !!alt_isspace(i));
+			assert_eq(!!isdigit(i), !!alt_isdigit(i));
+			assert_eq(!!isalpha(i), !!alt_isalpha(i));
+			assert_eq(!!islower(i), !!alt_islower(i));
+			assert_eq(!!isupper(i), !!alt_isupper(i));
+			assert_eq(!!isalnum(i), !!alt_isalnum(i));
+			assert_eq(!!isualpha(i), !!alt_isualpha(i));
+			assert_eq(!!isualnum(i), !!alt_isualnum(i));
+			assert_eq(!!isxdigit(i), !!alt_isxdigit(i));
+			assert_eq(tolower(i), alt_tolower(i));
+			assert_eq(toupper(i), alt_toupper(i));
+		}
+	}
+}
 
 test("strtoken", "", "string")
 {
@@ -1252,5 +1425,39 @@ test("string", "array", "string")
 		assert(!((cstring)"test test tests test").matches_glob("test*tests*test*test"));
 		assert(((cstring)"AAAAAAAAAA").matches_globi("a*???a**a"));
 		assert(!((cstring)"stacked").matches_glob("foobar*"));
+	}
+	
+	{
+		const char * tests[] = {
+			"",
+			"_",
+			"a",
+			"aaaa_aa",
+			"aaaa_aaa",
+			"_______________",
+			"aaaaaaaaaaaaaaa",
+			"aaaaaaaaaaaaaa_",
+			"_aaaaaaaaaaaaaa",
+			"aaaaaaaaaaaaaaaa",
+			"aaaaaaaaaaaaaaa_",
+			"_aaaaaaaaaaaaaaa",
+		};
+		
+		for (const char * test : tests)
+		{
+			testctx(test) {
+				bool nul = false;
+				string a = test;
+				for (int i : range(strlen(test)))
+				{
+					if (a[i] == '_')
+					{
+						nul = true;
+						a[i] = '\0';
+					}
+				}
+				assert_eq(a.contains_nul(), nul);
+			}
+		}
 	}
 }

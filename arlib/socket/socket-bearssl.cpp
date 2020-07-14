@@ -125,39 +125,6 @@ MAYBE_UNUSED static void append_certs_pem_x509(array<uint8_t> certs_pem)
 	}
 }
 
-//old version, ~9x slower (9ms->82ms) due to running the base64 decoder as a state machine
-//MAYBE_UNUSED static void append_certs_pem_x509(arrayview<uint8_t> certs_pem)
-//{
-//	br_pem_decoder_context pc;
-//	br_pem_decoder_init(&pc);
-//	array<uint8_t> cert_this;
-//	
-//	while (certs_pem)
-//	{
-//		size_t tlen = br_pem_decoder_push(&pc, certs_pem.ptr(), certs_pem.size());
-//		certs_pem = certs_pem.skip(tlen);
-//		
-//		//what a strange API, does it really need both event streaming and a callback?
-//		switch (br_pem_decoder_event(&pc)) {
-//		case BR_PEM_BEGIN_OBJ:
-//			cert_this.reset();
-//			if (!strcmp(br_pem_decoder_name(&pc), "CERTIFICATE"))
-//				br_pem_decoder_setdest(&pc, bytes_append, &cert_this);
-//			else
-//				br_pem_decoder_setdest(&pc, NULL, NULL);
-//			break;
-//		
-//		case BR_PEM_END_OBJ:
-//			if (cert_this) append_cert_x509(cert_this);
-//			break;
-//		
-//		case BR_PEM_ERROR:
-//			certs.reset();
-//			return;
-//		}
-//	}
-//}
-
 #ifdef _WIN32
 //crypt32.dll seems to be the only way to access the Windows cert store
 #include <wincrypt.h>
@@ -168,8 +135,6 @@ RUN_ONCE_FN(initialize)
 #ifndef _WIN32
 	append_certs_pem_x509(file::readall("/etc/ssl/certs/ca-certificates.crt"));
 #else
-	//TODO: LoadLibrary this, using some decltype
-	
 	HCERTSTORE store = CertOpenSystemStore((HCRYPTPROV)NULL, "ROOT");
 	if (!store) return;
 	
@@ -232,7 +197,7 @@ static const br_x509_class x509_noanchor_vtable = {
 };
 
 
-class socketssl_impl : public socket {
+class socketssl_schannel : public socket {
 public:
 	autoptr<socket> sock;
 	
@@ -243,16 +208,14 @@ public:
 		byte iobuf[BR_SSL_BUFSIZE_BIDI];
 	} s;
 	
-	runloop* loop;
 	function<void()> cb_read;
 	function<void()> cb_write;
 	
 	MAKE_DESTRUCTIBLE_FROM_CALLBACK();
 	bool errored = false;
 	
-	socketssl_impl(socket* inner, cstring domain, runloop* loop, bool permissive)
+	socketssl_schannel(socket* inner, cstring domain, runloop* loop, bool permissive)
 	{
-		this->loop = loop;
 		this->sock = inner;
 		
 		br_ssl_client_init_full(&s.sc, &s.xc, certs.ptr(), certs.size());
@@ -273,8 +236,8 @@ public:
 		if (sock)
 		{
 			int bearstate = br_ssl_engine_current_state(&s.sc.eng);
-			sock->callback((bearstate & BR_SSL_RECVREC) ? bind_this(&socketssl_impl::on_readable) : NULL,
-			               (bearstate & BR_SSL_SENDREC) ? bind_this(&socketssl_impl::on_writable) : NULL);
+			sock->callback((bearstate & BR_SSL_RECVREC) ? bind_this(&socketssl_schannel::on_readable) : NULL,
+			               (bearstate & BR_SSL_SENDREC) ? bind_this(&socketssl_schannel::on_writable) : NULL);
 		}
 	}
 	
@@ -371,7 +334,7 @@ public:
 		this->cb_write = cb_write;
 	}
 	
-	~socketssl_impl()
+	~socketssl_schannel()
 	{
 		if (!sock) return;
 		
@@ -407,7 +370,7 @@ public:
 	//}
 	//
 	////deserializing constructor
-	//socketssl_impl(int fd, arrayview<uint8_t> data) : socket(fd)
+	//socketssl_schannel(int fd, arrayview<uint8_t> data) : socket(fd)
 	//{
 	//	this->sock = socket::create_from_fd(fd);
 	//	const state_fr& in = *(state_fr*)data.ptr();
@@ -438,20 +401,20 @@ socket* socket::wrap_ssl_raw(socket* inner, cstring domain, runloop* loop)
 	initialize();
 	if (!certs) return NULL;
 	if (!inner) return NULL;
-	return new socketssl_impl(inner, domain, loop, false);
+	return new socketssl_schannel(inner, domain, loop, false);
 }
 
 //array<uint8_t> socketssl::serialize(int* fd)
 //{
-//	return ((socketssl_impl*)this)->serialize(fd);
+//	return ((socketssl_schannel*)this)->serialize(fd);
 //}
 //socketssl* socketssl::deserialize(int fd, arrayview<uint8_t> data)
 //{
-//	if (sizeof(socketssl_impl::state_fr) != data.size()) return NULL;
+//	if (sizeof(socketssl_schannel::state_fr) != data.size()) return NULL;
 //	initialize();
 //	if (!certs) return NULL;
 //	
-//	return new socketssl_impl(fd, data);
+//	return new socketssl_schannel(fd, data);
 //}
 
 #include "../test.h"
@@ -470,7 +433,7 @@ test("BearSSL init", "array,base64,file", "tcp")
 	uint64_t end_us = time_us_ne();
 	if (!RUNNING_ON_VALGRIND)
 	{
-		assert_lt(end_us-begin_us, 50000); // randomly takes either 10ms or 32ms - probably depending on cpu power saving policy
+		assert_lt(end_us-begin_us, 50000); // randomly takes either 10ms or 32ms, probably depending on cpu power saving policy
 	}
 }
 #endif

@@ -104,18 +104,20 @@ else
   DEBUG ?= 0
 endif
 
-CCXXFLAGS = -fvisibility=hidden -Wall -Wmissing-declarations -Wimplicit-fallthrough -Wvla -pipe
-#to silence for (size_t n : range(42))
-CCXXFLAGS += -Wno-unused-variable
-#doesn't seem to do anything, and CFLAGS is used for c++ too which throws warnings all over
+CCXXFLAGS = -fvisibility=hidden -Wall -Wmissing-declarations -Wimplicit-fallthrough -Wvla -Walloca -pipe
+#to silence for (size_t unused : range(42)) - delete this once gcc stops complaining
+CCXXFLAGS += -Wno-unused-variable -Wno-unused-but-set-variable
+#doesn't seem to do anything
 #CFLAGS += -Wmissing-prototypes
-ifneq ($(EXCEPTIONS),1)
-  CCXXFLAGS += -fno-exceptions
+ifeq ($(EXCEPTIONS),1)
+  OPTFLAGS_CXX += -fno-enforce-eh-specs
   ifeq ($(OS),windows)
-    CONF_LFLAGS += -static-libgcc
+    # these eat a few hundred kilobytes, but better embedded than DLL
+    CONF_LFLAGS += -static-libgcc -static-libstdc++
   endif
 else
-  OPTFLAGS_CXX += -fno-enforce-eh-specs
+  CCXXFLAGS += -fno-exceptions
+  OPTFLAGS += -fno-unwind-tables -fno-asynchronous-unwind-tables
 endif
 
 HOST_OS := unix
@@ -126,10 +128,6 @@ ifneq ($(findstring clang,$(CC) $(CXX) $(LD)),)
   CC = clang
   CXX = clang++
   LD = clang++
-endif
-
-ifeq ($(CC_FAMILY),gcc)
-  CCXXFLAGS += -fno-semantic-interposition
 endif
 
 #double gcc bug combo:
@@ -165,7 +163,7 @@ ifeq ($(OS),linux)
     CONF_CFLAGS += -pthread
     CONF_LFLAGS += -pthread
   endif
-  OBJNAME = linux
+  OBJNAME := $(OBJNAME)linux
   TR = valgrind --num-callers=100 --leak-check=full
   ifeq ($(ARGUI),1)
     # Gtk leaves over 9000 'possibly lost' objects around. not interested
@@ -184,20 +182,16 @@ ifeq ($(OS),windows)
     CONF_LFLAGS += -shared
   endif
   ifeq ($(ARTYPE),hybrid)
-    # an exe can export symbols, but its imports are ignored, so trying to call malloc() just segfaults
-    # it may be possible by marking it as native subsystem, not win32, but that has 99999 side effects
-    # DllMain and TLS callbacks are ignored too, so imports cannot be resolved that way
-    # tested on both XP and Wine
-    # https://github.com/wine-mirror/wine/blob/master/dlls/ntdll/loader.c#L1849
-    $(error unsupportable configuration)
+    DEFINES += ARLIB_HYBRID_DLL
+    $(warning hybrid DLL is a poorly tested configuration, prepare for bugs)
   endif
 #  OBJ += obj/resource$(OBJNAME).o
 #  RC = windres
 #  RCFLAGS =
 #obj/resource$(OBJNAME).o: ico/*
 #	$(RC) $(RCFLAGS) ico/minir.rc obj/resource$(OBJNAME).o
-  OBJNAME = windows
-#surprisingly, this is still needed as of gcc 8.1.0 (to check, objdump -x | grep DllCharacteristics, 0x0100 bit is nxcompat)
+  OBJNAME := $(OBJNAME)windows
+#surprisingly, this is still not default as of mingw 8.1.0 (to check, objdump -x | grep DllCharacteristics, 0x0100 bit is nxcompat)
   CONF_LFLAGS += -Wl,--nxcompat
   ifeq ($(ARXPSUPPORT),1)
     DEFINES += _WIN32_WINNT=_WIN32_WINNT_WINXP
@@ -209,7 +203,7 @@ ifeq ($(OS),windows)
   ifeq ($(shell echo ^^),^)
     HOST_OS := windows
   else
-    # building non-windows binaries on a windows host is not supported
+    # building non-windows binaries on a windows host is not supported (Cygwin or WSL compiling for themselves will probably work)
     # why would you do such a thing, anyways?
     $(warning non-cmd windows detected; if SHELL $(SHELL) is something other than sh.exe, makefile should check for that instead)
   endif
@@ -228,8 +222,9 @@ else
 endif
 
 OPTFLAGS += -Os -fomit-frame-pointer -fmerge-all-constants
-OPTFLAGS += -fno-unwind-tables -fno-asynchronous-unwind-tables
-OPTFLAGS += -ffunction-sections -fdata-sections
+OPTFLAGS += -ffunction-sections
+#inhibits some optimizations, and more importantly, turns .bss into .data on Windows
+#OPTFLAGS += -fdata-sections
 OPTFLAGS += -fno-ident
 OPTFLAGS += -DNDEBUG -DARLIB_OPT
 OPTFLAGS_CXX += -fno-threadsafe-statics
@@ -361,11 +356,9 @@ ifeq ($(ARSOCKET),1)
   DEFINES += ARLIB_SOCKET
   
   ifeq ($(OS),windows)
-    CONF_LFLAGS += -lws2_32
+    CONF_LFLAGS += -lws2_32 -liphlpapi
     ifdef ARSOCKET_SSL_WINDOWS
       ARSOCKET_SSL := $(ARSOCKET_SSL_WINDOWS)
-    else
-      ARSOCKET_SSL := schannel
     endif
   endif
   
@@ -376,7 +369,7 @@ ifeq ($(ARSOCKET),1)
   else ifeq ($(ARSOCKET_SSL),schannel)
     CFLAGS_ARLIB += -DARLIB_SSL_SCHANNEL
     #TODO: check if this is still needed
-    #CONF_LFLAGS += -lcrypt32 -lsecur32
+    CONF_LFLAGS += -lsecur32
   else ifeq ($(ARSOCKET_SSL),openssl)
     CFLAGS_ARLIB += -DARLIB_SSL_OPENSSL
     CONF_LFLAGS += -lssl -lcrypto
@@ -390,17 +383,21 @@ ifeq ($(ARSOCKET),1)
     OBJS_LATE += arlib/deps/bearssl-0.6/build/libbearssl.a
 arlib/deps/bearssl-0.6/build/libbearssl.a:
 	$(MAKE) -C arlib/deps/bearssl-0.6/ CFLAGS='$(OPTFLAGS) -fpic' lib
-  else ifeq ($(ARSOCKET_SSL),tlse)
-    CFLAGS_ARLIB += -DARLIB_SSL_TLSE
-    SOURCES_NOWARN += arlib/deps/tlse.c
   else
     $(error unknown SSL library)
   endif
 endif
 
 ifneq ($(wildcard resources/*),)
+  ifneq ($(wildcard resources/*.icon*),)
+    ifeq ($(OS),windows)
+      OBJS += arlib/icons_$(OBJNAME).o
+arlib/icons_$(OBJNAME).o:
+	windres obj/icons.rc obj/icons_$(OBJNAME).o
+    endif
+  endif
   SOURCES_ARLIB += obj/resources.cpp
-obj/resources.cpp: arlib/rescompile.py resources/ resources/*
+obj/resources.cpp: arlib/rescompile.py resources resources/*
 	python3 arlib/rescompile.py
 arlib.h: obj/resources.cpp
 endif
@@ -414,25 +411,28 @@ TRUE_CFLAGS := -std=c99 $(CCXXFLAGS) $(CONF_CFLAGS) $(CFLAGS)
 # - considerably simplifies existing code (everything is doable without that, but some things are painful)
 # - works on the default compiler on current Debian stable, latest Ubuntu LTS, whatever compiler I use for Windows
 #    (currently mingw-w64 8.1.0), and whatever other computers I have at the moment
-#    working on non-default compilers is is recommended, but not an absolute requirement
-# - is functional and non-experimental in a finalized -std= version (c++11 is final, c++0x isn't)
+#    working on additional compilers (for example Clang) is recommended, but not mandatory
+# - is functional and non-experimental in a finalized -std= version (c++11 is final, c++0x isn't, -fcoroutines isn't)
 #    it's fine if not every part of that language version is supported in that compiler version
-# I will not switch C++ version because a dependency needs that. Instead, I'll fork or reinvent the dependency.
+# If someone cares about older C++ versions, I will accept PRs and not intentionally break it, as long as
+# - it doesn't uglify anything too much; most modern C++ features aren't indispensable, but the lambdas are staying
+# - there is no performance penalty if compiled under modern C++; this may be accomplished with #if __cplusplus > 12345, if necessary
+# - said someone maintains it, and does not expect me to; I will forget what's C++11 and what isn't at random intervals
 # The following features would be useful; if enough of them show up, I will switch:
 #   C++2a template lambdas (for the PNG decoder)
-#   C++2a designated initializers (foo_t foo { .a = 42, .b = 123 })
-#   C++2a template string literals (for the regex parser)
+#   C++2a designated initializers (foo_t foo = { .a = 42, .b = 123 })
+#   C++2a template string literals (for the regex parser, and so I can create a string formatting function)
 #   C++2a concepts (also for the regex parser)
-#   C++2a consteval (still for the regex parser)
+#   C++2a consteval (still for the regex parser - that template mess is terrible, I want it as normal code)
 #   C++2a down with typename http://wg21.link/p0634r3
 #   C++2a [[likely]]
 #   C++2a [[no_unique_address]]
-#   C++2a ban non-twos-complement signed
+#   C++2a ban non-twos-complement signed - will probably enable various other C++ improvements
 #   C++2a void foo(auto arg) (shorthand for template<typename T> void foo(T arg) - simplifies function::bind_member)
-#   C++17 <charconv> in libc (not libstdc++) - will speed up tostring(float), and probably simplify it too
+#   C++2a coroutines, for runloop-related stuff
+#   C++17 <charconv>, to speed up tostring(float) (though I'll need to keep the current one around, for Windows)
 #   [[trivially_relocatable]] http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2019/p1144r3.html
 #   Lambdas without braces/return; function<int(int)> mul2 = [](int i) => i*2; (useful for LINQ)
-#   Sufficient constexpr improvements to rewrite the regex parser into normal code, that template mess is terrible
 #   Zero-overhead deterministic exceptions http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p0709r0.pdf
 #   Compile-time reflection (that SERIALIZE macro is a little too limited, and the error messages are worse than from the regexes)
 #   Single-implementation interfaces (public functions and nothing else in header, member variables hidden; useful for the GUI classes)
@@ -441,11 +441,11 @@ TRUE_CFLAGS := -std=c99 $(CCXXFLAGS) $(CONF_CFLAGS) $(CFLAGS)
 #   std::embed http://open-std.org/JTC1/SC22/WG21/docs/papers/2018/p1040r0.html, to get rid of rescompile.py's assembly shenanigans
 #     may allow some other optimizations/simplifications too
 #   Allow int x(int y=0); int x(int y=0) { return y*2; } (only if default value is identical on both ends, of course)
-#   Ranges TS - not because I want it as is, but because it'll get rid of the unused variable warning from for (size_t n : range(42)).
+#   Something to get rid of the unused variable warning from for (size_t n : range(42)) - Ranges TS, maybe?
+#   Overloading operator[] depending on whether it's a read or write access, int x = std::map[key_t] mutating is silly
 # The following may or may not be usable, depending on the exact details:
-#   C++2a coroutines, for anything involving the runloop
 #   C++2a modules (it's very easy to produce a bad module system, I don't know if this one avoids the pitfalls)
-# Other stuff I've seen proposed is uninteresting, though I haven't seen all proposals.
+# Other stuff I've seen proposed is uninteresting to me, though I haven't seen all proposals.
 # I'm not interested in library features. Most of them lack important functionality, have bad constant factors, and bloat the binary.
 # The compiler-magic ones, like std::move and type traits, do one thing and do it well, and optimize to nothing. I use them.
 TRUE_CXXFLAGS := -std=c++17 -fno-rtti $(CCXXFLAGS) $(CONF_CXXFLAGS) $(CXXFLAGS)

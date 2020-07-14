@@ -98,20 +98,20 @@ public:
 	
 	//Argument quoting is fairly screwy on Windows. Command line arguments at all are fairly screwy on Windows.
 	//You may get weird results if you use too many backslashes, quotes and spaces.
-	bool launch(cstring prog, arrayview<string> args, bool override_argv0 = false);
-	bool launch(cstring prog, array<string> args) { return launch(prog, (arrayview<string>)args); }
-	bool launch(cstring prog, arrayvieww<string> args) { return launch(prog, (arrayview<string>)args); }
+	bool launch(string prog, arrayview<string> args, bool override_argv0 = false);
+	bool launch(string prog, array<string> args) { return launch(std::move(prog), (arrayview<string>)args); }
+	bool launch(string prog, arrayvieww<string> args) { return launch(std::move(prog), (arrayview<string>)args); }
 	
 	template<typename... Args>
-	bool launch(cstring prog, Args... args)
+	bool launch(string prog, Args... args)
 	{
 		string argv[sizeof...(Args)] = { args... };
-		return launch(prog, arrayview<string>(argv));
+		return launch(std::move(prog), arrayview<string>(argv));
 	}
 	
-	bool launch(cstring prog)
+	bool launch(string prog)
 	{
-		return launch(prog, arrayview<string>(NULL));
+		return launch(std::move(prog), arrayview<string>(NULL));
 	}
 	
 	

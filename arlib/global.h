@@ -5,12 +5,12 @@
 #endif
 #define _strdup strdup //and windows is being windows as usual
 
-//these aren't needed with modern compilers, according to
+//these shouldn't be needed with modern compilers, according to
 //https://stackoverflow.com/questions/8132399/how-to-printf-uint64-t-fails-with-spurious-trailing-in-format
-//but it's wrong, it's needed even on gcc 8.1.0
-#define __STDC_LIMIT_MACROS //how many of these stupid things exist
-#define __STDC_FORMAT_MACROS // if I include a header, it's because I want to use its contents
-#define __STDC_CONSTANT_MACROS
+//but mingw 8.1.0 needs it anyways for whatever reason
+#define __STDC_LIMIT_MACROS
+#define __STDC_FORMAT_MACROS
+#define __STDC_CONSTANT_MACROS // why are they so many?
 #define _USE_MATH_DEFINES // needed for M_PI on windows
 
 #ifdef _WIN32
@@ -21,13 +21,12 @@
 #  elif _WIN32_WINNT <= 0x0600 // don't replace with _WIN32_WINNT_LONGHORN, windows.h isn't included yet
 #    undef _WIN32_WINNT
 #    define _WIN32_WINNT _WIN32_WINNT_WS03 // _WIN32_WINNT_WINXP excludes SetDllDirectory, so I need to put it at 0x0502
-#    define NTDDI_VERSION NTDDI_WS03 // actually NTDDI_WINXPSP2, but MinGW sddkddkver.h gets angry about that
+#    define NTDDI_VERSION NTDDI_WS03 // actually NTDDI_WINXPSP2, but mingw sddkddkver.h gets angry about that
+#    define _WIN32_IE _WIN32_IE_IE60SP2
 #  endif
-//the namespace pollution this causes is massive, but without it, there's a bunch of functions that
-// just tail call kernel32.dll. With it, they can be inlined.
 #  define WIN32_LEAN_AND_MEAN
 #  ifndef NOMINMAX
-#   define NOMINMAX
+#    define NOMINMAX
 #  endif
 #  define strcasecmp _stricmp
 #  define strncasecmp _strnicmp
@@ -37,8 +36,8 @@
 #  endif
 #  ifdef __MINGW32__
 // mingw *really* wants to define its own printf/scanf, which adds ~20KB random stuff to the binary
-// extra kilobytes is the opposite of what I want, and I want harder, so here's some shenanigans
-// (on some 32bit mingw versions, it also adds a dependency on libgcc_s_sjlj-1.dll - I want that even less)
+// (on some 32bit mingw versions, it also adds a dependency on libgcc_s_sjlj-1.dll)
+// extra kilobytes and dlls is the opposite of what I want, and my want is stronger, so here's some shenanigans
 // comments say libstdc++ demands a POSIX printf, but I don't use libstdc++'s text functions, so I don't care
 // msvcrt strtod also rounds wrong sometimes, but only for unrealistic inputs, so I don't care about that either
 #    define __USE_MINGW_ANSI_STDIO 0 // first, trigger a warning if it's enabled already - probably wrong include order
@@ -48,7 +47,7 @@
 #    undef strtof
 #    define strtof strtof_arlib // third, redefine these functions, they pull in mingw's scanf
 #    undef strtod               // (strtod not acting like scanf is creepy, anyways)
-#    define strtod strtod_arlib // this is why stdlib.h is chosen, rather than cstdbool - they live in stdlib.h
+#    define strtod strtod_arlib // this is why stdlib.h is chosen, rather than some random tiny c++ header like cstdbool
 #    undef strtold
 #    define strtold strtold_arlib
 float strtof_arlib(const char * str, char** str_end);
@@ -56,6 +55,8 @@ double strtod_arlib(const char * str, char** str_end);
 long double strtold_arlib(const char * str, char** str_end);
 #  endif
 #  define STRICT
+//the namespace pollution this causes is massive, but without it, there's a bunch of functions that
+// just tail call kernel32.dll. With it, they can be inlined.
 #  include <windows.h>
 #  undef STRICT
 #endif
@@ -80,20 +81,22 @@ long double strtold_arlib(const char * str, char** str_end);
 typedef void(*funcptr)();
 
 #define using(obj) if(obj;true)
-template<typename T> class using_holder {
+template<typename T> class defer_holder {
 	T fn;
 	bool doit;
 public:
-	using_holder(T fn) : fn(std::move(fn)), doit(true) {}
-	using_holder(using_holder&& other) : fn(std::move(other.fn)), doit(true) { other.doit = false; }
-	~using_holder() { if (doit) fn(); }
+	defer_holder(T fn) : fn(std::move(fn)), doit(true) {}
+	defer_holder(const defer_holder&) = delete;
+	defer_holder(defer_holder&& other) : fn(std::move(other.fn)), doit(true) { other.doit = false; }
+	~defer_holder() { if (doit) fn(); }
 };
 template<typename T>
-using_holder<T> using_bind(T&& f)
+defer_holder<T> defer_create(T&& f)
 {
 	return f;
 }
-#define using_fn(ct,dt) if(auto USING = using_bind((ct, [&](){ dt; }));true)
+// Useful for implementing context manager macros like test_nomalloc, but should not be used directly.
+#define contextmanager(begin_expr,end_expr) using(auto DEFER=defer_create(((begin_expr),[&](){ end_expr; })))
 
 #define JOIN_(x, y) x ## y
 #define JOIN(x, y) JOIN_(x, y)
@@ -115,18 +118,29 @@ using_holder<T> using_bind(T&& f)
 #define __GNUC__ 0
 #endif
 
+#ifndef __has_builtin
+#define __has_builtin(x) 0
+#endif
+
+#if __has_builtin(__builtin_unpredictable)
+#define UNPREDICTABLE(expr) __builtin_unpredictable(!!(expr))
+#else
+#define UNPREDICTABLE(expr) (expr)
+#endif
+
 using std::nullptr_t;
 
 //some magic stolen from http://blogs.msdn.com/b/the1/archive/2004/05/07/128242.aspx
 //C++ can be so messy sometimes...
 template<typename T, size_t N> char(&ARRAY_SIZE_CORE(T(&x)[N]))[N];
-template<typename T> typename std::enable_if<sizeof(T)==0, T&>::type ARRAY_SIZE_CORE(T& x); // for size-zero arrays
+template<typename T> typename std::enable_if<sizeof(T)==0, T&>::type ARRAY_SIZE_CORE(T& x); // size-zero arrays are a special case
 #define ARRAY_SIZE(x) (sizeof(ARRAY_SIZE_CORE(x)))
 
 //just to make C++ an even bigger mess. based on https://github.com/swansontec/map-macro with some changes:
 //- namespaced all child macros, renamed main one
 //- merged https://github.com/swansontec/map-macro/pull/3
 //- merged http://stackoverflow.com/questions/6707148/foreach-macro-on-macros-arguments#comment62878935_13459454, plus ifdef
+//explanation on what this nonsense does: http://jhnet.co.uk/articles/cpp_magic
 #define PPFE_EVAL0(...) __VA_ARGS__
 #define PPFE_EVAL1(...) PPFE_EVAL0(PPFE_EVAL0(PPFE_EVAL0(__VA_ARGS__)))
 #define PPFE_EVAL2(...) PPFE_EVAL1(PPFE_EVAL1(PPFE_EVAL1(__VA_ARGS__)))
@@ -250,6 +264,7 @@ void malloc_fail(size_t size);
 inline anyptr malloc_check(size_t size)
 {
 	_test_malloc();
+	if (size >= 0x80000000) malloc_fail(size);
 	void* ret = malloc(size);
 	if (size && !ret) malloc_fail(size);
 	return ret;
@@ -261,6 +276,7 @@ inline anyptr realloc_check(anyptr ptr, size_t size)
 {
 	if ((void*)ptr) _test_free();
 	if (size) _test_malloc();
+	if (size >= 0x80000000) malloc_fail(size);
 	void* ret = realloc(ptr, size);
 	if (size && !ret) malloc_fail(size);
 	return ret;
@@ -299,33 +315,6 @@ template<typename T, typename... Args> static T max(const T& a, Args... args)
 	if (a < b) return b;
 	else return a;
 }
-
-
-
-//too reliant on non-ancient compilers
-////some SFINAE shenanigans to call T::create if it exists, otherwise new() - took an eternity to google up
-////don't use this template yourself, use generic_create/destroy instead
-//template<typename T> class generic_create_core {
-//	template<int G> class int_eater {};
-//public:
-//	template<typename T2> static T* create(T2*, int_eater<sizeof(&T2::create)>*) { return T::create(); }
-//	static T* create(T*, ...) { return new T(); }
-//	
-//	template<typename T2> static void destroy(T* obj, T2*, int_eater<sizeof(&T2::release)>*) { obj->release(); }
-//	static void destroy(T* obj, T*, ...) { delete obj; }
-//};
-//template<typename T> T* generic_create() { return generic_create_core<T>::create((T*)NULL, NULL); }
-//template<typename T> void generic_delete(T* obj) { generic_create_core<T>::destroy(obj, (T*)NULL, NULL); }
-//
-//template<typename T> T* generic_create() { return T::create(); }
-//template<typename T> T* generic_new() { return new T; }
-//template<typename T> void generic_delete(T* obj) { delete obj; }
-//template<typename T> void generic_release(T* obj) { obj->release(); }
-//
-//template<typename T> void* generic_create_void() { return (void*)generic_create<T>(); }
-//template<typename T> void* generic_new_void() { return (void*)generic_new<T>(); }
-//template<typename T> void generic_delete_void(void* obj) { generic_delete((T*)obj); }
-//template<typename T> void generic_release_void(void* obj) { generic_release((T*)obj); }
 
 
 
@@ -402,6 +391,7 @@ class refcount {
 	
 public:
 	refcount() { inner = new inner_t(); inner->refcount = 1; }
+	refcount(nullptr_t) { inner = NULL; }
 	refcount(const refcount<T>& other) { inner = other.inner; inner->refcount++; }
 	refcount(refcount<T>&& other) { inner = other.inner; other.inner = NULL; }
 	refcount<T>& operator=(T* ptr) = delete;
@@ -412,6 +402,7 @@ public:
 	const T& operator*() const { return inner->item; }
 	operator T*() { return &inner->item; }
 	operator const T*() const { return &inner->item; }
+	bool unique() const { return inner->refcount == 1; }
 	~refcount() { if (inner && --inner->refcount == 0) delete inner; }
 };
 
@@ -476,9 +467,11 @@ public:
 //#endif
 
 //Acts like strstr, with the obvious difference.
-#ifdef _WIN32 // linux has this already
-void* memmem(const void * haystack, size_t haystacklen, const void * needle, size_t needlelen) __attribute__((pure));
+#if defined(_WIN32) || defined(__x86_64__) // Windows doesn't have this; Linux does, but libc is poorly optimized on x64.
+void* memmem_arlib(const void * haystack, size_t haystacklen, const void * needle, size_t needlelen) __attribute__((pure));
+#define memmem memmem_arlib
 #endif
+
 //Returns distance to first difference, or 'len' if that's smaller.
 size_t memcmp_d(const void * a, const void * b, size_t len) __attribute__((pure));
 
@@ -488,30 +481,27 @@ size_t memcmp_d(const void * a, const void * b, size_t len) __attribute__((pure)
 //typedef unsigned __int64 uint64_t;
 //typedef unsigned int size_t;
 
-//undefined behavior if 'in' is 0 or negative, or if the output would be out of range
-//TODO: investigate replacing this with std::ceil2 or std::bit_ceil
+//undefined behavior if 'in' is negative, or if the output would be out of range (signed input types are fine)
+//returns 1 if input is 0
 template<typename T> static inline T bitround(T in)
 {
-#if defined(__GNUC__) && defined(__x86_64__)
-	//this seems somewhat faster, and more importantly, it's smaller
-	//x64 only because I don't know if it does something stupid on other archs
-	//I'm surprised gcc doesn't detect this pattern and optimize it, it does detect a few others (like byteswap)
-	//special casing every size is because if T is signed, ~(T)0 is -1, and -1 >> N is -1 (and likely also undefined behavior)
-	if (in == 1) return in;
-	if (sizeof(T) == 1) return 1 + ((~(uint8_t )0) >> __builtin_clz(in - 1));
-	if (sizeof(T) == 2) return 1 + ((~(uint16_t)0) >> __builtin_clz(in - 1));
-	if (sizeof(T) == 4) return 1 + ((~(uint32_t)0) >> __builtin_clz(in - 1));
-	if (sizeof(T) == 8) return 1 + ((~(uint64_t)0) >> __builtin_clzll(in-1));
+#if defined(__GNUC__)
+	static_assert(sizeof(unsigned) == 4);
+	static_assert(sizeof(unsigned long long) == 8);
+	
+	if (in <= 1) return 1;
+	if (sizeof(T) <= 4) return 2u << (__builtin_clz(in - 1) ^ 31); // clz on x86 is bsr^31, so this compiles to bsr^31^31,
+	if (sizeof(T) == 8) return 2ull<<(__builtin_clzll(in-1) ^ 63); // which optimizes better than the usual 1<<(32-clz) bit_ceil
+	
 	abort();
 #endif
-	//TODO: https://stackoverflow.com/q/355967 for msvc
 	
-	in--;
+	in -= (bool)in; // so bitround(0) becomes 1, rather than integer overflow and back to 0
 	in |= in>>1;
 	in |= in>>2;
 	in |= in>>4;
-	if constexpr (sizeof(in) > 1) in |= in>>8;  // silly ifs to avoid 'shift amount out of range' warnings if the condition is false
-	if constexpr (sizeof(in) > 2) in |= in>>16; // arguably a gcc bug, but hard to avoid false positives
+	if constexpr (sizeof(in) > 1) in |= in>>8; // silly ifs to avoid 'shift amount out of range' warnings
+	if constexpr (sizeof(in) > 2) in |= in>>16;
 	if constexpr (sizeof(in) > 4) in |= in>>32;
 	in++;
 	return in;
@@ -539,12 +529,12 @@ template<typename T> static inline T bitround(T in)
 #define COMMON_INST(T) extern template class T
 #endif
 
-//For cases where Gcc thinks a variable is used uninitialized, but it isn't in practice.
+//For cases where gcc thinks a variable is used uninitialized, but it isn't in practice.
 //Usage: int foo KNOWN_INIT(0)
 #define KNOWN_INIT(x) = x
 
 //Attach this attribute to the tail loop after a SIMD loop, so the compiler won't try to vectorize something with max 4 iterations.
-//(Neither compiler seems to acknowledge 'don't unroll' as 'don't vectorize', and Gcc doesn't have a 'don't vectorize' at all.)
+//(Neither compiler seems to acknowledge 'don't unroll' as 'don't vectorize', and gcc doesn't have a 'don't vectorize' at all.)
 #ifdef __clang__
 #define SIMD_LOOP_TAIL _Pragma("clang loop unroll(disable) vectorize(disable)")
 #elif __GNUC__ >= 8
@@ -574,27 +564,51 @@ public:
                    static void JOIN(ondeinit,__LINE__)()
 #endif
 
-#define container_of(ptr, outer_t, member) \
-	((outer_t*)((uint8_t*)(ptr) - (offsetof(outer_t,member))))
+#define container_of(ptr, outer_t, member) ((outer_t*)((uint8_t*)(ptr) - (offsetof(outer_t,member))))
 
 class range_iter_t {
 	size_t n;
+	size_t step;
 public:
-	range_iter_t(size_t n) : n(n) {}
-	bool operator!=(const range_iter_t& other) { return n != other.n; }
-	void operator++() { n++; }
+	range_iter_t(size_t n, size_t step) : n(n), step(step) {}
+	bool operator!=(const range_iter_t& other) { return n < other.n; }
+	forceinline void operator++() { n += step; }
 	size_t operator*() { return n; }
 };
 class range_t {
-	size_t a;
-	size_t b;
+	size_t start;
+	size_t stop;
+	size_t step;
 public:
-	range_t(size_t a, size_t b) : a(a), b(b) {}
-	range_iter_t begin() const { return a; }
-	range_iter_t end() const { return b; }
+	range_t(size_t start, size_t stop, size_t step) : start(start), stop(stop), step(step) {}
+	range_iter_t begin() const { return { start, step }; }
+	range_iter_t end() const { return { stop, 0 }; }
 };
-static inline range_t range(size_t n) { return range_t(0, n); }
-static inline range_t range(size_t a, size_t b) { return range_t(a, b); }
+static inline range_t range(size_t stop) { return range_t(0, stop, 1); }
+static inline range_t range(size_t start, size_t stop, size_t step = 1) { return range_t(start, stop, step); }
+
+// WARNING: Hybrid EXE/DLL is not supported by the OS. If it's ran as an EXE, it's a perfectly normal EXE,
+//  other than its nonempty exports section; however, if used as a DLL, it's subject to several limitations:
+// - It's not supported by the OS; it relies on a bunch of implementation details and ugly tricks that may break in newer OSes.
+// - The program must call arlib_hybrid_dll_init() at the top of every DLLEXPORT function.
+//     (It's safe to call it multiple times, including multithreaded, as long as the first one has returned before the second enters.)
+//     (It's also safe to call it if it's ran as an EXE, and on OSes other than Windows. It'll just do nothing.)
+//     (Only the first call to arlib_hybrid_dll_init() does anything, so it's safe to omit it in
+//       exported functions guaranteed to not be the first one called, though not recommended.)
+// - It is poorly tested. __builtin_cpu_supports does not function properly, and I don't know what else is broken.
+// - DLLEXPORTed variables may not have constructors - the ctors are only called in arlib_hybrid_dll_init().
+// - On XP, global variables' destructors will never run, and dependent DLLs are never unloaded. It's a memory leak.
+//     On Vista and higher, it's untested.
+//     Note that parts of Arlib contains global constructors.
+// - If a normal DLL imports a symbol that doesn't exist, LoadLibrary's caller gets an error.
+//     If this one loads a symbol that doesn't exist, it'll crash.
+// - The program may not use compiler-supported thread-local variables from a DLL path.
+//     TlsAlloc()/etc is fine, but since destructors are unreliable, it's not recommended.
+#ifdef ARLIB_HYBRID_DLL
+void arlib_hybrid_dll_init();
+#else
+#define arlib_hybrid_dll_init() // null
+#endif
 
 //If an interface defines a function to set some state, and a callback for when this state changes,
 // calling that function will not trigger the state callback.

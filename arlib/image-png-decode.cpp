@@ -1,16 +1,7 @@
 #include "image.h"
 #include "bytestream.h"
 #include "crc32.h"
-#ifdef __SSE2__
-#include <emmintrin.h>
-#include "stringconv.h"
-inline void debug8(__m128i a){uint8_t n[16];memcpy(n,&a,16);puts(tostringhex(n));}
-inline void debug16(__m128i a){int16_t n[8];memcpy(n,&a,16);printf("%d %d %d %d %d %d %d %d\n",n[0],n[1],n[2],n[3],n[4],n[5],n[6],n[7]);}
-inline void debug32(__m128i a){int32_t n[4];memcpy(n,&a,16);printf("%d %d %d %d\n",n[0],n[1],n[2],n[3]);}
-inline void debug8(const char*n,__m128i a){printf("%s ",n);debug8(a);}
-inline void debug16(const char*n,__m128i a){printf("%s ",n);debug16(a);}
-inline void debug32(const char*n,__m128i a){printf("%s ",n);debug32(a);}
-#endif
+#include "simd.h"
 
 #define MINIZ_HEADER_FILE_ONLY
 #include "deps/miniz.c"
@@ -122,7 +113,11 @@ bool image::init_decode_png(arrayview<uint8_t> pngdata)
 		palettelen = PLTE.len/3;
 		for (unsigned i=0;i<palettelen;i++)
 		{
-			palette[i] = 0xFF000000 | PLTE.u24b();
+			uint32_t color = 0xFF000000;
+			color |= PLTE.u8()<<16; // could've been cleaner if order of evaluation wasn't implementation defined...
+			color |= PLTE.u8()<<8;
+			color |= PLTE.u8();
+			palette[i] = color;
 		}
 	}
 	
@@ -174,7 +169,7 @@ bool image::init_decode_png(arrayview<uint8_t> pngdata)
 			{
 				uint8_t newa = tRNS.u8();
 				if (newa != 0x00 && newa != 0xFF) has_bool_alpha = false;
-				palette[i] = (palette[i]&0x00FFFFFF) | newa<<24;
+				palette[i] = (palette[i]&0x00FFFFFF) | (uint32_t)newa<<24; // extra cast because u8 << 24 is signed
 			}
 		}
 		if (color_type == 4) goto fail;
@@ -306,7 +301,7 @@ goto fail;
 				// Clang optimizes abs(x) = (x^(x<0)) - (x<0) to real abs (with -mssse3), but it can't comprehend this one
 				// (GCC doesn't do anything useful with either)
 				return _mm_max_epi16(a, _mm_sub_epi16(_mm_setzero_si128(), a)); 
-			}; 
+			};
 #endif
 			// ignore simding the other filters; Paeth is the most common, and also the most expensive per pixel
 			// it can only be SIMDed to a degree of filter_bpp, so ignore filter_bpp=1
@@ -314,7 +309,7 @@ goto fail;
 			//    one 1px ahead of the one below, but the required data structures would be quite annoying,
 			//    and combining the bytes would be annoying too)
 			// macro instead of lambda is 7% faster
-#define SIMD_PAETH(filter_bpp) \
+#define SIMD_PAETH(filter_bpp) do { \
 					uint32_t a32 = *(uint32_t*)(defilter_out+x                  -filter_bpp);            \
 					uint32_t b32 = *(uint32_t*)(defilter_out+x-defilter_out_line           );            \
 					uint32_t c32 = *(uint32_t*)(defilter_out+x-defilter_out_line-filter_bpp);            \
@@ -343,11 +338,13 @@ goto fail;
 					uint32_t out32 = _mm_cvtsi128_si32(out);                                             \
 					if (filter_bpp == 3)                                                                 \
 						out32 = (out32&0xFFFFFF00) | (*outp&0x000000FF);                                 \
-					*outp = out32;
+					*outp = out32;                                                                       \
+				} while(0)
 			if (filter_bpp == 3)
 			{
-				//three bytes at the time, no need for a scalar tail loop
+				//one pixel at the time, no need for a scalar tail loop
 				//shift one byte to the left, so we don't overflow the malloc at the last scanline
+				//we don't actually change that byte, but it's UB anyways
 				defilter_out--;
 				for (size_t x=0;x<filter_width;x+=3)
 				{
@@ -364,8 +361,7 @@ goto fail;
 				break;
 			}
 			
-			// not SIMD_LOOP_TAIL, since 1byte-per-pixel (common with palettes) isn't manually vectorized
-			// (but if I can't vectorize it, there's no way gcc can either)
+			// not SIMD_LOOP_TAIL, the below runs for filter_bpp=1 aka palette
 #endif
 			for (size_t x=0;x<filter_width;x++)
 			{
@@ -555,9 +551,9 @@ static inline void unpack_pixels(uint32_t width, uint32_t height, uint32_t* pixe
 			if (color_type == 2)
 				pixels[x] = 0xFF000000 | sourceat[0]<<16 | sourceat[1]<<8 | sourceat[2]<<0;
 			if (color_type == 4)
-				pixels[x] = sourceat[1]<<24 | sourceat[0]*0x010101;
+				pixels[x] = (uint32_t)sourceat[1]<<24 | sourceat[0]*0x010101;
 			if (color_type == 6)
-				pixels[x] = sourceat[3]<<24 | sourceat[0]<<16 | sourceat[1]<<8 | sourceat[2]<<0;
+				pixels[x] = (uint32_t)sourceat[3]<<24 | sourceat[0]<<16 | sourceat[1]<<8 | sourceat[2]<<0;
 			x++;
 		}
 		

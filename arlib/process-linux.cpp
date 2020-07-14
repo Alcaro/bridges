@@ -367,15 +367,16 @@ pid_t process::launch_impl(const char * program, array<const char*> argv, array<
 	return ret;
 }
 
-bool process::launch(cstring prog, arrayview<string> args, bool override_argv0)
+bool process::launch(string prog, arrayview<string> args, bool override_argv0)
 {
 	sigchld::init(loop);
 	
-	array<const char*> argv;
-	string progpath = find_prog(prog); // don't inline, the variable must be kept alive until calling launch_impl
+	string progpath = find_prog(prog);
 	if (!progpath) return false;
+	
+	array<const char*> argv;
 	if (!override_argv0)
-		argv.append((const char*)progpath);
+		argv.append(prog);
 	for (size_t i=0;i<args.size();i++)
 	{
 		argv.append((const char*)args[i]);
@@ -511,7 +512,7 @@ void process::input::update(uintptr_t)
 {
 	if (pipe[1] == -1) return;
 	
-	if (buf.remaining() != 0)
+	if (buf)
 	{
 		arrayview<uint8_t> bytes = buf.pull_buf();
 		ssize_t nbytes = ::write(pipe[1], bytes.ptr(), bytes.size());
@@ -519,11 +520,11 @@ void process::input::update(uintptr_t)
 		if (nbytes <= 0) goto do_terminate;
 		buf.pull_done(nbytes);
 	}
-	if (buf.remaining() == 0 && started && do_close) goto do_terminate;
+	if (!buf && started && do_close) goto do_terminate;
 	
 do_monitor:
 	bool should_monitor;
-	should_monitor = (buf.remaining() != 0);
+	should_monitor = (buf);
 	if (should_monitor != monitoring)
 	{
 		loop->set_fd(pipe[1], NULL, (should_monitor ? bind_this(&input::update) : NULL));

@@ -120,8 +120,8 @@ int main(int argc, char** argv)
 			}
 		}
 		uint64_t end = time_ms_ne();
-		//expected (with side = 3..9, i = 0..9999, generate.cpp md5 94940171e4f1b91ccedf683c90a95930):
-		//32161 solvable, 0 unsolvable, 37839 multiple solutions, took 4062 ms
+		//expected (with side = 3..9, i = 0..9999, generate.cpp md5 f32cac429a654b96cc327086541aac4b):
+		//41535 solvable, 0 unsolvable, 28465 multiple solutions, took 7266 ms
 		printf("%i solvable, %i unsolvable, %i multiple solutions, took %u ms\n",
 		       nsolv, nunsolv, nmultisolv, (unsigned)(end-start));
 		
@@ -209,18 +209,14 @@ int main(int argc, char** argv)
 	gl.GenTextures(1, &tex);
 	gl.BindTexture(GL_TEXTURE_2D, tex);
 	
-	gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1024, 512, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, NULL);
+	gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, 1024, 512, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, NULL);
 	gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	
 	pressed_keys_init();
 	
 	//save support not implemented here, just hardcode something reasonable
-	static const uint8_t saveraw[] = { 31,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
-	game::savedat save;
-	static_assert(sizeof(save) == sizeof(saveraw));
-	memcpy(&save, saveraw, sizeof(save));
-	
+	static const uint8_t save[] = { 31,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
 	game* g = game::create(save);
 	
 	bool first = true;
@@ -267,13 +263,14 @@ int main(int argc, char** argv)
 		
 		//redraw the texture, to avoid glitches if we're sent an Expose event
 		//no point reuploading, and no point caring about whether the event was Expose or not, just redraw
-		gl.Clear(GL_COLOR_BUFFER_BIT); // does nothing, but likely makes things faster
+		gl.Clear(GL_COLOR_BUFFER_BIT); // does nothing, but docs say it makes things faster
 		gl.Begin(GL_TRIANGLE_STRIP);
 		gl.TexCoord2f(0,            0          ); gl.Vertex3i(0,   480, 0);
 		gl.TexCoord2f(640.0/1024.0, 0          ); gl.Vertex3i(640, 480, 0);
 		gl.TexCoord2f(0,            480.0/512.0); gl.Vertex3i(0,   0,   0);
 		gl.TexCoord2f(640.0/1024.0, 480.0/512.0); gl.Vertex3i(640, 0,   0);
 		gl.End();
+		//gl.RasterPos2i(0, 0);
 		
 		gl.swapBuffers();
 		

@@ -129,6 +129,7 @@ socket* socks5::connect(bool ssl, cstring domain, int port, runloop* loop)
 
 #include "test.h"
 
+#ifdef ARLIB_TEST
 static void clienttest(cstring target)
 {
 	test_skip("too slow");
@@ -136,11 +137,12 @@ static void clienttest(cstring target)
 	
 	autoptr<runloop> loop = runloop::create();
 	struct socks5_par param = { loop, socket::create("localhost", 1080, loop), target, 80 };
-	autoptr<socket> sock = wrap_socks5(param);
+	socket* sock = wrap_socks5(param);
 	
 	socket_test_http(sock, loop);
 }
 
 test("SOCKS5 with IP", "tcp", "socks5") { clienttest("1.1.1.1"); }
 test("SOCKS5 with domain", "tcp", "socks5") { clienttest("google.com"); }
+#endif
 #endif

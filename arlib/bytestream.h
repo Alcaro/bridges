@@ -15,17 +15,15 @@ protected:
 public:
 	static forceinline arrayview<uint8_t> to_signature(arrayview<uint8_t> sig) { return sig; }
 	template<size_t N>
-	static forceinline arrayview<uint8_t> to_signature(uint8_t (&sig)[N])         { return { sig, N }; }
+	static forceinline arrayview<uint8_t> to_signature(uint8_t (&sig)[N])      { return { sig, N }; }
 	static forceinline arrayview<uint8_t> to_signature(cstring sig)            { return sig.bytes(); }
 	static forceinline arrayview<uint8_t> to_signature(const char * sig)       { return { (uint8_t*)sig, strlen(sig) }; }
-	// TODO: delete this one
-	static forceinline arrayview<uint8_t> to_signature(const std::initializer_list<uint8_t>& il) { return { il.begin(), il.size() }; }
 	template<typename... Ts>
 	static forceinline sarray<uint8_t, 1+sizeof...(Ts)>
 	to_signature(uint8_t first, Ts... next)
 	{
 		// TODO: use static_assert once this one is consteval
-		if (!((next >= 0 && next <= 255) && ...))
+		if (((next < 0 || next > 255) || ...))
 		{
 			abort();
 		}
@@ -62,8 +60,6 @@ public:
 		return arrayview<uint8_t>(at, n);
 	}
 	
-	// super ugly, but there's no way to implement to_signature(u8, u8, u8) without consteval or lifetime issues
-	// and the worst part is most of it has to be copied to _dbg
 	template<typename... Ts>
 	forceinline bool signature(Ts... args)
 	{
@@ -100,7 +96,7 @@ public:
 	forceinline float f32l()
 	{
 		static_assert(sizeof(float) == 4);
-		uint32_t a = end_le_to_nat(u32l());
+		uint32_t a = u32l();
 		float b;
 		memcpy(&b, &a, sizeof(float));
 		return b;
@@ -108,7 +104,7 @@ public:
 	forceinline float f32b()
 	{
 		static_assert(sizeof(float) == 4);
-		uint32_t a = end_be_to_nat(u32l());
+		uint32_t a = u32b();
 		float b;
 		memcpy(&b, &a, sizeof(float));
 		return b;
@@ -116,7 +112,7 @@ public:
 	forceinline double f64l()
 	{
 		static_assert(sizeof(double) == 8);
-		uint64_t a = end_le_to_nat(u64l());
+		uint64_t a = u64l();
 		double b;
 		memcpy(&b, &a, sizeof(double));
 		return b;
@@ -124,13 +120,13 @@ public:
 	forceinline double f64b()
 	{
 		static_assert(sizeof(double) == 8);
-		uint64_t a = end_be_to_nat(u64l());
+		uint64_t a = u64b();
 		double b;
 		memcpy(&b, &a, sizeof(double));
 		return b;
 	}
 	
-	forceinline cstring strnul() // TODO: make sure cstring constructor is optimized out
+	forceinline cstring strnul()
 	{
 		const uint8_t * tmp = at;
 		while (*at) at++;
@@ -147,17 +143,6 @@ public:
 	forceinline uint32_t u32lat(size_t pos) { return readu_le32(start+pos); }
 	forceinline uint32_t u32bat(size_t pos) { return readu_be32(start+pos); }
 	forceinline arrayview<uint8_t> peek_at(size_t pos, size_t len) { return arrayview<uint8_t>(start+pos, len); }
-	
-	uint32_t u24l()
-	{
-		//doubt this is worth optimizing, it's rare...
-		arrayview<uint8_t> b = bytes(3);
-		return b[0] | b[1]<<8 | b[2]<<16;
-	}
-	uint32_t u24b()
-	{
-		return end_swap24(u24l());
-	}
 	
 	// for bytestream_dbg
 	void enter() {}
@@ -294,6 +279,7 @@ public:
 };
 
 
+// TODO: create a bytestream whose output size is known beforehand, so it doesn't malloc
 class bytestreamw {
 protected:
 	array<uint8_t> buf;
@@ -307,84 +293,52 @@ public:
 	{
 		buf += str.bytes();
 	}
-	void u8(uint8_t val)
+	template<typename... Ts>
+	void u8s(Ts... bs)
 	{
-		buf += arrayview<uint8_t>(&val, 1);
+		uint8_t raw[] = { (uint8_t)bs... };
+		bytes(raw);
 	}
-	void u16l(uint16_t val)
-	{
-		litend<uint16_t> valn = val;
-		buf += valn.bytes();
-	}
-	void u16b(uint16_t val)
-	{
-		bigend<uint16_t> valn = val;
-		buf += valn.bytes();
-	}
-	void u24l(uint32_t val)
-	{
-		u8(val>>0);
-		u8(val>>8);
-		u8(val>>16);
-	}
-	void u24b(uint32_t val)
-	{
-		u8(val>>16);
-		u8(val>>8);
-		u8(val>>0);
-	}
-	void u32l(uint32_t val)
-	{
-		litend<uint32_t> valn = val;
-		buf += valn.bytes();
-	}
-	void u32b(uint32_t val)
-	{
-		bigend<uint32_t> valn = val;
-		buf += valn.bytes();
-	}
-	void u64l(uint64_t val)
-	{
-		litend<uint64_t> valn = val;
-		buf += valn.bytes();
-	}
-	void u64b(uint64_t val)
-	{
-		bigend<uint64_t> valn = val;
-		buf += valn.bytes();
-	}
+	void u8(uint8_t val) { buf += arrayview<uint8_t>(&val, 1); }
+	void u16l(uint16_t val) { buf += pack_le16(val); }
+	void u16b(uint16_t val) { buf += pack_be16(val); }
+	void u32l(uint32_t val) { buf += pack_le32(val); }
+	void u32b(uint32_t val) { buf += pack_be32(val); }
+	void u64l(uint64_t val) { buf += pack_le64(val); }
+	void u64b(uint64_t val) { buf += pack_be64(val); }
+	
+	void align8() {}
+	void align16() { buf.resize((buf.size()+1)&~1); }
+	void align32() { buf.resize((buf.size()+3)&~3); }
+	void align64() { buf.resize((buf.size()+7)&~7); }
 	
 	void f32l(float val)
 	{
 		static_assert(sizeof(float) == 4);
 		uint32_t ival;
 		memcpy(&ival, &val, sizeof(float));
-		ival = end_nat_to_le(ival);
-		buf += arrayview<uint8_t>((uint8_t*)&ival, sizeof(uint32_t));
+		u32l(ival);
 	}
 	void f32b(float val)
 	{
 		static_assert(sizeof(float) == 4);
 		uint32_t ival;
 		memcpy(&ival, &val, sizeof(float));
-		ival = end_nat_to_be(ival);
-		buf += arrayview<uint8_t>((uint8_t*)&ival, sizeof(uint32_t));
+		u32b(ival);
 	}
 	void f64l(double val)
 	{
 		static_assert(sizeof(double) == 8);
 		uint64_t ival;
 		memcpy(&ival, &val, sizeof(double));
-		ival = end_nat_to_le(ival);
-		buf += arrayview<uint8_t>((uint8_t*)&ival, sizeof(uint64_t));
+		u64l(ival);
 	}
 	void f64b(double val)
 	{
 		static_assert(sizeof(double) == 8);
 		uint64_t ival;
 		memcpy(&ival, &val, sizeof(double));
-		ival = end_nat_to_be(ival);
-		buf += arrayview<uint8_t>((uint8_t*)&ival, sizeof(uint64_t));
+		u64b(ival);
 	}
 	
 	arrayview<uint8_t> peek()
