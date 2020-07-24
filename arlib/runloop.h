@@ -30,9 +30,11 @@
 //     for example, if a HTTP handler reads only half of the output from a SSL socket, its ready callback must run again immediately
 //     this is currently SSL's responsibility, and the exact rules are pretty subtle - I doubt I did it right everywhere
 //   proposed solution: sockets have an is_ready() function, and runloop loops that as necessary
+//                      would also allow removing the gameview::tmp_step lamehack
 // - decide if I want the runloop in a thread local variable, instead of passing it around and calling runloop::global everywhere
 //   advantages: less boilerplate; no need to store runloop pointers everywhere; DECL_TIMER becomes trivial
-//   disadvantages: TLS is tricky, especially regarding destructors; it's a global variable; may complicate testing
+//   disadvantages: TLS is tricky, especially regarding destructors; it's a global variable (though runloop::global is global already);
+//                  may complicate testing; explicit is better
 //   (if yes, use a global object's constructor to assign the GUI runloop to the main thread)
 
 //A runloop keeps track of a number of file descriptors, calling their handlers whenever the relevant operation is available.

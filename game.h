@@ -2,12 +2,11 @@
 
 class game : nocopy {
 public:
-	
 	enum key_t { k_right, k_up, k_left, k_down, k_confirm, k_cancel };
 	
 	struct input {
-		int mousex; // if the mouse is not in the game window, use x=-1 y=-1 click=false
-		int mousey;
+		int mousex; // coords can be outside the game window
+		int mousey; // anything is fine, game doesn't care
 		bool lmousedown;
 		bool rmousedown;
 		
@@ -21,14 +20,14 @@ public:
 	// 0 - the frame wasn't rendered, the previous one should be shown for another 16ms
 	// -1 - the frame wasn't rendered, and there are no ongoing animations;
 	//        the previous frame should be shown until the next user input, and there's no need to call run() until then
-	//For the latter two, 'out' remains unchanged; caller is allowed to put the previous frame there and rerender that.
+	//For the latter two, 'out' remains unchanged; if caller put the previous frame in out, it's still there.
 	//If can_skip is false, return value is always 1.
 	virtual int run(const input& in, image& out, bool can_skip = false) = 0;
 	
 	static const size_t savedat_size = 2+8*3; // This is the size of the save data in save() and create().
 	
 	//Call this before exiting the game, and save the result to disk. Next session, pass that struct to create().
-	//For the first run, call create() without a savedat.
+	//For the first run, call create() without an argument.
 	virtual bytearray save() = 0;
 	
 	virtual ~game() {}

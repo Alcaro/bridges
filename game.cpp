@@ -240,7 +240,7 @@ public:
 		{
 			res.smallfont.scale = 1;
 			out.insert_text(198, 196, res.smallfont, "keybol 2010");
-			out.insert_text(350, 196, res.smallfont, "Alcaro 2018-2019");
+			out.insert_text(350, 196, res.smallfont, "Alcaro 2018-2020");
 			
 			if (in.mousex > 238 && in.mousex < 406 && in.mousey > 309 && in.mousey < 388)
 			{

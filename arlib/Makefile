@@ -230,7 +230,7 @@ OPTFLAGS += -DNDEBUG -DARLIB_OPT
 OPTFLAGS_CXX += -fno-threadsafe-statics
 OPTLFLAGS := -Wl,--gc-sections,--build-id=none,--relax,--sort-common
 ifneq ($(OS),windows)
-OPTLFLAGS += -Wl,--hash-style=gnu
+  OPTLFLAGS += -Wl,--hash-style=gnu
 endif
 #OPTLFLAGS += -Wl,--print-map
 ifneq ($(DEBUG),1)
@@ -267,6 +267,13 @@ ifeq ($(PROFILE),use)
   CONF_CFLAGS += -fprofile-use -fprofile-correction
 endif
 
+ifneq ($(ASAN),)
+  OBJNAME := $(OBJNAME)-asan
+  CONF_CFLAGS += -fsanitize=address
+  #ASan must be first
+  CONF_LFLAGS := -lasan $(CONF_LFLAGS)
+endif
+
 CONF_CFLAGS += -DARLIB_OBJNAME=$(OBJNAME)
 
 OUTNAME = $(PROGRAM)$(EXESUFFIX)
@@ -281,6 +288,7 @@ DOMAINNAME = $(firstword $(subst ___,$(SPACE),$(patsubst obj/%.o,%,$1)))
 
 CFLAGS_DEFAULT ?=
 CFLAGS_NOWARN += -w
+DEPS_DEFAULT :=
 
 SOURCES += *.cpp
 SOURCES_ARLIB := arlib/*.cpp
@@ -298,12 +306,12 @@ ifeq ($(ARGUI),1)
   SOURCES_ARLIB += arlib/gui/*.cpp
   ifeq ($(OS),windows)
     DEFINES += ARGUI_WINDOWS
-    CONF_LFLAGS += -lgdi32 -lcomctl32 -lcomdlg32
+    CONF_LFLAGS += -lgdi32 -lcomctl32 -lcomdlg32 -mwindows
   endif
   ifeq ($(OS),linux)
     DEFINES += ARGUI_GTK3 ARGUIPROT_X11
     CONF_CFLAGS += $(shell pkg-config --cflags gtk+-3.0)
-    CONF_LFLAGS += -ldl -lX11 $(shell pkg-config --libs gtk+-3.0)
+    CONF_LFLAGS += -lX11 $(shell pkg-config --libs gtk+-3.0)
     ifneq ($(OPT),0)
       # don't know if this has ever caught anything except NULLs, but they're harmless on debug
       # but they do waste space on release builds.
@@ -314,22 +322,36 @@ else
   DEFINES += ARGUI_NONE
 endif
 
-ifeq ($(AROPENGL),1)
-  ifeq ($(ARGUI),0)
-    $(error can't use OpenGL without the GUI)
+ifeq ($(ARGAME),1)
+  DEFINES += ARGAME
+  ifeq ($(ARGUI),1)
+    $(error can't use ARGAME and ARGUI simultaneously)
   endif
+  ifeq ($(OS),windows)
+    CONF_LFLAGS += -lgdi32 -mwindows
+  endif
+endif
+
+ifeq ($(AROPENGL),1)
   SOURCES_ARLIB += arlib/opengl/*.cpp
   DEFINES += ARLIB_OPENGL
   ifeq ($(OS),linux)
-    CONF_LFLAGS += -ldl
+    DEFINES += ARGUIPROT_X11
+    CONF_LFLAGS += -lX11
   endif
   ifeq ($(AROPENGL_D3DSYNC),1)
     DEFINES += AROPENGL_D3DSYNC
   endif
-obj/glsym-slim.h:
-	python3 arlib/opengl/generate.py used aropengl obj/glsym-slim.h
+    # if glsym-slim.h doesn't change, things that depend on it don't rebuild
+    # but that also means make thinks the header itself is outdated and will try to rebuild it next time,
+    #  which is noisy and failure prone
+    # instead, add another intermediate
+obj/glsym-slim-marker: $(SOURCES)
+	python3 arlib/opengl/generate.py used aropengl obj/glsym-slim.h || python arlib/opengl/generate.py used aropengl obj/glsym-slim.h
+	echo a > obj/glsym-slim-marker
+obj/glsym-slim.h: obj/glsym-slim-marker
 ifneq ($(OPT),0)
-arlib.h: obj/glsym-slim.h
+  DEPS_DEFAULT += obj/glsym-slim.h
 endif
 endif
 
@@ -391,15 +413,15 @@ endif
 ifneq ($(wildcard resources/*),)
   ifneq ($(wildcard resources/*.icon*),)
     ifeq ($(OS),windows)
-      OBJS += arlib/icons_$(OBJNAME).o
-arlib/icons_$(OBJNAME).o:
-	windres obj/icons.rc obj/icons_$(OBJNAME).o
+      OBJS += obj/icons-$(OBJNAME).o
+obj/icons-$(OBJNAME).o: obj/resources.h
+	windres obj/icons.rc obj/icons-$(OBJNAME).o
     endif
   endif
   SOURCES_ARLIB += obj/resources.cpp
-obj/resources.cpp: arlib/rescompile.py resources resources/*
-	python3 arlib/rescompile.py
-arlib.h: obj/resources.cpp
+obj/resources.h: arlib/rescompile.py resources resources/*
+	python3 arlib/rescompile.py || python arlib/rescompile.py
+  DEPS_DEFAULT += obj/resources.h
 endif
 
 SOURCES_NOWARN += arlib/deps/miniz.c
@@ -508,13 +530,13 @@ OBJS += $(sort $(OBJS_LATE))
 arlib-default: $(OUTNAME)
 
 
-obj/%.c.o: $$(call SOURCENAME,$$@) arlib.h | obj
+obj/%.c.o: $$(call SOURCENAME,$$@) $$(DEPS_$$(call DOMAINNAME,$$@)) | obj
 	$(ECHOQ) CC $<
 	$(Q)$(CC) $(TRUE_CFLAGS) $(CFLAGS_$(call DOMAINNAME,$@)) -c $< -o $@
-obj/%.cpp.o: $$(call SOURCENAME,$$@) arlib.h | obj
+obj/%.cpp.o: $$(call SOURCENAME,$$@) $$(DEPS_$$(call DOMAINNAME,$$@)) | obj
 	$(ECHOQ) CXX $<
 	$(Q)$(CXX) $(TRUE_CXXFLAGS) $(CFLAGS_$(call DOMAINNAME,$@)) -c $< -o $@
-obj/%.S.o: $$(call SOURCENAME,$$@) arlib.h | obj
+obj/%.S.o: $$(call SOURCENAME,$$@) $$(DEPS_$$(call DOMAINNAME,$$@)) | obj
 	$(ECHOQ) AS $<
 	$(Q)$(AS) $(TRUE_ASFLAGS) $(ASFLAGS_$(call DOMAINNAME,$@)) $< -o $@
 #do not make this rule generic (obj/%.a.o), it hits some ridiculous unkillable 'chain of implicit rules'

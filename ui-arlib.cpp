@@ -1,52 +1,7 @@
 #include "game.h"
-#include "arlib/deps/valgrind/valgrind.h"
 
-#include <X11/Xlib.h>
-#include <X11/keysym.h>
-
-static const KeySym keys[6*2] = { XK_Right,XK_d, XK_Up,XK_w, XK_Left,XK_a, XK_Down,XK_s, XK_Return,XK_space, XK_Escape,XK_BackSpace };
-static int scans[6*2];
-
-static void pressed_keys_init()
-{
-	int minkc;
-	int maxkc;
-	XDisplayKeycodes(window_x11.display, &minkc, &maxkc);
-	
-	int sym_per_code;
-	KeySym* sym = XGetKeyboardMapping(window_x11.display, minkc, maxkc-minkc+1, &sym_per_code);
-	
-	for (int i=0;i<6*2;i++) scans[i] = -1;
-	
-	// process this backwards, so the unshifted state is the one that stays in the array
-	unsigned i = sym_per_code*(maxkc-minkc);
-	while (i--)
-	{
-		for (int j=0;j<6*2;j++)
-		{
-			if (sym[i] == keys[j]) scans[j] = minkc + i/sym_per_code;
-		}
-	}
-	
-	XFree(sym);
-}
-
-static int pressed_keys()
-{
-	uint8_t state[32];
-	if (!XQueryKeymap(window_x11.display, (char*)state)) return 0;
-	
-	int ret = 0;
-	for (int i=0;i<6*2;i++)
-	{
-		int scan = scans[i];
-		if (scan >= 0 && state[scan>>3]&(1<<(scan&7)))
-		{
-			ret |= 1<<(i/2);
-		}
-	}
-	return ret;
-}
+//#include <X11/Xlib.h>
+//#include <X11/keysym.h>
 
 int main(int argc, char** argv)
 {
@@ -186,14 +141,8 @@ int main(int argc, char** argv)
 		return 0;
 	}
 	
-	widget_viewport* view;
-	window* wnd = window_create(
-		view = widget_create_viewport(640, 480)
-		);
-	wnd->show();
-	
 	aropengl gl;
-	gl.create(view, aropengl::t_ver_1_0);
+	autoptr<gameview> gv = gameview::create(gl, 640, 480, aropengl::t_ver_1_0, "bridges");
 	gl.swapInterval(1);
 	
 	gl.MatrixMode(GL_PROJECTION);
@@ -213,25 +162,45 @@ int main(int argc, char** argv)
 	gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	
-	pressed_keys_init();
-	
 	//save support not implemented here, just hardcode something reasonable
 	static const uint8_t save[] = { 31,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
 	game* g = game::create(save);
+	game::input in = {};
+	
+	gv->keys_cb([&in](int kb_id, int scancode, gameview::key_t key, bool down) {
+printf("key %d,%d,%d\n",scancode,key,down);
+		int bit;
+		if(0);
+		else if (key == gameview::K_RIGHT  || key == gameview::K_d)         bit = game::k_right;
+		else if (key == gameview::K_UP     || key == gameview::K_w)         bit = game::k_up;
+		else if (key == gameview::K_LEFT   || key == gameview::K_a)         bit = game::k_left;
+		else if (key == gameview::K_DOWN   || key == gameview::K_s)         bit = game::k_down;
+		else if (key == gameview::K_RETURN || key == gameview::K_SPACE)     bit = game::k_confirm;
+		else if (key == gameview::K_ESCAPE || key == gameview::K_BACKSPACE) bit = game::k_cancel;
+		else return;
+		
+		in.keys = (in.keys & ~(1<<bit)) | (down << bit);
+	});
+	
+	gv->mouse_cb([&in](int x, int y, uint8_t buttons) {
+printf("mouse %d,%d,%d\n",x,y,buttons);
+		in.mousex = x;
+		in.mousey = y;
+		in.lmousedown = (buttons&1);
+		in.rmousedown = (buttons&2);
+	});
 	
 	bool first = true;
 	bool active = true;
-	while (wnd->is_visible())
+	while (gv->running())
 	{
 		if (active)
 		{
-			game::input in;
-			in.keys = pressed_keys();
-			
+			/*
 			Window ignorew;
 			int ignorei;
 			unsigned flags;
-			XQueryPointer(window_x11.display, view->get_parent(),
+			XQueryPointer(window_x11.display, gv->tmp_get_window(),
 			              &ignorew, &ignorew, &ignorei, &ignorei,
 			              &in.mousex, &in.mousey, &flags);
 			if (in.mousex >= 0 && in.mousey >= 0 && in.mousex < 640 && in.mousey < 480)
@@ -246,6 +215,7 @@ int main(int argc, char** argv)
 				in.lmousedown = false;
 				in.rmousedown = false;
 			}
+			*/
 			
 #ifdef ARLIB_OPT
 			uint64_t start = time_us_ne();
@@ -261,8 +231,8 @@ int main(int argc, char** argv)
 			active = (do_upload >= 0);
 		}
 		
-		//redraw the texture, to avoid glitches if we're sent an Expose event
-		//no point reuploading, and no point caring about whether the event was Expose or not, just redraw
+		//redraw the texture, to avoid glitches if compositor discarded our pixels
+		//no point reuploading, and no point checking why gv->tmp_step returned, just redraw
 		gl.Clear(GL_COLOR_BUFFER_BIT); // does nothing, but docs say it makes things faster
 		gl.Begin(GL_TRIANGLE_STRIP);
 		gl.TexCoord2f(0,            0          ); gl.Vertex3i(0,   480, 0);
@@ -270,12 +240,11 @@ int main(int argc, char** argv)
 		gl.TexCoord2f(0,            480.0/512.0); gl.Vertex3i(0,   0,   0);
 		gl.TexCoord2f(640.0/1024.0, 480.0/512.0); gl.Vertex3i(640, 0,   0);
 		gl.End();
-		//gl.RasterPos2i(0, 0);
 		
 		gl.swapBuffers();
 		
-		runloop::global()->step(!active);
-		active = (wnd->is_active());
+		active = (gv->focused());
+		gv->tmp_step(!active);
 	}
 	
 	return 0;
