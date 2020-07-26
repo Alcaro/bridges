@@ -4,7 +4,7 @@
 #include "os.h"
 #include "test.h"
 
-#if defined(ARGAME) || !defined(ARGUI_NONE)
+#if defined(ARLIB_GAME) || !defined(ARGUI_NONE)
 #define ENABLE_MSGPUMP
 void _window_process_events();
 #endif
@@ -122,6 +122,7 @@ public:
 		else if (t_next == (uint64_t)-1) delay = INFINITE;
 		else delay = t_next-t_now;
 		
+#ifndef ARLIB_OPT
 		if (wait && events.size() == 0 && delay == INFINITE && !is_global)
 		{
 #ifdef ARLIB_TESTRUNNER
@@ -130,6 +131,7 @@ public:
 			abort();
 #endif
 		}
+#endif
 		
 		unsigned n = 0;
 		HANDLE handles[MAXIMUM_WAIT_OBJECTS];

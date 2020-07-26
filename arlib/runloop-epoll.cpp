@@ -201,6 +201,7 @@ public:
 		if (next == INT_MAX) next = -1;
 		if (!wait) next = 0;
 		
+#ifndef ARLIB_OPT
 		if (wait && fdinfo.size() == 0 && next == -1)
 		{
 #ifdef ARLIB_TESTRUNNER
@@ -209,6 +210,7 @@ public:
 			abort();
 #endif
 		}
+#endif
 		
 		
 		epoll_event ev[16];

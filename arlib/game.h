@@ -1,4 +1,4 @@
-#ifdef ARGAME
+#ifdef ARLIB_GAME
 #include "global.h"
 #include "string.h"
 #include "opengl/aropengl.h"

@@ -1,4 +1,4 @@
-#if defined(ARGAME) && defined(_WIN32)
+#if defined(ARLIB_GAME) && defined(_WIN32)
 #include "game.h"
 #include "runloop.h"
 #include <windowsx.h> // GET_X_LPARAM

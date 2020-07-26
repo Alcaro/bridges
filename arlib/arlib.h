@@ -66,8 +66,11 @@
 #include "gui/window.h"
 #endif
 
-#ifdef ARLIB_OPENGL
+#ifdef ARLIB_GAME
 #include "game.h"
+#endif
+
+#ifdef ARLIB_OPENGL
 #include "opengl/aropengl.h"
 #endif
 

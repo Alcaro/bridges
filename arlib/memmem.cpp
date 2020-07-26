@@ -334,7 +334,7 @@ test("memmem", "", "string")
 #ifdef __SSE2__
 test("load_sse2_small","","")
 {
-	#ifndef _WIN32
+#ifndef _WIN32
 	uint8_t* page;
 	if (posix_memalign((void**)&page, 4096, 8192) != 0) abort();
 	autofree<uint8_t> holder = page;
@@ -358,7 +358,7 @@ test("load_sse2_small","","")
 	test1(16, 11);
 	test1(27, 16);
 	test1(4100, 16);
-	#endif
+#endif
 	
 	// used to verify the condition in load_sse2_small
 	/*

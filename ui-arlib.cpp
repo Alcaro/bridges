@@ -192,31 +192,22 @@ printf("mouse %d,%d,%d\n",x,y,buttons);
 	
 	bool first = true;
 	bool active = true;
+	
+	time_t t=0;
+	int fps=0;
+	
 	while (gv->running())
 	{
+		fps++;
+		if (t != time(NULL))
+		{
+			printf("%dfps\n",fps);
+			fps = 0;
+			t = time(NULL);
+		}
+		
 		if (active)
 		{
-			/*
-			Window ignorew;
-			int ignorei;
-			unsigned flags;
-			XQueryPointer(window_x11.display, gv->tmp_get_window(),
-			              &ignorew, &ignorew, &ignorei, &ignorei,
-			              &in.mousex, &in.mousey, &flags);
-			if (in.mousex >= 0 && in.mousey >= 0 && in.mousex < 640 && in.mousey < 480)
-			{
-				in.lmousedown = (flags & Button1Mask);
-				in.rmousedown = (flags & Button3Mask); // why is right 3, middle should be 3
-			}
-			else
-			{
-				in.mousex = -1;
-				in.mousey = -1;
-				in.lmousedown = false;
-				in.rmousedown = false;
-			}
-			*/
-			
 #ifdef ARLIB_OPT
 			uint64_t start = time_us_ne();
 #endif

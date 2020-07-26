@@ -321,11 +321,11 @@ public:
 		                               D3DCREATE_HARDWARE_VERTEXPROCESSING,
 		                               &parameters, NULL, &this->D3D_device)) &&
 		    FAILED(d3d->CreateDeviceEx(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, this->D3D_hwnd,
-		                               D3DCREATE_MIXED_VERTEXPROCESSING, // I don't care what type of vertex processing, just do something
-		                               &parameters, NULL, &this->D3D_device)) &&
+		                               D3DCREATE_MIXED_VERTEXPROCESSING, // I don't care what type of vertex processing,
+		                               &parameters, NULL, &this->D3D_device)) && // just do something
 		    FAILED(d3d->CreateDeviceEx(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, this->D3D_hwnd,
 		                               D3DCREATE_SOFTWARE_VERTEXPROCESSING,
-		                               &parameters, NULL, &this->D3D_device)) &&)
+		                               &parameters, NULL, &this->D3D_device)))
 		{
 			return false;
 		}
@@ -435,6 +435,7 @@ public:
 			HRESULT err = this->D3D_device->PresentEx(NULL, NULL, NULL, NULL, D3DPRESENT_FORCEIMMEDIATE);
 			if (err == D3DERR_DEVICELOST || err == D3DERR_DEVICEHUNG)
 			{
+#error test, then remove these asserts
 				//WARNING: Untested, stolen from https://github.com/mudlord/einweggerat/commit/07dc0cb74f76c8cde890f4bbf290bad1d56975d9
 				debug_or_print();
 				

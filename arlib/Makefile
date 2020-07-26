@@ -323,7 +323,7 @@ else
 endif
 
 ifeq ($(ARGAME),1)
-  DEFINES += ARGAME
+  DEFINES += ARLIB_GAME
   ifeq ($(ARGUI),1)
     $(error can't use ARGAME and ARGUI simultaneously)
   endif
@@ -346,10 +346,10 @@ ifeq ($(AROPENGL),1)
     # but that also means make thinks the header itself is outdated and will try to rebuild it next time,
     #  which is noisy and failure prone
     # instead, add another intermediate
-obj/glsym-slim-marker: $(SOURCES)
+obj/glsym-slim-marker: $(SOURCES) | obj
 	python3 arlib/opengl/generate.py used aropengl obj/glsym-slim.h || python arlib/opengl/generate.py used aropengl obj/glsym-slim.h
 	echo a > obj/glsym-slim-marker
-obj/glsym-slim.h: obj/glsym-slim-marker
+obj/glsym-slim.h: obj/glsym-slim-marker | obj
 ifneq ($(OPT),0)
   DEPS_DEFAULT += obj/glsym-slim.h
 endif
@@ -419,8 +419,9 @@ obj/icons-$(OBJNAME).o: obj/resources.h
     endif
   endif
   SOURCES_ARLIB += obj/resources.cpp
-obj/resources.h: arlib/rescompile.py resources resources/*
+obj/resources.h: arlib/rescompile.py resources resources/* | obj
 	python3 arlib/rescompile.py || python arlib/rescompile.py
+obj/resources.cpp: obj/resources.h
   DEPS_DEFAULT += obj/resources.h
 endif
 
