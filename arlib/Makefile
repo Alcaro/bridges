@@ -24,6 +24,17 @@
 #and find some way to auto include the correct one
 #(config depends on platform, so it must have OBJNAME)
 
+ifneq (,)
+  $(error conditionals are required; only GNU Make is supported)
+panic:
+	echo "conditionals are required; only GNU Make is supported"
+	false
+endif
+
+ifeq (,$(wildcard arlib/string.cpp))
+  $(error wrong build directory, go up one level)
+endif
+
 all: arlib-default
 
 MAKEFLAGS := Rr
@@ -31,9 +42,12 @@ MAKEFLAGS := Rr
 .SECONDEXPANSION:
 .DELETE_ON_ERROR:
 
-ifeq (,$(wildcard arlib/string.cpp))
-  $(error wrong build directory, go up one level)
-endif
+SPACE := $(subst ,, )
+
+define LF
+
+
+endef
 
 CC = gcc
 CFLAGS =
@@ -45,13 +59,13 @@ AS = as
 ASFLAGS =
 AR = ar
 
-SPACE :=
-SPACE +=
-
-define LF
-
-
-endef
+CC_FAMILY := gcc
+ifneq ($(findstring clang,$(CC) $(CXX) $(LD)),)
+  CC_FAMILY := clang
+  CC = clang
+  CXX = clang++
+  LD = clang++
+endif
 
 ifeq ($(OS),Windows_NT)
   OS = windows
@@ -104,9 +118,13 @@ else
   DEBUG ?= 0
 endif
 
-CCXXFLAGS = -fvisibility=hidden -Wall -Wmissing-declarations -Wimplicit-fallthrough -Wvla -Walloca -pipe
+CCXXFLAGS = -fvisibility=hidden -Wall -Wmissing-declarations -Wimplicit-fallthrough -Wvla -pipe
 #to silence for (size_t unused : range(42)) - delete this once gcc stops complaining
-CCXXFLAGS += -Wno-unused-variable -Wno-unused-but-set-variable
+CCXXFLAGS += -Wno-unused-variable
+ifeq ($(CC_FAMILY),gcc)
+  # Clang doesn't support those
+  CCXXFLAGS += -Walloca -Wno-unused-but-set-variable
+endif
 #doesn't seem to do anything
 #CFLAGS += -Wmissing-prototypes
 ifeq ($(EXCEPTIONS),1)
@@ -121,14 +139,6 @@ else
 endif
 
 HOST_OS := unix
-
-CC_FAMILY := gcc
-ifneq ($(findstring clang,$(CC) $(CXX) $(LD)),)
-  CC_FAMILY := clang
-  CC = clang
-  CXX = clang++
-  LD = clang++
-endif
 
 #double gcc bug combo:
 #(1) GCC hates this pattern:
@@ -347,7 +357,7 @@ ifeq ($(AROPENGL),1)
     #  which is noisy and failure prone
     # instead, add another intermediate
 obj/glsym-slim-marker: $(SOURCES) | obj
-	python3 arlib/opengl/generate.py used aropengl obj/glsym-slim.h || python arlib/opengl/generate.py used aropengl obj/glsym-slim.h
+	python3 arlib/opengl/generate.py used aropengl obj/glsym-slim.h
 	echo a > obj/glsym-slim-marker
 obj/glsym-slim.h: obj/glsym-slim-marker | obj
 ifneq ($(OPT),0)
@@ -420,7 +430,7 @@ obj/icons-$(OBJNAME).o: obj/resources.h
   endif
   SOURCES_ARLIB += obj/resources.cpp
 obj/resources.h: arlib/rescompile.py resources resources/* | obj
-	python3 arlib/rescompile.py || python arlib/rescompile.py
+	python3 arlib/rescompile.py
 obj/resources.cpp: obj/resources.h
   DEPS_DEFAULT += obj/resources.h
 endif

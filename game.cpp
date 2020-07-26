@@ -1157,7 +1157,7 @@ to_title(); //TODO
 				}
 				popup_frame = 2;
 				if (popup_id == 0) break;
-				//else fallthrough
+				[[fallthrough]];
 			case 0:
 				out.insert_tile_with_border(290, 80, 60, 20, res.popup, 10,30, 0,110);
 				break;
@@ -1441,7 +1441,7 @@ to_title(); //TODO
 			case st_init:
 				init();
 				to_title();
-				//fallthrough
+				[[fallthrough]];
 			case st_title:
 				title();
 				break;
