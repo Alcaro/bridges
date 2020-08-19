@@ -248,14 +248,14 @@ runloop* runloop::create()
 	return runloop_wrap_blocktest(new runloop_windows());
 }
 
-#ifdef ENABLE_MSGPUMP
 runloop* runloop::global()
 {
-	//TODO: use WSACreateEvent and WSAEventSelect
-	//SOCKET is UINT_PTR, WSAEVENT is HANDLE, MsgWaitForMultipleObjects should work
 	static runloop* ret;
-	if (!ret) ret = runloop_wrap_blocktest(new runloop_windows(true));
+	if (!ret) ret = runloop_wrap_blocktest(new runloop_windows(
+#ifdef ENABLE_MSGPUMP
+		true
+#endif
+	));
 	return ret;
 }
-#endif
 #endif

@@ -199,8 +199,8 @@ uint8_t current_scans[32];
 void calc_keyboard_map()
 {
 	struct {
-		uint16_t arlib; // could compress this to uint8 by subtracting 128 if >= 256, but that'd just spawn padding
-		uint16_t x11;   // there are ways to remove that too, but none that are worth the effort
+		uint8_t arlib; // there's a byte of padding, but there's no real way to remove it without making a mess
+		uint16_t x11; // and such a thing would save 138 bytes at most
 	} static const keymap[] = {
 		{ K_BACKSPACE, XK_BackSpace }, { K_TAB, XK_Tab }, { K_CLEAR, XK_Clear }, { K_RETURN, XK_Return }, { K_PAUSE, XK_Pause },
 		{ K_ESCAPE, XK_Escape }, { K_SPACE, XK_space }, { K_EXCLAIM, XK_exclam }, { K_QUOTEDBL, XK_quotedbl },
@@ -225,8 +225,8 @@ void calc_keyboard_map()
 		{ K_KP_PERIOD, XK_KP_Separator }, { K_KP_DIVIDE, XK_KP_Divide }, { K_KP_MULTIPLY, XK_KP_Multiply },
 		{ K_KP_MINUS, XK_KP_Subtract }, { K_KP_PLUS, XK_KP_Add }, { K_KP_ENTER, XK_KP_Enter }, { K_KP_EQUALS, XK_KP_Equal },
 		
-		{ K_UP, XK_Up }, { K_DOWN, XK_Down }, { K_RIGHT, XK_Right }, { K_LEFT, XK_Left }, { K_INSERT, XK_Insert }, // Delete is earlier
-		{ K_HOME, XK_Home }, { K_END, XK_End }, { K_PAGEUP, XK_Page_Up }, { K_PAGEDOWN, XK_Page_Down },
+		{ K_UP, XK_Up }, { K_DOWN, XK_Down }, { K_RIGHT, XK_Right }, { K_LEFT, XK_Left },
+		{ K_INSERT, XK_Insert }, { K_HOME, XK_Home }, { K_END, XK_End }, { K_PAGEUP, XK_Page_Up }, { K_PAGEDOWN, XK_Page_Down },
 		
 		{ K_F1, XK_F1 }, { K_F2, XK_F2 }, { K_F3, XK_F3 }, { K_F4, XK_F4 }, { K_F5, XK_F5 },
 		{ K_F6, XK_F6 }, { K_F7, XK_F7 }, { K_F8, XK_F8 }, { K_F9, XK_F9 }, { K_F10, XK_F10 },
@@ -267,9 +267,9 @@ void calc_keyboard_map()
 	XFree(sym);
 }
 
-function<void(int kb_id, int scancode, key_t k, bool down)> cb_keys;
+function<void(int scancode, key_t k, bool down)> cb_keys;
 
-/*public*/ void keys_cb(function<void(int kb_id, int scancode, key_t k, bool down)> cb)
+/*public*/ void keys_cb(function<void(int scancode, key_t k, bool down)> cb)
 {
 	cb_keys = cb;
 	memset(current_scans, 0, sizeof(current_scans));
@@ -285,7 +285,7 @@ void set_key(uint8_t scancode, bool state)
 	if (state == prevstate) return;
 	
 	current_scans[byte] = (current_scans[byte] & ~(1<<bit)) | (state<<bit);
-	cb_keys(-1, scancode, (key_t)scan_to_key[scancode], state);
+	cb_keys(scancode, (key_t)scan_to_key[scancode], state);
 }
 
 void set_all_keys()

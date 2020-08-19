@@ -239,20 +239,18 @@ class bmldeserializer {
 		>>
 	read_item(T& out, int ov_resolut1)
 	{
-		typename T::serialize_as tmp;
-		try_fromstring(thisval, tmp);
-		out = tmp;
+		out = try_fromstring<typename T::serialize_as>(thisval);
 	}
 	
 	template<typename T>
 	typename std::enable_if_t<
 		!std::is_same_v<
-			decltype(try_fromstring(std::declval<cstring>(), std::declval<T&>())),
+			decltype(try_fromstring<T>(std::declval<cstring>())),
 			void*
 		>>
 	read_item(T& out, float ov_resolut1)
 	{
-		try_fromstring(thisval, out);
+		out = try_fromstring<T>(thisval);
 	}
 	
 	template<typename T> void read_item(array<T>& out, int ov_resolut1)
@@ -687,7 +685,7 @@ class jsondeserializer {
 	template<typename T>
 	typename std::enable_if_t<
 		std::is_same_v<
-			decltype(std::declval<T>().serialize(std::declval<jsonserializer&>())),
+			decltype(std::declval<T>().serialize(std::declval<jsondeserializer&>())),
 			void
 		>>
 	read_item(T& out, int ov_resolut1)

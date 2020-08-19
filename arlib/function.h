@@ -2,7 +2,7 @@
 
 //Inspired by
 // http://www.codeproject.com/Articles/136799/ Lightweight Generic C++ Callbacks (or, Yet Another Delegate Implementation)
-//but rewritten using C++11 features, to remove code duplication and 6-arg limits, and improve error messages
+//but rewritten using C++11 (and later C++17) features, to remove code duplication and 6-arg limits, and improve error messages
 
 #include <stddef.h>
 #include <string.h>
@@ -33,8 +33,10 @@ class function<Tr(Ta...)> {
 		void(*destruct)(void* ctx);
 	};
 	
-	Tfp func;
+	// context first, so a buffer overflow into this object can't redirect the function without resetting the context
+	// I think that's the order that'd make exploitation harder, though admittedly I don't have any numbers on that
 	void* ctx;
+	Tfp func;
 	refcount* ref;
 	
 	class dummy {};
@@ -53,7 +55,7 @@ class function<Tr(Ta...)> {
 		if (LIKELY(!ref)) return;
 		if (!--ref->count)
 		{
-			bool do_del = ((void*)ref != ctx);
+			bool do_del = ((void*)ref != ctx); // ref==ctx happens if binding a lambda capturing a lot
 			ref->destruct(ctx);
 			if (do_del)
 				delete ref;
@@ -128,8 +130,8 @@ class function<Tr(Ta...)> {
 	
 public:
 	function() { init_free(NULL); }
-	function(const function& rhs) : func(rhs.func), ctx(rhs.ctx), ref(rhs.ref) { add_ref(); }
-	function(function&& rhs)      : func(rhs.func), ctx(rhs.ctx), ref(rhs.ref) { rhs.ref = NULL; }
+	function(const function& rhs) : ctx(rhs.ctx), func(rhs.func), ref(rhs.ref) { add_ref(); }
+	function(function&& rhs)      : ctx(rhs.ctx), func(rhs.func), ref(rhs.ref) { rhs.ref = NULL; }
 	function& operator=(const function& rhs)
 		{ unref(); func = rhs.func; ctx = rhs.ctx; ref = rhs.ref; add_ref(); return *this; }
 	function& operator=(function&& rhs)
@@ -198,9 +200,21 @@ public:
 	explicit operator bool() const { return isTrue(); }
 	bool operator!() const { return !isTrue(); }
 	
+private:
+	struct unsafe_binding {
+		bool safe;
+		Tfp fp;
+		void* ctx;
+		operator bool() { return safe; }
+	};
+	struct binding {
+		Tfp fp;
+		void* ctx;
+	};
+public:
 	//Splits a function object into a function pointer and a context argument.
 	//Calling the pointer, with the context as first argument, is equivalent to calling the function object directly
-	// (modulo a few move constructor calls).
+	// (possibly modulo a few move constructor calls).
 	//
 	//WARNING: If the object owns memory, it must remain alive during any use of ctx.
 	//This function assumes you don't want to keep this object alive.
@@ -209,25 +223,17 @@ public:
 	//The function object owns memory if it refers to a lambda binding more than sizeof(void*) bytes.
 	//In typical cases (a member function, or a lambda binding 'this' or nothing), this is safe.
 	//If you want to decompose but keep the object alive, use try_decompose.
-private:
-	struct binding {
-		bool safe;
-		Tfp fp;
-		void* ctx;
-		operator bool() { return safe; }
-	};
-public:
 	binding decompose()
 	{
 		if (ref) __builtin_trap();
-		return { !ref, func, ctx };
+		return { func, ctx };
 	}
 	
 	//Like the above, but assumes you will keep the object alive, so it always succeeds.
 	//Potentially useful to skip a level of indirection when wrapping a C callback into an Arlib
 	// class, but should be avoided under most circumstances. Direct use of a C API can know what's
 	// being bound, and can safely use the above instead.
-	binding try_decompose()
+	unsafe_binding try_decompose()
 	{
 		return { !ref, func, ctx };
 	}
@@ -306,7 +312,7 @@ bind_lambda(Tl&& l)
 	return bind_lambda_core<Tl>(std::move(l), &Tl::operator());
 }
 
-//I could make this a compile error if the lambda can't safely destructure, but no need. it'll be immediately caught at runtime anyways
+//I could make this a compile error if the lambda can't safely decompose, but no need. it'll be immediately caught at runtime anyways
 //I could also create a swapped decompose function, userdata at end rather than start, but that'd have to
 // copy half of the function template, and the only one needing userdata at end is GTK which can swap by itself anyways.
 template<typename Tl>

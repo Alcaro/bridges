@@ -330,7 +330,6 @@ runloop* runloop::create()
 #ifdef ARGUI_NONE
 runloop* runloop::global()
 {
-	//ignore thread safety, this function can only be used from main thread
 	static runloop* ret = NULL;
 	if (!ret) ret = runloop::create();
 	return ret;

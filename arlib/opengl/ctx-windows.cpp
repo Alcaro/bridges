@@ -1,7 +1,7 @@
 #ifdef _WIN32
 #include "aropengl.h"
 
-// https://www.opengl.org/registry/specs/NV/DX_interop.txt
+// https://www.khronos.org/registry/OpenGL/extensions/NV/WGL_NV_DX_interop.txt
 // https://github.com/halogenica/WGL_NV_DX/blob/master/SharedResource.cpp
 // https://msdn.microsoft.com/en-us/library/windows/desktop/bb174336(v=vs.85).aspx
 
@@ -19,6 +19,7 @@
 #include "../deps/wglext.h"
 
 #ifdef AROPENGL_D3DSYNC
+#include "../os.h"
 # include <D3D9.h>
 # ifndef D3DPRESENT_FORCEIMMEDIATE
 #  define D3DPRESENT_FORCEIMMEDIATE 0x00000100L
@@ -429,25 +430,27 @@ public:
 		{
 			wgl.DXUnlockObjectsNV(D3D_sharehandle, 1, &this->GL_htexture);
 			this->D3D_device->StretchRect(this->D3D_GLtarget, NULL, this->D3D_backbuf, NULL, D3DTEXF_NONE);
-			this->D3D_device->PresentEx(NULL, NULL, NULL, NULL, (vsync ? 0 : D3DPRESENT_FORCEIMMEDIATE|D3DPRESENT_DONOTWAIT));
+			uint32_t presentflags = (vsync ? 0 : D3DPRESENT_FORCEIMMEDIATE|D3DPRESENT_DONOTWAIT);
+			HRESULT err = this->D3D_device->PresentEx(NULL, NULL, NULL, NULL, presentflags);
 			
-#error figure out why PresentEx is called twice
-			HRESULT err = this->D3D_device->PresentEx(NULL, NULL, NULL, NULL, D3DPRESENT_FORCEIMMEDIATE);
 			if (err == D3DERR_DEVICELOST || err == D3DERR_DEVICEHUNG)
 			{
-#error test, then remove these asserts
-				//WARNING: Untested, stolen from https://github.com/mudlord/einweggerat/commit/07dc0cb74f76c8cde890f4bbf290bad1d56975d9
-				debug_or_print();
-				
+				// TODO: I can't provoke this condition, so I can't test it, or know what behavior would be appropriate
+				// according to https://github.com/mudlord/einweggerat/commit/07dc0cb74f76c8cde890f4bbf290bad1d56975d9,
+				// it's enough to
+				/*
 				DeallocRenderTarget();
 				D3DPRESENT_PARAMETERS parameters = PresentParams();
 				err = this->D3D_device->ResetEx(&parameters, NULL);
 				if (err == D3DERR_DEVICELOST || err == D3DERR_DEVICEHUNG)
 				{
-					// WARNING: Not tested by mudlord either
+					// ???
 					debug_or_abort();
 				}
 				AllocRenderTarget();
+				*/
+				// but I think it'd require reinitializing the GL resources too
+				debug_or_print();
 			}
 			
 			wgl.DXLockObjectsNV(D3D_sharehandle, 1, &this->GL_htexture);

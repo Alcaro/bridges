@@ -42,7 +42,7 @@ MAKEFLAGS := Rr
 .SECONDEXPANSION:
 .DELETE_ON_ERROR:
 
-SPACE := $(subst ,, )
+SPACE := $(NULL) $(NULL)
 
 define LF
 
@@ -138,10 +138,10 @@ else
   OPTFLAGS += -fno-unwind-tables -fno-asynchronous-unwind-tables
 endif
 
-HOST_OS := unix
+HOST_SHELL := sh
 
 #double gcc bug combo:
-#(1) GCC hates this pattern:
+#(1) GCC hates commented-out backslash line continuations, even if the next line is commented out too, for example
 #//#define foo(a,b,c) \
 #//  bar(a) \
 #//  bar(b) \
@@ -211,7 +211,7 @@ ifeq ($(OS),windows)
   endif
 
   ifeq ($(shell echo ^^),^)
-    HOST_OS := windows
+    HOST_SHELL := cmd
   else
     # building non-windows binaries on a windows host is not supported (Cygwin or WSL compiling for themselves will probably work)
     # why would you do such a thing, anyways?
@@ -224,7 +224,7 @@ ifeq ($(V),)
   ECHOQ = @echo
 else
   Q =
-  ifeq ($(HOST_OS),windows)
+  ifeq ($(HOST_SHELL),cmd)
     ECHOQ = @ver>nul
   else
     ECHOQ = @true
@@ -442,8 +442,8 @@ CONF_CFLAGS += $(patsubst %,-D%,$(DEFINES))
 TRUE_CFLAGS := -std=c99 $(CCXXFLAGS) $(CONF_CFLAGS) $(CFLAGS)
 # C++ version policy: I will switch to a newer version of C++ only if it adds something that
 # - considerably simplifies existing code (everything is doable without that, but some things are painful)
-# - works on the default compiler on current Debian stable, latest Ubuntu LTS, whatever compiler I use for Windows
-#    (currently mingw-w64 8.1.0), and whatever other computers I have at the moment
+# - works on the default compiler on current Debian stable, latest Ubuntu LTS, whatever compiler I currently use for
+#    Windows (as of writing, mingw-w64 8.1.0), and whatever other computers I have at the moment
 #    working on additional compilers (for example Clang) is recommended, but not mandatory
 # - is functional and non-experimental in a finalized -std= version (c++11 is final, c++0x isn't, -fcoroutines isn't)
 #    it's fine if not every part of that language version is supported in that compiler version
@@ -465,10 +465,11 @@ TRUE_CFLAGS := -std=c99 $(CCXXFLAGS) $(CONF_CFLAGS) $(CFLAGS)
 #   C++2a coroutines, for runloop-related stuff
 #   C++17 <charconv>, to speed up tostring(float) (though I'll need to keep the current one around, for Windows)
 #   [[trivially_relocatable]] http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2019/p1144r3.html
-#   Lambdas without braces/return; function<int(int)> mul2 = [](int i) => i*2; (useful for LINQ)
+#   Lambdas without braces/return, function<int(int)> mul2 = [](int i) => i*2; (useful for LINQ)
 #   Zero-overhead deterministic exceptions http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p0709r0.pdf
 #   Compile-time reflection (that SERIALIZE macro is a little too limited, and the error messages are worse than from the regexes)
-#   Single-implementation interfaces (public functions and nothing else in header, member variables hidden; useful for the GUI classes)
+#   Single-implementation interfaces (public functions and nothing else in header, member variables hidden)
+#     useful for anything with multiple implementations, but where the active one is a #ifdef, for example gameview and the widgets
 #     the $class proposal P0707 would most likely permit this, as well as most or all of the reflection I want
 #   Demote or, and, bitand, etc from keyword to predefined macro (or even better, banish them to the <ciso646> they should've never left)
 #   std::embed http://open-std.org/JTC1/SC22/WG21/docs/papers/2018/p1040r0.html, to get rid of rescompile.py's assembly shenanigans
@@ -487,7 +488,7 @@ TRUE_LFLAGS := $(LFLAGS) -fvisibility=hidden $(CONF_LFLAGS)
 obj:
 	mkdir obj
 
-ifeq ($(HOST_OS),windows)
+ifeq ($(HOST_SHELL),cmd)
 clean:
 	del /q obj\*
 
@@ -504,12 +505,6 @@ superclean: clean
 	rm -f arlib/deps/bearssl-0.6/build/obj/*
 	rm -f arlib/deps/bearssl-0.6/build/libbearssl.a
 endif
-
-#ARLIB_H := $(patsubst %,\#define %$(LF),$(DEFINES))
-#arlib.h: Makefile
-#	$(eval export ARLIB_H)
-#	echo "$$ARLIB_H" > arlib.h
-#	echo '#include "arlib/arlib.h"' >> arlib.h
 
 
 DOMAINS += DEFAULT NOWARN

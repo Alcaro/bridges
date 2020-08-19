@@ -24,7 +24,7 @@
 //     timers and gui events do not belong in an async context, and cannot be async
 //   this can be done by giving async functions a lock argument, whose dtor releases the context, unless moved into a lambda capture
 //   however, that is very error prone, and requires nesting lambdas forever
-//   it'd be a lot easier with c++20 coroutines, which will probably be available in gcc 11, and most likely to me in apr 2022
+//   it'd be a lot easier with c++20 coroutines, which will probably be available in gcc 11, and most likely to me in 2022
 //   cancellation can probably be done by running that coro and forcing the object to return failure, unless coros allow something better
 // - make socket handler less easy to screw up
 //     for example, if a HTTP handler reads only half of the output from a SSL socket, its ready callback must run again immediately
@@ -36,6 +36,7 @@
 //   disadvantages: TLS is tricky, especially regarding destructors; it's a global variable (though runloop::global is global already);
 //                  may complicate testing; explicit is better
 //   (if yes, use a global object's constructor to assign the GUI runloop to the main thread)
+// should also remove the idle/relative/absolute/repeat distinction, oneshot relative only; the others are too rare
 
 //A runloop keeps track of a number of file descriptors, calling their handlers whenever the relevant operation is available.
 //Event handlers must handle the event. If they don't, the handler may be called again forever and block everything else.
@@ -48,7 +49,8 @@ protected:
 public:
 	//The global runloop handles GUI events, in addition to whatever fds it's told to track.
 	//The global runloop belongs to the main thread. Don't delete it, or call this function from any other thread.
-	//This function always returns the same object.
+	//This function always returns the same object. It may be called on non-main threads,
+	// but only if prepare_submit() has already been called.
 	static runloop* global();
 	
 	//For non-primary threads. Using multiple runloops per thread is generally a bad idea.
@@ -85,7 +87,7 @@ public:
 	//prepare_submit() must be called on the owning thread before submit() is allowed.
 	//There is no way to 'unprepare' submit(), other than deleting the runloop.
 	//It is safe to call prepare_submit() multiple times, even concurrently with submit(),
-	// as long as the first one has finished before the first submit() or second prepare_submit() starts.
+	// as long as the first prepare_submit() has finished before the first submit() starts.
 	virtual void prepare_submit() = 0;
 #endif
 	

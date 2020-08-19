@@ -142,7 +142,7 @@ int main(int argc, char** argv)
 	}
 	
 	aropengl gl;
-	autoptr<gameview> gv = gameview::create(gl, 640, 480, aropengl::t_ver_1_0, "bridges");
+	autoptr<gameview> gv = gameview::create(gl, 640, 480, aropengl::t_ver_1_0/*|aropengl::t_direct3d_vsync*/, "bridges");
 	gl.swapInterval(1);
 	
 	gl.MatrixMode(GL_PROJECTION);
@@ -167,7 +167,7 @@ int main(int argc, char** argv)
 	game* g = game::create(save);
 	game::input in = {};
 	
-	gv->keys_cb([&in](int kb_id, int scancode, gameview::key_t key, bool down) {
+	gv->keys_cb([&in](int scancode, gameview::key_t key, bool down) {
 printf("key %d,%d,%d\n",scancode,key,down);
 		int bit;
 		if(0);
@@ -234,8 +234,8 @@ printf("mouse %d,%d,%d\n",x,y,buttons);
 		
 		gl.swapBuffers();
 		
-		active = (gv->focused());
 		gv->tmp_step(!active);
+		active = (gv->focused()); // keep them in this order, so the framestop implementation works
 	}
 	
 	return 0;
