@@ -34,7 +34,7 @@ class function<Tr(Ta...)> {
 	};
 	
 	// context first, so a buffer overflow into this object can't redirect the function without resetting the context
-	// I think that's the order that'd make exploitation harder, though admittedly I don't have any numbers on that
+	// I think that's the order that makes exploitation harder, though admittedly I don't have any numbers on that
 	void* ctx;
 	Tfp func;
 	refcount* ref;

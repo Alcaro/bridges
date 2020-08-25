@@ -32,13 +32,9 @@ int main(int argc, char** argv)
 		int nmultisolv = 0;
 		for (int side=3;side<10;side++)
 		{
-			for (int i=0;i<(vg ? 1000 : 10000);i++)
+			for (int i=0;i<(vg ? 1000 : 10000);i++) // ignore benchmark, we want iteration count constant between runs
 			{
 				if (i%(vg ? 10 : 100) == 0) { printf("%i %i     \r", side, i); fflush(stdout); }
-				//int minislands = side*2;
-				//int maxislands = side*side/2;
-				//int islands = minislands + rand()%(maxislands+1-minislands);
-				//string map = map_generate(side, side, islands);
 				
 				gamemap::genparams par = {};
 				par.width = side;
@@ -89,54 +85,27 @@ int main(int argc, char** argv)
 		game::input in_press = {};
 		in_press.keys = 1 << game::k_confirm;
 		
-		int frames = 0;
-		
-		uint64_t start = time_ms_ne();
-		
-		uint64_t end = start;
-		while (end < start+5000)
+		using (benchmark b)
 		{
-			for (int i=0;i<100;i++) // only checking timer every 100 frames boosts framerate from 1220 to 1418
-			{
-				g->run(in, out);
-				frames++;
-			}
-			end = time_ms_ne();
+			while (b) g->run(in, out);
+			printf("title screen: %u frames in %ums = %ffps\n", b.iterations, b.us/1000, b.per_second());
 		}
-		
-		printf("title screen: %i frames in %u ms = %ffps\n", frames, (unsigned)(end-start), frames/(float)(end-start)*1000);
 		
 		g->run(in_press, out);
 		
-		start = time_ms_ne();
-		end = start;
-		while (end < start+5000)
+		using (benchmark b)
 		{
-			for (int i=0;i<100;i++)
-			{
-				g->run(in, out);
-				frames++;
-			}
-			end = time_ms_ne();
+			while (b) g->run(in, out);
+			printf("level select: %u frames in %ums = %ffps\n", b.iterations, b.us/1000, b.per_second());
 		}
-		
-		printf("level select: %i frames in %u ms = %ffps\n", frames, (unsigned)(end-start), frames/(float)(end-start)*1000);
 		
 		g->run(in_press, out);
 		
-		start = time_ms_ne();
-		end = start;
-		while (end < start+5000)
+		using (benchmark b)
 		{
-			for (int i=0;i<100;i++)
-			{
-				g->run(in, out);
-				frames++;
-			}
-			end = time_ms_ne();
+			while (b) g->run(in, out);
+			printf("ingame: %u frames in %ums = %ffps\n", b.iterations, b.us/1000, b.per_second());
 		}
-		
-		printf("ingame: %i frames in %u ms = %ffps\n", frames, (unsigned)(end-start), frames/(float)(end-start)*1000);
 		
 		return 0;
 	}
