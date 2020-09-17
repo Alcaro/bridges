@@ -6,16 +6,19 @@
 int main(int argc, char** argv)
 {
 	argparse args;
+#ifndef STDOUT_ERROR
 	bool do_bench_solv = false;
 	args.add("perf-solv", &do_bench_solv);
 	bool do_bench_ui = false;
 	args.add("perf-ui", &do_bench_ui);
+#endif
 	arlib_init(args, argv);
 	
 	static uint32_t pixels[640*480]; // static to keep the stack frame small
 	image out; // initialized up here so perf-ui can use it too
 	out.init_ptr(pixels, 640, 480, sizeof(uint32_t)*640, ifmt_xrgb8888); // xrgb is faster than 0rgb
 	
+#ifndef STDOUT_ERROR
 	if (do_bench_solv && do_bench_ui)
 	{
 		puts("can't benchmark both solver and UI");
@@ -109,6 +112,7 @@ int main(int argc, char** argv)
 		
 		return 0;
 	}
+#endif
 	
 	aropengl gl;
 	autoptr<gameview> gv = gameview::create(gl, 640, 480, aropengl::t_ver_1_0/*|aropengl::t_direct3d_vsync*/, "bridges");
@@ -137,7 +141,7 @@ int main(int argc, char** argv)
 	game::input in = {};
 	
 	gv->keys_cb([&in](int scancode, gameview::key_t key, bool down) {
-printf("key %d,%d,%d\n",scancode,key,down);
+//printf("key %d,%d,%d\n",scancode,key,down);
 		int bit;
 		if(0);
 		else if (key == gameview::K_RIGHT  || key == gameview::K_d)         bit = game::k_right;
@@ -152,7 +156,7 @@ printf("key %d,%d,%d\n",scancode,key,down);
 	});
 	
 	gv->mouse_cb([&in](int x, int y, uint8_t buttons) {
-printf("mouse %d,%d,%d\n",x,y,buttons);
+//printf("mouse %d,%d,%d\n",x,y,buttons);
 		in.mousex = x;
 		in.mousey = y;
 		in.lmousedown = (buttons&1);
@@ -162,30 +166,29 @@ printf("mouse %d,%d,%d\n",x,y,buttons);
 	bool first = true;
 	bool active = true;
 	
-	time_t t=0;
-	int fps=0;
+	//time_t t=0;
+	//int fps=0;
 	
 	while (gv->running())
 	{
-		fps++;
-		if (t != time(NULL))
-		{
-			printf("%dfps\n",fps);
-			fps = 0;
-			t = time(NULL);
-		}
+		//fps++;
+		//if (t != time(NULL))
+		//{
+//printf("%dfps\n",fps);
+			//fps = 0;
+			//t = time(NULL);
+		//}
 		
 		if (active)
 		{
-#ifdef ARLIB_OPT
-			uint64_t start = time_us_ne();
+#if defined(ARLIB_OPT) && !defined(STDOUT_ERROR)
+			timer t;
 #endif
 			int do_upload = g->run(in, out, !first);
 			first = false;
-#ifdef ARLIB_OPT
-			uint64_t end = time_us_ne();
-			if (end-start >= 2500)
-				printf("rendered in %uus\n", (unsigned)(end-start));
+#if defined(ARLIB_OPT) && !defined(STDOUT_ERROR)
+			if (t.us() >= 2500)
+				printf("rendered in %uus\n", (unsigned)t.us());
 #endif
 			if (do_upload > 0) gl.TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 640, 480, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, pixels);
 			active = (do_upload >= 0);

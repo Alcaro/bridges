@@ -23,9 +23,11 @@ class linker {
 	uint16_t n_linkable_islands; // Number of islands that do not have population 1.
 	
 public:
+#ifndef STDOUT_ERROR
 void debug(int i){printf("link[%.3i]:%.3i,%.3i,%.3i,%.3i; %.3i,%.3i,x\n",i,
 links[i].links[0],links[i].links[1],links[i].links[2],links[i].links[3],
 links[i].join_root,links[i].join_next);}
+#endif
 	void init(gamemap& map, uint16_t* possibilities)
 	{
 		for (int y=0;y<map.height;y++)
@@ -817,8 +819,10 @@ public:
 		}
 		else
 		{
+#ifndef STDOUT_ERROR
 			puts("Out of memory");
 			puts(map.serialize());
+#endif
 			abort();
 			return -1;
 		}
@@ -922,7 +926,9 @@ public:
 			if (ret == -1) { maxdepth++; goto again; }
 			maxdepth--; // needs at least depth 1, or it won't notice that it's finished. this should not contribute to difficulty
 			add_difficulty(100*maxdepth*maxdepth);
+#ifndef STDOUT_ERROR
 if(maxdepth>=2)puts("#######"),puts(map.serialize()),puts("#######");
+#endif
 		}
 		else
 		{
@@ -950,8 +956,17 @@ if(maxdepth>=2)puts("#######"),puts(map.serialize()),puts("#######");
 			while (map.map[y][x].bridges[3] != ndown)  map.toggle(x, y, 3);
 		}
 		
-#ifndef abort
-		if (!map.finished()) { puts("ERROR: solver returned bad solution"); puts(map.serialize()); abort(); }
+#ifndef STDOUT_ERROR
+		if (!map.finished())
+		{
+			puts("ERROR: solver returned bad solution");
+			puts(map.serialize());
+#ifdef ARLIB_TEST
+			assert(false);
+#else
+			abort();
+#endif
+		}
 #endif
 	}
 
@@ -970,6 +985,7 @@ void verify(bool strict=true)
 	}
 }
 
+#ifndef STDOUT_ERROR
 void print()
 {
 	for (int y=0;y<map.height;y++)
@@ -981,6 +997,7 @@ void print()
 	}
 	puts("");
 }
+#endif
 };
 }
 
@@ -990,6 +1007,7 @@ bool gamemap::solve_another() { solver<op_another> s(*this); return s.solve(); }
 uint32_t gamemap::difficulty() { solver<op_difficulty> s(*this); s.solve(); return s.accumulator; }
 uint32_t gamemap::solve_difficulty() { solver<op_difficulty> s(*this); if (s.solve()) s.assign(); return s.accumulator; }
 
+#ifdef ARLIB_TEST
 static void test_split(cstring in, string& map, string& solution)
 {
 	array<cstring> lines = in.csplit("\n");
@@ -1473,3 +1491,4 @@ return;
 		printf("[%i]=%i\n",i,diff[i]);
 	}
 }
+#endif
