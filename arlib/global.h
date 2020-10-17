@@ -36,15 +36,15 @@
 // (on some 32bit mingw versions, it also adds a dependency on libgcc_s_sjlj-1.dll)
 // extra kilobytes and dlls is the opposite of what I want, and my want is stronger, so here's some shenanigans
 // comments say libstdc++ demands a POSIX printf, but I don't use libstdc++'s text functions, so I don't care
-// msvcrt strtod also rounds wrong sometimes, but only for unrealistic inputs, so I don't care about that either
+// msvcrt strtod also rounds wrong sometimes, but it's right for all plausible inputs, so I don't care about that either
 #    define __USE_MINGW_ANSI_STDIO 0 // first, trigger a warning if it's enabled already - probably wrong include order
 #    include <stdlib.h>              // second, include this specific header; it includes <bits/c++config.h>,
 #    undef __USE_MINGW_ANSI_STDIO    // which sets this flag, which must be turned off
 #    define __USE_MINGW_ANSI_STDIO 0 // (subsequent includes of c++config.h are harmless, there's an include guard)
 #    undef strtof
 #    define strtof strtof_arlib // third, redefine these functions, they pull in mingw's scanf
-#    undef strtod               // (strtod not acting like scanf is creepy, anyways)
-#    define strtod strtod_arlib // this is why stdlib.h is chosen, rather than some random tiny c++ header like cstdbool
+#    undef strtod               // this is why stdlib.h is chosen, rather than some random tiny c++ header like cstdbool
+#    define strtod strtod_arlib // (strtod not acting like scanf is creepy, anyways)
 #    undef strtold
 #    define strtold strtold_arlib
 float strtof_arlib(const char * str, char** str_end);
@@ -61,6 +61,7 @@ long double strtold_arlib(const char * str, char** str_end);
 #include <inttypes.h>
 #include <utility>
 #include "function.h"
+#include "cpu.h"
 
 #ifdef STDOUT_DELETE
 #define puts(x) do{}while(0)
@@ -251,7 +252,7 @@ typedef void* anyptr;
 #endif
 
 
-#ifdef ARLIB_TESTRUNNER
+#ifdef ARLIB_TESTRUNNER // count mallocs and frees; memory leak means test failure
 void _test_malloc();
 void _test_free();
 void free_test(void* ptr);
@@ -261,45 +262,33 @@ void free_test(void* ptr);
 #define _test_free()
 #endif
 
-void malloc_fail(size_t size);
+#ifdef runtime__SSE2__
+#include <mm_malloc.h> // contains an inline function that calls malloc
+#endif
 
-inline anyptr malloc_check(size_t size)
-{
-	_test_malloc();
-	if (size >= 0x80000000) malloc_fail(size);
-	void* ret = malloc(size);
-	if (size && !ret) malloc_fail(size);
-	return ret;
-}
+// these six act as their base functions on success, except they return anyptr and don't need explicit casts
+// on failure, try_ returns NULL, while xmalloc throws std::bad_alloc or calls abort(), depending on whether exceptions are enabled
+// however, note that using try_malloc, or catching xmalloc's exception, is not a comprehensive OOM handling strategy
+// - it's hard to test
+// - it's often unclear how OOM should be handled, especially considering OOM handlers can't allocate more memory
+// - parts of Arlib are not exception safe; you may get memory leaks, or something worse
+// - modern systems don't fail memory allocations; they swap things around until the machine is unusably slow, or summon the OOM killer
+// therefore, if your program has data it doesn't want to lose, it should write it to disk often, and crash and get restarted on OOM
+// (naturally, these arguments turn out differently on different platforms, but they're true for every platform Arlib targets)
+anyptr xmalloc(size_t size);
 inline anyptr try_malloc(size_t size) { _test_malloc(); return malloc(size); }
-#define malloc malloc_check
+#define malloc use_xmalloc_or_try_malloc_instead
 
-inline anyptr realloc_check(anyptr ptr, size_t size)
-{
-	if ((void*)ptr) _test_free();
-	if (size) _test_malloc();
-	if (size >= 0x80000000) malloc_fail(size);
-	void* ret = realloc(ptr, size);
-	if (size && !ret) malloc_fail(size);
-	return ret;
-}
+anyptr xrealloc(anyptr ptr, size_t size);
 inline anyptr try_realloc(anyptr ptr, size_t size) { if ((void*)ptr) _test_free(); if (size) _test_malloc(); return realloc(ptr, size); }
-#define realloc realloc_check
+#define realloc use_xrealloc_or_try_realloc_instead
 
-inline anyptr calloc_check(size_t size, size_t count)
-{
-	_test_malloc();
-	void* ret = calloc(size, count);
-	if (size && count && !ret) malloc_fail(size*count);
-	return ret;
-}
+anyptr xcalloc(size_t size, size_t count);
 inline anyptr try_calloc(size_t size, size_t count) { _test_malloc(); return calloc(size, count); }
-#define calloc calloc_check
-
-inline void malloc_assert(bool cond) { if (!cond) malloc_fail(0); }
+#define calloc use_xcalloc_or_try_calloc_instead
 
 
-//if I cast it to void, that means I do not care, so shut up about warn_unused_result
+//cast to void should be enough to shut up warn_unused_result, but...
 template<typename T> static inline void ignore(T t) {}
 
 
@@ -426,7 +415,6 @@ public:
 
 
 //if an object should contain callbacks that can destroy the object, you should use the macros below these classes
-//(hopefully c++20 coroutines will replace most usecases for this one, they're easy to forget)
 class destructible {
 	friend class destructible_lock;
 	bool* pb = NULL;
@@ -460,24 +448,15 @@ public:
 			return __VA_ARGS__; \
 	} while(0)
 //why? easier than doing it manually, and supports exceptions
+//(hopefully c++20 coroutines will replace most usecases for this one, they're easy to forget)
 
 
 
 
-//#if defined(__linux__) || GCC_VERSION >= 40900
-//#define asprintf(...) malloc_assert(asprintf(__VA_ARGS__) >= 0)
-//#else
-//void asprintf(char * * ptr, const char * fmt, ...);
-//#endif
-
-//Acts like strstr, with the obvious difference.
-#if defined(_WIN32) || defined(__x86_64__) // Windows doesn't have this; Linux does, but my libc is poorly optimized on x64.
+#if defined(_WIN32) || defined(runtime__SSE4_2__) // Windows doesn't have memmem; Linux does, but it's rare and poorly optimized.
 void* memmem_arlib(const void * haystack, size_t haystacklen, const void * needle, size_t needlelen) __attribute__((pure));
 #define memmem memmem_arlib
 #endif
-
-//Returns distance to first difference, or 'len' if that's smaller.
-size_t memcmp_d(const void * a, const void * b, size_t len) __attribute__((pure));
 
 
 //undefined behavior if 'in' is negative, or if the output would be out of range (signed input types are fine)
@@ -507,6 +486,55 @@ template<typename T> static inline T bitround(T in)
 }
 
 
+
+template<typename T> inline T memxor_t(const uint8_t * a, const uint8_t * b)
+{
+	T an; memcpy(&an, a, sizeof(T));
+	T bn; memcpy(&bn, b, sizeof(T));
+	return an^bn;
+}
+// memeq is small after optimization, but looks big to the inliner, so forceinline it
+// if caller doesn't know size, caller should also be forceinlined
+forceinline bool memeq(const void * a, const void * b, size_t len)
+{
+	if (!__builtin_constant_p(len)) return !memcmp(a, b, len);
+	
+#if defined(__i386__) || defined(__x86_64__)
+	// several ideas borrowed from clang !memcmp(variable, constant, constant) output
+	// its codegen is often better than anything I could think of
+	
+	const uint8_t * a8 = (uint8_t*)a;
+	const uint8_t * b8 = (uint8_t*)b;
+	
+	if (len == 0)
+		return true;
+	
+	if (len == 1)
+		return *a8 == *b8;
+	
+	if (len == 2) return memxor_t<uint16_t>(a8, b8) == 0;
+	if (len == 3) return (memxor_t<uint16_t>(a8, b8) | (a8[2]^b8[2])) == 0;
+	
+	if (len == 4) return memxor_t<uint32_t>(a8, b8) == 0;
+	if (len == 5) return (memxor_t<uint32_t>(a8, b8) | (a8[4]^b8[4])) == 0;
+	if (len == 6) return (memxor_t<uint32_t>(a8, b8) | memxor_t<uint16_t>(a8+4, b8+4)) == 0;
+	if (len < 8) return (memxor_t<uint32_t>(a8, b8) | memxor_t<uint32_t>(a8+len-4, b8+len-4)) == 0;
+	
+	if (len == 8)  return memxor_t<uint64_t>(a8, b8) == 0;
+	if (len == 9)  return (memxor_t<uint64_t>(a8, b8) | (a8[8]^b8[8])) == 0;
+	if (len == 10) return (memxor_t<uint64_t>(a8, b8) | memxor_t<uint16_t>(a8+8, b8+8)) == 0;
+	if (len <= 12) return (memxor_t<uint64_t>(a8, b8) | memxor_t<uint32_t>(a8+len-4, b8+len-4)) == 0;
+	if (len <= 16) return (memxor_t<uint64_t>(a8, b8) | memxor_t<uint64_t>(a8+len-8, b8+len-8)) == 0;
+	
+	// no point doing a SSE version, large constant sizes are rare
+#else
+#error enable the above on platforms where unaligned mem access is fast
+#endif
+	
+	return !memcmp(a, b, len);
+}
+
+
 #define ALLINTS(x) \
 	x(signed char) \
 	x(unsigned char) \
@@ -518,11 +546,6 @@ template<typename T> static inline T bitround(T in)
 	x(unsigned long) \
 	x(signed long long) \
 	x(unsigned long long)
-
-#define ALLNUMS(x) \
-	ALLINTS(x) \
-	x(float) \
-	x(double) \
 
 #ifndef COMMON_INST
 #define COMMON_INST(T) extern template class T
@@ -544,6 +567,7 @@ template<typename T> static inline T bitround(T in)
 
 #ifdef __GNUC__
 #define oninit() __attribute__((constructor)) static void JOIN(oninit,__LINE__)()
+#define oninit_early() __attribute__((constructor(101))) static void JOIN(oninit,__LINE__)()
 #define ondeinit() __attribute__((destructor)) static void JOIN(ondeinit,__LINE__)()
 #else
 class initrunner {
@@ -565,13 +589,19 @@ public:
 
 // oninit_static is like oninit, but promises to only write directly to global variables, no malloc.
 // In exchange, it is usable in hybrid DLLs. On non-hybrid or non-Windows, it's same as normal oninit.
+// The only way to affect ordering is _early. Static early runs before both nonearly; early nonstatic runs before normal.
+// Other than that, no guarantees; there are no guarantees on order within a class, between static and nonstatic,
+// between static and early nonstatic, or between global objects and normal.
 #ifdef ARLIB_HYBRID_DLL
-#define oninit_static() static void JOIN(oninit,__LINE__)(); \
+#define oninit_static_section(sec) static void JOIN(oninit,__LINE__)(); \
                         static const funcptr JOIN(initrun,__LINE__) \
-                            __attribute__((section(".ctors.arlibstatic2"), used)) = JOIN(oninit,__LINE__); \
+                            __attribute__((section(".ctors.arlibstatic" sec), used)) = JOIN(oninit,__LINE__); \
                         static void JOIN(oninit,__LINE__)()
+#define oninit_static() oninit_static_section("2")
+#define oninit_static_early() oninit_static_section("3") // it's processed backwards, high-numbered sections run first
 #else
 #define oninit_static oninit
+#define oninit_static_early oninit_early
 #endif
 
 #define container_of(ptr, outer_t, member) ((outer_t*)((uint8_t*)(ptr) - (offsetof(outer_t,member))))
@@ -601,28 +631,39 @@ static inline range_t range(size_t start, size_t stop, size_t step = 1) { return
 //  its nonempty exports section; however, if used as a DLL, it has to reimplement some OS facilities, yielding several limitations:
 // - It's not supported by the OS; it relies on a bunch of implementation details and ugly tricks that may break in newer OSes.
 // - The program must call arlib_hybrid_dll_init() at the top of every DLLEXPORTed function.
+//     It must be at the very top; constructors and exception handling setup are not permitted.
 //     It's safe to call it multiple times, including multithreaded if ARLIB_THREAD is enabled.
 //     It's also safe to call it if it's ran as an EXE, and on OSes other than Windows. It'll just do nothing.
 //     Only the first call to arlib_hybrid_dll_init() does anything, so it's safe to omit it in
-//       exported functions guaranteed to not be the first one called, though not recommended.
+//       exported functions guaranteed to not be the first one called.
 // - The EXE/DLL startup code does a lot of stuff I don't understand, or never investigated; doubtlessly I forgot something important.
-// - Global objects' destructors are often implemented via atexit(), which is process-global in EXEs, or things GCC thinks is an EXE.
-//     As such, nontrivial globals are memory leaks at best; DLL paths may not touch them.
+// - Global objects' destructors are often implemented via atexit(), which is process-global in EXEs, and in things GCC thinks is an EXE.
+//     As such, globals containing dynamic allocations are memory leaks at best; DLL paths may not touch them.
+//     (Statically allocated globals are fine. For example, BearSSL caches the system certificate store into a global buffer.)
 //     Note that parts of Arlib use global constructors or global variables. In particular, the following are memory leaks or worse:
 //     - runloop::global()
 //     - socket::create_ssl() SChannel backend (BearSSL is safe; OpenSSL and GnuTLS are not supported on Windows)
-//     - window_* on Windows
-//     - file::exepath() on Unix
-//     - random_t::get_seed() if ARXPSUPPORT (safe on Unix and 7)
-//     - WuTF
-// - To avoid crashes if onexit() calls an unloaded DLL, and to allow globals in EXE paths, globals' constructors are not run either.
-//     Constant-initialized variables are safe.
-// - Some parts of libc and compiler intrinsics are also implemented via global variables. Be careful.
-//     The only useful global-based intrinsic, __builtin_cpu_supports, is special cased and works.
-// - If a normal DLL imports a symbol that doesn't exist, LoadLibrary's caller gets an error.
-//     If this one loads a symbol that doesn't exist, it'll remain as NULL, and will crash if called (though you can NULL check them).
-// - Unless the DLL exports a single-thread-only init function, ARLIB_THREAD must be enabled, even if otherwise unused.
-// - Unlikely to work on 32bit, since it has to relocate itself. PIC on 32bit is hard.
+//     - window_*
+//     - random_t::get_seed() if ARXPSUPPORT (no globals on Unix and 7+)
+//     - WuTF (not supported in DLLs at all)
+// - To avoid crashes if atexit() calls an unloaded DLL, and to allow globals in EXE paths, globals' constructors are not run either.
+//     Constant-initialized variables are safe, or if you need to fill in some globals, you can use oninit_static().
+// - Some libc functions and compiler intrinsics that are implemented via global variables.
+//     Most of them are safe; msvcrt is a normal DLL, and most things MinGW statically links are stateless.
+//     The only useful exception I'm aware of, __builtin_cpu_supports, should be avoided anyways.
+// - If a normal DLL imports a symbol that doesn't exist from another DLL, LoadLibrary's caller gets an error.
+//     If a hybrid DLL imports a symbol that doesn't exist, it will remain as NULL, and will crash if called (you can't even
+//     NULL check them, compiler will optimize it out).
+// - DLLs used by this program will never be unloaded. If your program only links against system libraries, this is fine,
+//     something else is probably already using them; if your program ships its own DLLs (for example libstdc++-6.dll
+//     or libgcc_s_seh-1.dll), this is equivalent to a memory leak. (But if you're shipping DLLs, your program is already
+//     multiple files, and you should put all shareable logic in another DLL and use a normal EXE.)
+//     A hybrid DLL calling LoadLibrary and FreeLibrary is safe.
+// - arlib_hybrid_dll_init() is thread safe only if ARLIB_THREAD is enabled. If you export a single-thread-only init function,
+//     it's safe to disable.
+// - It uses a couple of GCC extensions, with no MSVC equivalent. (Though the rest of Arlib isn't tested under MSVC either...)
+// - Not tested on 32bit, and likely to crash. It has to relocate itself, and the relocator must be position independent;
+//     PIC on 32bit is hard.
 // - It does various weird things; antivirus programs may react.
 // On Linux, none of the above applies; it's a perfectly normal program in both respects.
 #ifdef ARLIB_HYBRID_DLL

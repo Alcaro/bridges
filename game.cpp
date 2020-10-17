@@ -1369,21 +1369,22 @@ to_title(); //TODO
 #endif
 	}
 	
-	bytearray save()
+	void save(bytesw dat)
 	{
-		bytestreamw b;
-		b.u8(unlocked);
-		b.u8(seen_random_tutorial);
+		if (dat.size() != savedat_size) abort();
+		
+		dat[0] = unlocked;
+		dat[1] = seen_random_tutorial;
 		
 #ifdef ARLIB_THREAD
-		b.u64l(gamegen_next[0]);
-		b.u64l(gamegen_next[1]);
-		b.u64l(gamegen_next[2]);
+		writeu_le64(dat.skip(2 ).ptr(), gamegen_next[0]);
+		writeu_le64(dat.skip(10).ptr(), gamegen_next[1]);
+		writeu_le64(dat.skip(18).ptr(), gamegen_next[2]);
 #else
-		b.u64l(0); b.u64l(0); b.u64l(0);
+		writeu_le64(dat.skip(2 ).ptr(), 0);
+		writeu_le64(dat.skip(10).ptr(), 0);
+		writeu_le64(dat.skip(18).ptr(), 0);
 #endif
-		
-		return b.finish();
 	}
 	
 	void gamegen_step()

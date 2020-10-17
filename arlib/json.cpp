@@ -28,7 +28,7 @@ uint8_t jsonparser::nextch()
 again: ;
 	uint8_t ret = *(m_data++);
 	if (ret >= 33) return ret;
-	if (isspace(ret)) goto again;
+	if (LIKELY(isspace(ret))) goto again;
 	if (m_data > m_data_end)
 	{
 		m_data--;
@@ -45,13 +45,9 @@ bool jsonparser::skipcomma(size_t depth)
 	{
 		if ((m_nesting.size() >= depth) == (ch == '\0')) return false;
 		if (m_nesting.get_or(m_nesting.size()-depth, false) == true)
-		{
 			m_want_key = true;
-		}
 		if (ch == ',')
-		{
 			m_need_value = true;
-		}
 		return true;
 	}
 	if (ch == ']' || ch == '}')
@@ -110,10 +106,11 @@ jsonparser::event jsonparser::next()
 		parse_key:
 			is_key = true;
 		}
-		string val;
+		uint8_t * val_out_start = m_data;
+		uint8_t * val_out = m_data;
 		
 		//most strings don't contain escapes - special case them
-		const uint8_t * fast_iter = m_data;
+		uint8_t * fast_iter = m_data;
 #ifdef __SSE2__
 		while (fast_iter+16 <= m_data_end)
 		{
@@ -129,7 +126,7 @@ jsonparser::event jsonparser::next()
 				continue;
 			}
 			fast_iter += ctz32(mask);
-			val = string(arrayview<uint8_t>(m_data, fast_iter-m_data));
+			val_out = fast_iter;
 			m_data = fast_iter;
 			if (LIKELY(*m_data == '"'))
 			{
@@ -145,7 +142,7 @@ jsonparser::event jsonparser::next()
 			uint8_t ch = *fast_iter;
 			if (UNLIKELY(ch < 32 || ch == '\\' || ch == '"'))
 			{
-				val = string(arrayview<uint8_t>(m_data, fast_iter-m_data));
+				val_out = fast_iter;
 				m_data = fast_iter;
 				if (LIKELY(ch == '"'))
 				{
@@ -166,27 +163,27 @@ jsonparser::event jsonparser::next()
 				uint8_t esc = *(m_data++);
 				switch (esc)
 				{
-				case '"': val +=  '"'; break;
-				case '\\':val += '\\'; break;
-				case '/': val +=  '/'; break;
-				case 'b': val += '\b'; break;
-				case 'f': val += '\f'; break;
-				case 'n': val += '\n'; break;
-				case 'r': val += '\r'; break;
-				case 't': val += '\t'; break;
+				case '"': *val_out++ =  '"'; break;
+				case '\\':*val_out++ = '\\'; break;
+				case '/': *val_out++ =  '/'; break;
+				case 'b': *val_out++ = '\b'; break;
+				case 'f': *val_out++ = '\f'; break;
+				case 'n': *val_out++ = '\n'; break;
+				case 'r': *val_out++ = '\r'; break;
+				case 't': *val_out++ = '\t'; break;
 				case 'u':
 				{
-					if (m_data+4 > m_data_end) return do_error();
+					if (UNLIKELY(m_data+4 > m_data_end)) return do_error();
 					
 					uint32_t codepoint;
-					if (!fromstringhex(arrayview<uint8_t>(m_data, 4), codepoint)) return do_error();
+					if (UNLIKELY(!fromstringhex(arrayview<uint8_t>(m_data, 4), codepoint))) return do_error();
 					m_data += 4;
 					
 					// curse utf16 forever
 					if (codepoint >= 0xD800 && codepoint <= 0xDBFF && m_data[0] == '\\' && m_data[1] == 'u')
 					{
 						uint16_t low_sur;
-						if (!fromstringhex(arrayview<uint8_t>(m_data+2, 4), low_sur)) return do_error();
+						if (UNLIKELY(!fromstringhex(arrayview<uint8_t>(m_data+2, 4), low_sur))) return do_error();
 						
 						if (low_sur >= 0xDC00 && low_sur <= 0xDFFF)
 						{
@@ -196,7 +193,7 @@ jsonparser::event jsonparser::next()
 					}
 					// else leave as is, string::codepoint will return fffd
 					
-					val += string::codepoint(codepoint);
+					val_out += string::codepoint(val_out, codepoint);
 					break;
 				}
 				default:
@@ -211,18 +208,20 @@ jsonparser::event jsonparser::next()
 				m_data--;
 				return do_error();
 			}
-			val += ch;
+			*val_out++ = ch;
 		}
 	skip_escape_parse:
+		*val_out = '\0';
+		cstring val(arrayview<uint8_t>(val_out_start, val_out-val_out_start), true);
 		if (is_key)
 		{
 			if (nextch() != ':') return do_error();
-			return { map_key, std::move(val) };
+			return { map_key, val };
 		}
 		else
 		{
 			if (!skipcomma()) return do_error();
-			return { str, std::move(val) };
+			return { str, val };
 		}
 	}
 	if (ch == '[')
@@ -277,10 +276,9 @@ jsonparser::event jsonparser::next()
 			while (isdigit(*m_data)) m_data++;
 		}
 		
-		double d;
-		if (!fromstring(arrayview<uint8_t>(start, m_data-start), d)) return do_error();
+		size_t len = m_data-start;
 		if (!skipcomma()) return do_error();
-		return { num, d };
+		return { num, arrayview<uint8_t>(start, len) };
 	}
 	if (ch == 't' && *(m_data++)=='r' && *(m_data++)=='u' && *(m_data++)=='e')
 	{
@@ -357,11 +355,17 @@ string jsonwriter::strwrap(cstring s)
 
 JSON JSON::c_null;
 
-void JSON::construct(jsonparser& p, bool* ok, size_t maxdepth)
+void JSON::construct(jsonparser& p, jsonparser::event& ev, bool* ok, size_t maxdepth)
 {
-	if (maxdepth == 0)
+	m_action = ev.action;
+	if(0);
+	else if (ev.action == jsonparser::str) m_str = ev.str;
+	else if (ev.action == jsonparser::num) fromstring(ev.str, m_num);
+	else if (ev.action == jsonparser::error) *ok = false;
+	else if (maxdepth == 0)
 	{
 		*ok = false;
+		m_action = jsonparser::error;
 		if (ev.action == jsonparser::enter_list || ev.action == jsonparser::enter_map)
 		{
 			// it would be faster to reset the jsonparser somehow,
@@ -378,20 +382,17 @@ void JSON::construct(jsonparser& p, bool* ok, size_t maxdepth)
 		}
 		return;
 	}
-	
-	if (ev.action == jsonparser::enter_list)
+	else if (ev.action == jsonparser::enter_list)
 	{
 		while (true)
 		{
 			jsonparser::event next = p.next();
 			if (next.action == jsonparser::exit_list) break;
 			if (next.action == jsonparser::error) *ok = false;
-			JSON& child = chld_list.append();
-			child.ev = next;
-			child.construct(p, ok, maxdepth-1);
+			m_chld_list.append().construct(p, next, ok, maxdepth-1);
 		}
 	}
-	if (ev.action == jsonparser::enter_map)
+	else if (ev.action == jsonparser::enter_map)
 	{
 		while (true)
 		{
@@ -399,34 +400,33 @@ void JSON::construct(jsonparser& p, bool* ok, size_t maxdepth)
 			if (next.action == jsonparser::exit_map) break;
 			if (next.action == jsonparser::map_key)
 			{
-				JSON& child = chld_map.insert(next.str);
-				child.ev = p.next();
-				child.construct(p, ok, maxdepth-1);
+				jsonparser::event ev = p.next();
+				m_chld_map.insert(next.str).construct(p, ev, ok, maxdepth-1);
 			}
 			if (next.action == jsonparser::error) *ok = false;
 		}
 	}
-	if (ev.action == jsonparser::error) *ok = false;
 }
 
-bool JSON::parse(cstring s)
+bool JSON::parse(string s)
 {
 	// it would not do to have some function changing the value of null for everybody else
 	// this check is only needed here; all of JSON's other members are conceptually const, though most aren't marked as such
 	if (this == &c_null)
 		abort();
 	
-	chld_list.reset();
-	chld_map.reset();
+	m_chld_list.reset();
+	m_chld_map.reset();
 	
-	jsonparser p(s);
-	ev = p.next();
+	jsonparser p(std::move(s));
 	bool ok = true;
-	construct(p, &ok, 1000);
-	jsonparser::event lastev = p.next();
-	if (!ok || lastev.action != jsonparser::finish)
+	jsonparser::event ev = p.next();
+	construct(p, ev, &ok, 1000);
+	
+	ev = p.next();
+	if (!ok || ev.action != jsonparser::finish)
 	{
-		ev.action = jsonparser::error;
+		m_action = jsonparser::error;
 		return false;
 	}
 	return true;
@@ -435,7 +435,7 @@ bool JSON::parse(cstring s)
 template<bool sort>
 void JSON::serialize(jsonwriter& w) const
 {
-	switch (ev.action)
+	switch (m_action)
 	{
 	case jsonparser::unset:
 	case jsonparser::error:
@@ -449,15 +449,15 @@ void JSON::serialize(jsonwriter& w) const
 		w.boolean(false);
 		break;
 	case jsonparser::str:
-		w.str(ev.str);
+		w.str(m_str);
 		break;
 	case jsonparser::num:
-		if (ev.num == (int)ev.num) w.num((int)ev.num);
-		else w.num(ev.num);
+		if (m_num == (int)m_num) w.num((int)m_num);
+		else w.num(m_num);
 		break;
 	case jsonparser::enter_list:
 		w.list_enter();
-		for (const JSON& j : chld_list) j.serialize<sort>(w);
+		for (const JSON& j : m_chld_list) j.serialize<sort>(w);
 		w.list_exit();
 		break;
 	case jsonparser::enter_map:
@@ -465,7 +465,7 @@ void JSON::serialize(jsonwriter& w) const
 		if (sort)
 		{
 			array<const map<string,JSON>::node*> items;
-			for (const map<string,JSON>::node& e : chld_map)
+			for (const map<string,JSON>::node& e : m_chld_map)
 			{
 				items.append(&e);
 			}
@@ -478,7 +478,7 @@ void JSON::serialize(jsonwriter& w) const
 		}
 		else
 		{
-			for (auto& e : chld_map)
+			for (auto& e : m_chld_map)
 			{
 				w.map_key(e.key);
 				e.value.serialize<sort>(w);
@@ -535,9 +535,9 @@ static const char * test2 =
 
 static jsonparser::event test2e[]={
 	{ e_enter_list },
-		{ e_num, 1 },
-		{ e_num, 25 },
-		{ e_num, 3 },
+		{ e_num, "1" },
+		{ e_num, "2.5e+1" },
+		{ e_num, "3" },
 	{ e_exit_list },
 	{ e_finish }
 };
@@ -561,7 +561,7 @@ static jsonparser::event test3e[]={
 static const char * test4 =
 "{ \"a\": [ { \"b\": [ 1, 2 ], \"c\": [ 3, 4 ] }, { \"d\": [ 5, 6 ], "
 "\"e\": [ \"this is a 31 byte string aaaaaa\", \"this is a 32 byte string aaaaaaa\", \"this is a 33 byte string aaaaaaaa\" ] } ],\n"
-"  \"f\": [ { \"g\": [ 7, 8 ], \"h\": [ 9, 1 ] }, { \"i\": [ 2, \"\xC3\xB8\" ], \"j\": [ {}, \"x\\nx\x7fx\" ] } ] }"
+"  \"f\": [ { \"g\": [ 7, 8 ], \"h\": [ 9, 0 ] }, { \"i\": [ 1, \"\xC3\xB8\" ], \"j\": [ {}, \"x\\nx\x7fx\" ] } ] }"
 ;
 
 static jsonparser::event test4e[]={
@@ -570,13 +570,13 @@ static jsonparser::event test4e[]={
 		{ e_enter_list },
 			{ e_enter_map },
 				{ e_map_key, "b" },
-				{ e_enter_list }, { e_num, 1 }, { e_num, 2 }, { e_exit_list },
+				{ e_enter_list }, { e_num, "1" }, { e_num, "2" }, { e_exit_list },
 				{ e_map_key, "c" },
-				{ e_enter_list }, { e_num, 3 }, { e_num, 4 }, { e_exit_list },
+				{ e_enter_list }, { e_num, "3" }, { e_num, "4" }, { e_exit_list },
 			{ e_exit_map },
 			{ e_enter_map },
 				{ e_map_key, "d" },
-				{ e_enter_list }, { e_num, 5 }, { e_num, 6 }, { e_exit_list },
+				{ e_enter_list }, { e_num, "5" }, { e_num, "6" }, { e_exit_list },
 				{ e_map_key, "e" },
 				{ e_enter_list },
 					{ e_str, "this is a 31 byte string aaaaaa" },
@@ -589,13 +589,13 @@ static jsonparser::event test4e[]={
 		{ e_enter_list },
 			{ e_enter_map },
 				{ e_map_key, "g" },
-				{ e_enter_list }, { e_num, 7 }, { e_num, 8 }, { e_exit_list },
-				{ e_map_key, "h" }, // don't use [9,0], { e_num, 0 } is ambiguous between double/char* ctors because c++ null is drunk
-				{ e_enter_list }, { e_num, 9 }, { e_num, 1 }, { e_exit_list },
+				{ e_enter_list }, { e_num, "7" }, { e_num, "8" }, { e_exit_list },
+				{ e_map_key, "h" },
+				{ e_enter_list }, { e_num, "9" }, { e_num, "0" }, { e_exit_list },
 			{ e_exit_map },
 			{ e_enter_map },
 				{ e_map_key, "i" },
-				{ e_enter_list }, { e_num, 2 }, { e_str, "\xC3\xB8" }, { e_exit_list },
+				{ e_enter_list }, { e_num, "1" }, { e_str, "\xC3\xB8" }, { e_exit_list },
 				{ e_map_key, "j" },
 				{ e_enter_list }, { e_enter_map }, { e_exit_map }, { e_str, "x\nx\x7fx" }, { e_exit_list },
 			{ e_exit_map },
@@ -629,7 +629,6 @@ static void testjson(cstring json, jsonparser::event* expected)
 		{
 			assert_eq(actual.action, expected->action);
 			assert_eq(actual.str, expected->str);
-			if (expected->action == e_num) assert_eq(actual.num, expected->num);
 			
 			if (expected->action == e_finish) return;
 		}
@@ -672,6 +671,7 @@ test("JSON parser", "string", "json")
 	testcall(testjson(test5, test5e));
 	
 	testcall(testjson_error(""));
+	testcall(testjson_error("           "));
 	testcall(testjson_error("{"));
 	testcall(testjson_error("{\"a\""));
 	testcall(testjson_error("{\"a\":"));
@@ -683,6 +683,7 @@ test("JSON parser", "string", "json")
 	testcall(testjson_error("\""));
 	testcall(testjson_error("01"));
 	testcall(testjson_error("1."));
+	testcall(testjson_error("+1"));
 	testcall(testjson_error("1e"));
 	testcall(testjson_error("1e+"));
 	testcall(testjson_error("1e-"));
@@ -695,26 +696,28 @@ test("JSON parser", "string", "json")
 	testcall(testjson_error("\"\\u12"));
 	testcall(testjson_error("\"\\u123"));
 	testcall(testjson_error("\"\\u1234"));
+	testcall(testjson_error("[\f]"));
+	testcall(testjson_error("[\v]"));
 	
 	//try to make it read out of bounds
 	//input length 31
-	testcall(testjson_error("\"force allocating the string \\u"));
-	testcall(testjson_error("\"force allocating the string\\u1"));
-	testcall(testjson_error("\"force allocating the strin\\u12"));
-	testcall(testjson_error("\"force allocating the stri\\u123"));
-	testcall(testjson_error("\"force allocating the str\\u1234"));
+	testcall(testjson_error("\"this is a somewhat longer str\\u"));
+	testcall(testjson_error("\"this is a somewhat longer st\\u1"));
+	testcall(testjson_error("\"this is a somewhat longer s\\u12"));
+	testcall(testjson_error("\"this is a somewhat longer \\u123"));
+	testcall(testjson_error("\"this is a somewhat longer\\u1234"));
 	//input length 32
-	testcall(testjson_error("\"force allocating the string  \\u"));
-	testcall(testjson_error("\"force allocating the string \\u1"));
-	testcall(testjson_error("\"force allocating the string\\u12"));
-	testcall(testjson_error("\"force allocating the strin\\u123"));
-	testcall(testjson_error("\"force allocating the stri\\u1234"));
+	testcall(testjson_error("\"this is a somewhat longer stri\\u"));
+	testcall(testjson_error("\"this is a somewhat longer str\\u1"));
+	testcall(testjson_error("\"this is a somewhat longer st\\u12"));
+	testcall(testjson_error("\"this is a somewhat longer s\\u123"));
+	testcall(testjson_error("\"this is a somewhat longer \\u1234"));
 	//input length 15
-	testcall(testjson_error("\"inline data \\u"));
-	testcall(testjson_error("\"inline data\\u1"));
-	testcall(testjson_error("\"inline dat\\u12"));
-	testcall(testjson_error("\"inline da\\u123"));
-	testcall(testjson_error("\"inline d\\u1234"));
+	testcall(testjson_error("\"short string \\u"));
+	testcall(testjson_error("\"short string\\u1"));
+	testcall(testjson_error("\"short strin\\u12"));
+	testcall(testjson_error("\"short stri\\u123"));
+	testcall(testjson_error("\"short str\\u1234"));
 	
 	//found by https://github.com/nst/JSONTestSuite/ - thanks!
 	testcall(testjson_error("[]\1"));
@@ -725,8 +728,9 @@ test("JSON parser", "string", "json")
 	testcall(testjson_error("{\"a\":0,}"));
 	testcall(testjson_error("[1,,2]"));
 	testcall(testjson_error("[-.123]"));
-	testcall(testjson_error(arrayview<uint8_t>((uint8_t*)"123\0", 4)));
-	testcall(testjson_error(arrayview<uint8_t>((uint8_t*)"[]\0", 3)));
+	
+	testcall(testjson_error("123"+string::nul()));
+	testcall(testjson_error("[]"+string::nul()));
 }
 
 

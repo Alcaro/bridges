@@ -884,7 +884,7 @@ uint64_t gamemap::generator::pack()
 		ret = n_valid ? best_seed : 0;
 	}
 	
-	sem.release(); // in case some noob decides to call pack() multiple times
+	sem.release(); // in case some fool decides to call pack() multiple times
 	return ret;
 }
 
@@ -899,7 +899,7 @@ void gamemap::generator::cancel()
 {
 	synchronized(mut) { stop = true; }
 	sem.wait();
-	sem.release(); // in case some noob decides to call finish() after this
+	sem.release(); // in case some fool decides to call finish() after this
 }
 
 

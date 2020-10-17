@@ -24,11 +24,11 @@ public:
 	//If can_skip is false, return value is always 1.
 	virtual int run(const input& in, image& out, bool can_skip = false) = 0;
 	
-	static const size_t savedat_size = 2+8*3; // This is the size of the save data in save() and create().
-	
 	//Call this before exiting the game, and save the result to disk. Next session, pass that struct to create().
 	//For the first run, call create() without an argument.
-	virtual bytearray save() = 0;
+	//save()s argument must be of size
+	static const size_t savedat_size = 2+8*3;
+	virtual void save(bytesw dat) = 0;
 	
 	virtual ~game() {}
 	

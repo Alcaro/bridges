@@ -8,6 +8,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+// TODO: replace epoll with normal poll, epoll doesn't help at our small scale
+
 namespace {
 class runloop_linux : public runloop {
 public:
@@ -19,7 +21,7 @@ public:
 	
 	struct fd_cbs {
 #ifdef ARLIB_TESTRUNNER
-		char* valgrind_dummy; // an uninitialized malloc(1), used to print stack trace of the guilty allocation
+		char* valgrind_dummy; // an unused malloc(1), used as a stack trace that can be printed by double freeing
 #endif
 		function<void(uintptr_t)> cb_read;
 		function<void(uintptr_t)> cb_write;
@@ -88,7 +90,7 @@ public:
 		fd_cbs& cb = fdinfo.get_create(fd);
 #ifdef ARLIB_TESTRUNNER
 		if (!cb.valgrind_dummy)
-			cb.valgrind_dummy = malloc(1);
+			cb.valgrind_dummy = xmalloc(1);
 #endif
 		cb.cb_read  = cb_read;
 		cb.cb_write = cb_write;
@@ -126,7 +128,7 @@ public:
 		
 		timer_cb& timer = timerinfo.append();
 #ifdef ARLIB_TESTRUNNER
-		timer.valgrind_dummy = malloc(1);
+		timer.valgrind_dummy = xmalloc(1);
 #endif
 		timer.repeat = repeat;
 		timer.id = timer_id;
@@ -236,7 +238,8 @@ public:
 		//full pipe should be impossible
 		static_assert(sizeof(cb) <= PIPE_BUF);
 		if (write(submit_fds[1], &cb, sizeof(cb)) != sizeof(cb)) abort();
-		memset(&cb, 0, sizeof(cb));
+		// this relies on function's ctor not allocating, and its dtor doing nothing if given an all-zero object
+		memset((void*)&cb, 0, sizeof(cb));
 	}
 	/*private*/ void submit_cb(uintptr_t)
 	{

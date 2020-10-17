@@ -19,6 +19,7 @@
 #include "global.h"
 #include "linqbase.h"
 
+#include "simd.h"
 #include "hash.h"
 #include "array.h"
 #include "string.h"
@@ -41,14 +42,13 @@
 #include "base64.h"
 #include "bytestream.h"
 #include "crc32.h"
-#include "html.h"
+#include "deflate.h"
 #include "image.h"
 #include "init.h"
 #include "process.h"
 #include "regex.h"
 #include "runloop.h"
 #include "serialize.h"
-#include "simd.h"
 #include "test.h"
 #include "zip.h"
 
