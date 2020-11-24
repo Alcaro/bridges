@@ -34,7 +34,7 @@ const gamemap::genparams& par;
 
 //custom RNG because rand() is slow on Linux and shitty on Windows
 //one per thread so pack() and unpack() work, and to avoid pointless cacheline bouncing
-random_t rand{0}; // hardcode a seed, so it doesn't seed itself from the system CSPRNG
+random_t rand{0}; // hardcode a seed, no need to waste time with the system CSPRNG
 
 loc_generator(gamemap& map, const gamemap::genparams& par) : map(map), par(par) {}
 
@@ -61,7 +61,7 @@ uint16_t valid_bridges_from(int x, int y, bool doit, uint16_t& color)
 			if (map.map[y][xx].population < 0) break; // can't connect to crossing bridge or reef
 			if (color != (uint16_t)-1 && map.towalk[index] != color) break; // can't connect to a castle of another color
 			
-			if (rand() % ++n_colors == 0) color = map.towalk[index];
+			if (rand(++n_colors) == 0) color = map.towalk[index];
 			valid_dirs |= 1<<0;
 			break;
 		}
@@ -80,7 +80,7 @@ uint16_t valid_bridges_from(int x, int y, bool doit, uint16_t& color)
 			if (map.map[yy][x].population < 0) break;
 			if (color != (uint16_t)-1 && map.towalk[index] != color) break;
 			
-			if (rand() % ++n_colors == 0) color = map.towalk[index];
+			if (rand(++n_colors) == 0) color = map.towalk[index];
 			valid_dirs |= 1<<1;
 			break;
 		}
@@ -99,7 +99,7 @@ uint16_t valid_bridges_from(int x, int y, bool doit, uint16_t& color)
 			if (map.map[y][xx].population < 0) break;
 			if (color != (uint16_t)-1 && map.towalk[index] != color) break;
 			
-			if (rand() % ++n_colors == 0) color = map.towalk[index];
+			if (rand(++n_colors) == 0) color = map.towalk[index];
 			valid_dirs |= 1<<2;
 			break;
 		}
@@ -118,7 +118,7 @@ uint16_t valid_bridges_from(int x, int y, bool doit, uint16_t& color)
 			if (map.map[yy][x].population < 0) break;
 			if (color != (uint16_t)-1 && map.towalk[index] != color) break;
 			
-			if (rand() % ++n_colors == 0) color = map.towalk[index];
+			if (rand(++n_colors) == 0) color = map.towalk[index];
 			valid_dirs |= 1<<3;
 			break;
 		}
@@ -145,18 +145,18 @@ bool add_island_sub(int x, int y, uint16_t root, bool force, uint16_t color)
 		for (int dir=0;dir<4;dir++)
 		{
 			if (!(valid_dirs & (1<<dir))) continue;
-			if (rand()%100 >= 50) continue;
+			if (rand(100) >= 50) continue;
 			
 			static const int offsets[4] = { 1, -100, -1, 100 };
 			
 			int8_t len = 0;
 			while (map.get(y*100+x + (++len)*offsets[dir]).population < 0) {}
-			if (rand()%(len*100) >= 250) continue; // reduce probability of long bridges
+			if (rand(len*100) >= 250) continue; // reduce probability of long bridges
 			
 //printf("MAKE: SRC=[%.3i]=%i, DST=[%.3i]=%.3i\n", y*100+x,color,y*100+x + len*offsets[dir],map.towalk[y*100+x + len*offsets[dir]]);
 			if (map.towalk[y*100+x + len*offsets[dir]] != color) abort(); // valid_bridges_from should ban this
 			
-			int nbri = rand()%2 + 1;
+			int nbri = rand(2) + 1;
 			
 			if (map.get(root).population < 80)
 			{
@@ -184,10 +184,10 @@ bool add_island_sub(int x, int y, uint16_t root, bool force, uint16_t color)
 	
 	if (!par.dense)
 	{
-		if (x<map.width-1  && map.towalk[y*100+x+1  ]<=1 && rand()%100 < 90) map.towalk[y*100+x+1  ]=2;
-		if (y<map.height-1 && map.towalk[y*100+x+100]<=1 && rand()%100 < 90) map.towalk[y*100+x+100]=2;
-		if (x>0            && map.towalk[y*100+x-1  ]<=1 && rand()%100 < 90) map.towalk[y*100+x-1  ]=2;
-		if (y>0            && map.towalk[y*100+x-100]<=1 && rand()%100 < 90) map.towalk[y*100+x-100]=2;
+		if (x<map.width-1  && map.towalk[y*100+x+1  ]<=1 && rand(100) < 90) map.towalk[y*100+x+1  ]=2;
+		if (y<map.height-1 && map.towalk[y*100+x+100]<=1 && rand(100) < 90) map.towalk[y*100+x+100]=2;
+		if (x>0            && map.towalk[y*100+x-1  ]<=1 && rand(100) < 90) map.towalk[y*100+x-1  ]=2;
+		if (y>0            && map.towalk[y*100+x-100]<=1 && rand(100) < 90) map.towalk[y*100+x-100]=2;
 	}
 	
 	return true;
@@ -212,9 +212,9 @@ bool try_add_island(int x, int y)
 	add_island_sub(x, y, root, true, color);
 	
 	//all two- and three-tile large islands are valid, as are 2x2 squares
-	if (par.use_large && rand()%100<50)
+	if (par.use_large && rand(100)<50)
 	{
-		switch (rand()%10)
+		switch (rand(10))
 		{
 #define X(xx,yy) try_add_island_sub(x+xx, y+yy, root, false, color)
 		case 0: // right
@@ -238,16 +238,16 @@ bool try_add_island(int x, int y)
 		case 6: // square, up left
 			//+ instead of || because otherwise it short-circuits and only creates L-shaped islands (| would work as well)
 			//rand()%100 to ensure it does create some L shapes - it's kinda silly to know that L shapes always have something in the hole
-			(X(-1,0) + X(0,-1)) && rand()%100<75 && X(-1,-1);
+			(X(-1,0) + X(0,-1)) && rand(100)<75 && X(-1,-1);
 			break;
 		case 7: // square, up right
-			(X(+1,0) + X(0,-1)) && rand()%100<75 && X(+1,-1);
+			(X(+1,0) + X(0,-1)) && rand(100)<75 && X(+1,-1);
 			break;
 		case 8: // square, down left
-			(X(-1,0) + X(0,+1)) && rand()%100<75 && X(-1,+1);
+			(X(-1,0) + X(0,+1)) && rand(100)<75 && X(-1,+1);
 			break;
 		case 9: // square, down right
-			(X(+1,0) + X(0,+1)) && rand()%100<75 && X(+1,+1);
+			(X(+1,0) + X(0,+1)) && rand(100)<75 && X(+1,+1);
 			break;
 #undef X
 		}
@@ -266,7 +266,7 @@ static uint32_t gcd(uint32_t a, uint32_t b)
 //probably doesn't give all valid answers with equal probability, but good enough
 uint32_t rand_coprime(uint32_t to)
 {
-	uint32_t ret = rand()%(to-1) + 1;
+	uint32_t ret = rand(to-1) + 1;
 	uint32_t tmp;
 	do {
 		tmp = gcd(ret, to);
@@ -313,8 +313,8 @@ void generate_one(uint64_t seed)
 	
 	if (!par.use_castle)
 	{
-		int startx = rand() % par.width;
-		int starty = rand() % par.height;
+		int startx = rand(par.width);
+		int starty = rand(par.height);
 		map.an_island[0] = starty*100 + startx;
 		add_island_sub(startx, starty, starty*100+startx, false, 3);
 		
@@ -324,9 +324,18 @@ void generate_one(uint64_t seed)
 	int ncastleeach = 1;
 	if (par.use_castle)
 	{
-		ncastle = rand()%3 + 2;
+		ncastle = rand(3) + 2;
 		uint8_t colors[4] = {80,81,82,83};
-		arrayvieww<uint8_t>(colors).shuffle();
+		for (int i=4;i>0;i--)
+		{
+			int a = i-1;
+			int b = rand(i);
+			
+			uint8_t tmp = colors[a];
+			colors[a] = colors[b];
+			colors[b] = tmp;
+		}
+		
 		map.has_castles = true;
 		
 		//minimum sizes with 2 castles, such that there's always a place to put the last castle,
@@ -363,8 +372,8 @@ void generate_one(uint64_t seed)
 		{
 			while (true)
 			{
-				int x = rand() % (par.width-1);
-				int y = rand() % (par.height-1);
+				int x = rand(par.width-1);
+				int y = rand(par.height-1);
 				
 				if (map.towalk[y*100+x    ] <= 1 &&
 				    map.towalk[y*100+x+  1] <= 1 &&
@@ -393,7 +402,7 @@ void generate_one(uint64_t seed)
 		for (int y=0;y<map.height;y++)
 		for (int x=0;x<map.width;x++)
 		{
-			if (rand()%100 > 3) continue;
+			if (rand(100) > 3) continue;
 			if (map.towalk[y*100+x] >= 3) continue;
 			
 			map.towalk[y*100+x] = 3;
@@ -402,13 +411,13 @@ void generate_one(uint64_t seed)
 	}
 	
 	int totislands = par.width*par.height*par.density;
-	totislands = totislands * (rand()%100+50) / 100; // multiply by 50%..150%
+	totislands = totislands * (rand(100)+50) / 100; // multiply by 50%..150%
 	//make sure it doesn't loop forever saying "here's a map with density 0" "don't give me maps with only one island!"
 	if (totislands < 4) totislands = 4;
 	while (map.numislands < totislands)
 	{
 		//packed index - equal to y*width+x, as opposed to normal index (y*100+x)
-		int pidx_start = rand() % (par.width*par.height);
+		int pidx_start = rand(par.width*par.height);
 		int pidx_skip = rand_coprime(par.width*par.height);
 		
 		int pidx = pidx_start;
@@ -507,7 +516,7 @@ void generate_one(uint64_t seed)
 				
 				uint16_t color = map.towalk[root];
 //printf("CASTLEVALID[%i]:%.3i,%.3i\n",color,root,index);
-				if (rand()%(++numoptions[color-80]) != 0) continue;
+				if (rand(++numoptions[color-80]) != 0) continue;
 				
 				newcastle[color-80] = index;
 				newroot[color-80] = root;
@@ -693,7 +702,7 @@ done: ;
 			if (valid_root)
 			{
 				nroots++;
-				if (rand()%nroots == 0) newroot = idx;
+				if (rand(nroots) == 0) newroot = idx;
 			}
 			idx = map.towalk[idx];
 		} while (idx != y*100+x);
@@ -776,8 +785,7 @@ void gamemap::generator::do_work(workitem& w, gamemap& map)
 				if (here.population < 0) continue;
 				n_close += (here.bridgelen[0] == 1) + (here.bridgelen[3] == 1);
 			}
-			w.penalty += (unsigned)(5 * pow(n_close, 1.5));
-//if(rand()%400==0)printf("PEN=%u,%u\n",n_close,w.penalty);
+			w.penalty += (unsigned)(5 * powf(n_close, 1.5f));
 		}
 	}
 }
@@ -903,5 +911,5 @@ void gamemap::generator::cancel()
 }
 
 
-//test("generator","solver","generator")
 // it's near impossible to test anything as subjective as this
+test("generator","solver","generator") {}

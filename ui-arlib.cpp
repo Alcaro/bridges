@@ -1,7 +1,6 @@
 #include "game.h"
 
-//#include <X11/Xlib.h>
-//#include <X11/keysym.h>
+extern const char * const game_maps[];
 
 int main(int argc, char** argv)
 {
@@ -26,7 +25,7 @@ int main(int argc, char** argv)
 	}
 	if (do_bench_solv)
 	{
-		srand(0);
+		g_rand.seed(0);
 		bool vg = RUNNING_ON_VALGRIND;
 		uint64_t start = time_ms_ne();
 		
@@ -67,7 +66,6 @@ int main(int argc, char** argv)
 					puts(map.serialize());
 					exit(1);
 				}
-				if (result == -1) nunsolv++;
 				if (result == 0) nunsolv++;
 				if (result == 1) nsolv++;
 				if (result == 2) nmultisolv++;
@@ -137,7 +135,7 @@ int main(int argc, char** argv)
 	
 	//save support not implemented here, just hardcode something reasonable
 	static const uint8_t save[] = { 31,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
-	game* g = game::create(save);
+	autoptr<game> g = game::create(save);
 	game::input in = {};
 	
 	gv->keys_cb([&in](int scancode, gameview::key_t key, bool down) {

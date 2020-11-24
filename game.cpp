@@ -19,57 +19,49 @@ public:
 	//if 'force', they'll appear nearby; if not, far off
 	void reset(bool force)
 	{
-		if (frame < -800/spd) return; // far off = leave there, so they appear earlier
+		if (frame < -800/spd) return; // approaching but not on the screen = leave them there, so they appear earlier
 		
-		//first, pick a center for the birds, anywhere in the screen that's at least 100px from the edge
-		xmid = 100 + rand()%(640-200);
-		ymid = 100 + rand()%(480-200);
+		// first, pick a center for the birds, anywhere in the screen that's at least 100px from the edge
+		xmid = 100 + g_rand(640-200);
+		ymid = 100 + g_rand(480-200);
 		
-		//then pick a direction, any direction
-		angle = (float)rand()/RAND_MAX * M_PI*2;
+		// then pick a random direction
+		angle = (float)g_rand.rand32()/65536/65536 * M_PI*2;
 		
 		frame = -800/spd;
 		if (!force)
 		{
-			frame -= 60*60 + rand()%(60*60);
+			frame -= 60*60 + g_rand(60*60);
 		}
 	}
 	
 	void draw(image& out, const image& birdsmap, int tileset)
 	{
-		if (tileset != 2) // no birds in the snow region
+		if (tileset == 2) return; // no birds in the snow region
+		
+		image bird;
+		int animframe = frame/10 & 1;
+		bird.init_ref_sub(birdsmap, animframe*8, tileset*6, 8, 6);
+		
+		int x = xmid + cos(angle)*spd*frame;
+		int y = ymid + sin(angle)*spd*frame;
+		
+		for (int n=0;n<5;n++)
 		{
-			image bird;
-			int animframe = frame/10 & 1;
-			bird.init_ref_sub(birdsmap, animframe*8, tileset*6, 8, 6);
-			
-			int x = xmid + cos(angle)*spd*frame;
-			int y = ymid + sin(angle)*spd*frame;
-			
-			for (int n=0;n<5;n++)
-			{
-				out.insert(x + cos(angle + flock_angle_rad)*n*flock_dist, y + sin(angle + flock_angle_rad)*n*flock_dist, bird);
-				out.insert(x + cos(angle - flock_angle_rad)*n*flock_dist, y + sin(angle - flock_angle_rad)*n*flock_dist, bird);
-			}
-			
-			frame++;
-			
-			//if outside the screen and distance increasing, reset them
-			if (frame > 800/spd)
-			{
-				reset(false);
-			}
+			out.insert(x + cos(angle + flock_angle_rad)*n*flock_dist, y + sin(angle + flock_angle_rad)*n*flock_dist, bird);
+			out.insert(x + cos(angle - flock_angle_rad)*n*flock_dist, y + sin(angle - flock_angle_rad)*n*flock_dist, bird);
 		}
+		
+		frame++;
+		
+		//if outside the screen and distance increasing, reset them
+		if (frame > 800/spd)
+			reset(false);
 	}
 };
 
 class game_impl : public game {
 public:
-	resources res;
-	image res_bg0b;
-	image res_titlebig;
-	image res_menuclose;
-	
 	struct input in;
 	struct input prev_in;
 	static const int k_click  = k_cancel+1; // used in in_push
@@ -152,29 +144,23 @@ public:
 	
 	void init()
 	{
-		res_bg0b.init_clone(res.bg0, -1, 1);
-		res_menuclose.init_clone(res.menuopen, 1, -1);
-		res_titlebig.init_new(res.title.width*16, res.title.height*16, res.title.fmt);
-		
-		res.smallfont.scale = 2;
-		res.smallfont.height = 9;
-		res.smallfont.width[(uint8_t)' '] += 2; // extra cast to shut up Clang
+		resources::init();
 	}
 	
 	void background()
 	{
 		if (tileset == 0)
 		{
-			out.insert_tile(0, 0, 640, 480, ((bgpos/15) & 1) ? res_bg0b : res.bg0);
+			out.insert_tile(0, 0, 640, 480, ((bgpos/15) & 1) ? resources::bg0b : resources::bg0);
 		}
 		if (tileset == 1)
 		{
 			int off = (bgpos/6)%21;
-			out.insert_tile(0, 0, 640, 480, res.bg1, off, 21-off);
+			out.insert_tile(0, 0, 640, 480, resources::bg1, off, 21-off);
 		}
 		if (tileset == 2)
 		{
-			out.insert_tile(0, 0, 640, 480, res.bg2);
+			out.insert_tile(0, 0, 640, 480, resources::bg2);
 		}
 		
 		bgpos++;
@@ -197,66 +183,94 @@ public:
 	{
 		background();
 		
-		out.insert_tile_with_border(150, 65, 340, 150, res.fg0, 3, 37, 4, 36);
-		out.insert(200, 285, res.fg0);
-		out.insert(400, 285, res.fg0);
-		out.insert(200, 375, res.fg0);
-		out.insert(400, 375, res.fg0);
-		out.insert_tile(238, 298, 164, 11, res.bridgeh);
-		out.insert_tile(238, 388, 164, 11, res.bridgeh);
-		out.insert_tile(206, 323, 11, 54, res.bridgev);
-		out.insert_tile(224, 323, 11, 54, res.bridgev);
-		out.insert_tile(406, 323, 11, 54, res.bridgev);
-		out.insert_tile(424, 323, 11, 54, res.bridgev);
+		out.insert_tile_with_border(150, 65, 340, 150, resources::fg0, 3, 37, 4, 36);
+		out.insert(200, 285, resources::fg0);
+		out.insert(400, 285, resources::fg0);
+		out.insert(200, 375, resources::fg0);
+		out.insert(400, 375, resources::fg0);
+		out.insert_tile(238, 298, 164, 11, resources::bridgeh);
+		out.insert_tile(238, 388, 164, 11, resources::bridgeh);
+		out.insert_tile(206, 323, 11, 54, resources::bridgev);
+		out.insert_tile(224, 323, 11, 54, resources::bridgev);
+		out.insert_tile(406, 323, 11, 54, resources::bridgev);
+		out.insert_tile(424, 323, 11, 54, resources::bridgev);
 		
-		int titlescale = (16 - title_frame/2);
-		if (titlescale < 4) titlescale = 4;
+		uint32_t titlescale = (16 - title_frame/2);
+		if ((int32_t)titlescale < 4) titlescale = 4;
 		
-		if (title_frame <= 24) // to not waste cpu rerendering what's already there
+		static const uint32_t titlewidth = 63;
+		static const uint32_t titleheight = 27;
+		int titlex = 319-(63*titlescale)/2; // center it as if it's 28px tall with an extra row of empty pixels at the bottom
+		int titley = 144-(28*titlescale)/2;
+		
+		uint32_t* titlepx = resources::title.pixels32;
+		for (uint32_t oy=0;oy<titleheight;oy++)
+		for (uint32_t ox=0;ox<titlewidth;ox++)
 		{
-			res_titlebig.insert_scale_unsafe(0, 0, res.title, titlescale, titlescale);
+			uint32_t pix = *titlepx++;
+			if (pix < 0x80000000) continue; // known bargb
+			
+			uint32_t x1 = titlex + ox*titlescale;
+			uint32_t y1 = titley + oy*titlescale;
+			uint32_t x2 = x1 + titlescale;
+			uint32_t y2 = y1 + titlescale;
+			
+			if ((int32_t)x1 < 0) x1 = 0;
+			if ((int32_t)y1 < 0) y1 = 0;
+			if (x2 > out.width) x2 = out.width;
+			if (y2 > out.height) y2 = out.height;
+			x2 -= x1;
+			y2 -= y1;
+			if (x2 > titlescale || y2 > titlescale) continue;
+			
+			uint32_t* target = out.pixels32 + y1*out.stride/sizeof(uint32_t) + x1;
+			
+			for (uint32_t iy=0;iy<y2;iy++)
+			{
+				for (uint32_t ix=0;ix<x2;ix++)
+					target[ix] = pix;
+				target += out.stride/sizeof(uint32_t);
+			}
 		}
-		out.insert_sub(319-(63*titlescale)/2, 144-(28*titlescale)/2, res_titlebig,
-		               0, 0, res.title.width*titlescale, res.title.height*titlescale);
 		
 		if (title_frame > 48)
 		{
 			int fontscale = (8 - (title_frame-48)/2);
 			if (fontscale < 2) fontscale = 2;
-			res.smallfont.scale = fontscale;
+			resources::smallfont.scale = fontscale;
 			
 			int textx = 320 - 25*fontscale;
 			int texty = 349 - 9*fontscale/2;
 			
-			res.smallfont.color = 0x000000;
-			out.insert_text(textx  , texty+1, res.smallfont, "Play Game");
-			out.insert_text(textx+1, texty  , res.smallfont, "Play Game");
+			resources::smallfont.color = 0x000000;
+			resources::smallfont.render(out, textx  , texty+1, "Play Game");
+			resources::smallfont.render(out, textx+1, texty  , "Play Game");
 			
-			res.smallfont.color = 0xFFFFFF;
-			out.insert_text(textx  , texty  , res.smallfont, "Play Game");
+			resources::smallfont.color = 0xFFFFFF;
+			resources::smallfont.render(out, textx  , texty  , "Play Game");
 		}
 		
 		if (title_frame > 60)
 		{
-			res.smallfont.scale = 1;
-			out.insert_text(198, 196, res.smallfont, "keybol 2010");
-			out.insert_text(350, 196, res.smallfont, "Alcaro 2018-2020");
+			resources::smallfont.scale = 1;
+			resources::smallfont.render(out, 198, 196, "keybol 2010");
+			resources::smallfont.render(out, 350, 196, "Alcaro 2018-2020");
 			
 			if (in.mousex > 238 && in.mousex < 406 && in.mousey > 309 && in.mousey < 388)
 			{
 				// contrary to what this icon implies, the entire map is clickable
 				// but it looks nice, so it stays
-				out.insert(257, 344, res.menuchoice);
+				out.insert(257, 344, resources::menuchoice);
 			}
 		}
 		else title_frame++;
 		
-		res.smallfont.scale = 2;
+		resources::smallfont.scale = 2;
 		
 		if (in_press & 1<<k_confirm) to_menu(true);
 		if (in_press & 1<<k_click) to_menu(false);
 		
-		birdfg.draw(out, res.bird, 0);
+		birdfg.draw(out, resources::bird, 0);
 	}
 	
 	
@@ -307,7 +321,7 @@ public:
 			to_title();
 		}
 		
-		res.smallfont.color = 0xFFFFFF;
+		resources::smallfont.color = 0xFFFFFF;
 		
 		static const char * const names[6] = {
 			"Kimera - 7x7 Map (Tutorial)",
@@ -319,7 +333,7 @@ public:
 		};
 		
 		auto draw_level = [this](int x, int y, int n){
-			out.insert(x, y, res.levelbox);
+			out.insert(x, y, resources::levelbox);
 			
 			if (n < 100)
 			{
@@ -327,17 +341,17 @@ public:
 				int d2 = (n+1)%10;
 				if (d1)
 				{
-					out.insert_text(x+6    + 2*(d1==1), y+8, res.smallfont, tostring(d1));
-					out.insert_text(x+6+12 + 2*(d2==1), y+8, res.smallfont, tostring(d2));
+					resources::smallfont.render(out, x+6    + 2*(d1==1), y+8, tostring(d1));
+					resources::smallfont.render(out, x+6+12 + 2*(d2==1), y+8, tostring(d2));
 				}
 				else
 				{
-					out.insert_text(x+6+6  + 2*(d2==1), y+8, res.smallfont, tostring(d2));
+					resources::smallfont.render(out, x+6+6  + 2*(d2==1), y+8, tostring(d2));
 				}
 			}
 			else
 			{
-				out.insert_text(x+6+6+1, y+8, res.smallfont, "?");
+				resources::smallfont.render(out, x+6+6+1, y+8, "?");
 			}
 			
 			bool highlight = false;
@@ -352,7 +366,7 @@ public:
 			if (menu_focus == n)
 				highlight = true;
 			if (highlight) // as a variable to make sure the box isn't drawn twice, that'd be ugly
-				out.insert(x-10, y-10, res.levelboxactive);
+				out.insert(x-10, y-10, resources::levelboxactive);
 		};
 		for (int y=0;y<6;y++)
 		{
@@ -362,7 +376,7 @@ public:
 			
 			bool b = (y>=4); // the rock tile contains a repeating pattern, better follow its size
 			out.insert_tile_with_border(150 - 30*has_randoms, oy-8, 340 + 60*has_randoms, 50,
-			                            (y<2 ? res.fg0 : y<4 ? res.fg1menu : res.fg2),
+			                            (y<2 ? resources::fg0 : y<4 ? resources::fg1menu : resources::fg2),
 			                            3+b, 37-b-b, 4+b, 36-b-b);
 			
 			for (int x=0;x<5+has_randoms;x++)
@@ -384,12 +398,12 @@ public:
 				}
 				if (unlocked == (y+1)*5 && !has_randoms) hidefrom = 640;
 				outcrop.insert_tile_with_border(150-hidefrom - 30*has_randoms, 30+y*75, 340 + 60*has_randoms, 50,
-				                                (y<2 ? res.fg0mask : y<4 ? res.fg1mask : res.fg0mask),
+				                                (y<2 ? resources::fg0mask : y<4 ? resources::fg1mask : resources::fg0mask),
 				                                3+b, 37-b, 4+b, 36-b);
 			}
 			
-			uint32_t textwidth = res.smallfont.measure(names[y]);
-			out.insert_text(320-textwidth/2, oy-22, res.smallfont, names[y]);
+			uint32_t textwidth = resources::smallfont.measure(names[y]);
+			resources::smallfont.render(out, 320-textwidth/2, oy-22, names[y]);
 		}
 		
 		//no birds on the menu
@@ -486,7 +500,7 @@ public:
 	
 	void draw_island_fragment(int x, int y, bool right, bool up, bool left, bool down, bool downright)
 	{
-		image& im = (tileset==0 ? res.fg0 : tileset==1 ? res.fg1 : res.fg2);
+		const image& im = (tileset==0 ? resources::fg0 : tileset==1 ? resources::fg1 : resources::fg2);
 		
 		int bx = (tileset==2 ? 5 : 3); // border x
 		int by = (tileset==2 ? 6 : 4);
@@ -618,7 +632,7 @@ public:
 			in_press = 0;
 		}
 		
-		image& fg = (tileset==0 ? res.fg0 : tileset==1 ? res.fg1 : res.fg2);
+		const image& fg = (tileset==0 ? resources::fg0 : tileset==1 ? resources::fg1 : resources::fg2);
 		
 		int sx = (320 - 24*map.width + 4); // +4 to center it
 		int sy = (240 - 24*map.height + 4);
@@ -652,7 +666,7 @@ public:
 			}
 			if (here.population == -2)
 			{
-				out.insert(x, y, res.reef);
+				out.insert(x, y, resources::reef);
 			}
 		}
 		
@@ -675,7 +689,7 @@ public:
 			
 			if (isroot && here.population >= 80)
 			{
-				out.insert_sub(x+12, y+12, res.castle, 64*(here.population-80), 0, 64, 64);
+				out.insert_sub(x+12, y+12, resources::castle, 64*(here.population-80), 0, 64, 64);
 				
 				int flagx1 = 0; // these values won't be used, but gcc doesn't know that
 				int flagx2 = 0;
@@ -694,10 +708,10 @@ public:
 				if (cut > 16) cut = 16;
 				//else cut = 0;
 				
-				out.insert_sub(x+12+flagx1,     y+12+flagy+  upleft, res.flags, 16*(here.population-80),     0, cut,    12);
-				out.insert_sub(x+12+flagx1+cut, y+12+flagy+1-upleft, res.flags, 16*(here.population-80)+cut, 0, 16-cut, 12);
-				out.insert_sub(x+12+flagx2,     y+12+flagy+  upleft, res.flags, 16*(here.population-80),     0, cut,    12);
-				out.insert_sub(x+12+flagx2+cut, y+12+flagy+1-upleft, res.flags, 16*(here.population-80)+cut, 0, 16-cut, 12);
+				out.insert_sub(x+12+flagx1,     y+12+flagy+  upleft, resources::flags, 16*(here.population-80),     0, cut,    12);
+				out.insert_sub(x+12+flagx1+cut, y+12+flagy+1-upleft, resources::flags, 16*(here.population-80)+cut, 0, 16-cut, 12);
+				out.insert_sub(x+12+flagx2,     y+12+flagy+  upleft, resources::flags, 16*(here.population-80),     0, cut,    12);
+				out.insert_sub(x+12+flagx2+cut, y+12+flagy+1-upleft, resources::flags, 16*(here.population-80)+cut, 0, 16-cut, 12);
 			}
 			else if (isroot)
 			{
@@ -761,22 +775,22 @@ public:
 					by = 18;
 				}
 				
-				res.smallfont.scale = 1;
-				res.smallfont.color = 0xFFFF00;
-				out.insert_text(x+plx, y+ply, res.smallfont, "Pop.");
-				res.smallfont.color = 0xFFFFFF;
-				out.insert_text(x+blx, y+bly, res.smallfont, "Bri.");
-				res.smallfont.scale = 2;
+				resources::smallfont.scale = 1;
+				resources::smallfont.color = 0xFFFF00;
+				resources::smallfont.render(out, x+plx, y+ply, "Pop.");
+				resources::smallfont.color = 0xFFFFFF;
+				resources::smallfont.render(out, x+blx, y+bly, "Bri.");
+				resources::smallfont.scale = 2;
 				
-				res.smallfont.color = 0x000000;
-				out.insert_text(x+px+1, y+py, res.smallfont, tostring(here.population));
-				out.insert_text(x+px, y+py+1, res.smallfont, tostring(here.population));
-				out.insert_text(x+bx+1, y+by, res.smallfont, tostring(here.totbridges));
-				out.insert_text(x+bx, y+by+1, res.smallfont, tostring(here.totbridges));
-				res.smallfont.color = 0xFFFF00;
-				out.insert_text(x+px, y+py, res.smallfont, tostring(here.population));
-				res.smallfont.color = 0xFFFFFF;
-				out.insert_text(x+bx, y+by, res.smallfont, tostring(here.totbridges));
+				resources::smallfont.color = 0x000000;
+				resources::smallfont.render(out, x+px+1, y+py, tostring(here.population));
+				resources::smallfont.render(out, x+px, y+py+1, tostring(here.population));
+				resources::smallfont.render(out, x+bx+1, y+by, tostring(here.totbridges));
+				resources::smallfont.render(out, x+bx, y+by+1, tostring(here.totbridges));
+				resources::smallfont.color = 0xFFFF00;
+				resources::smallfont.render(out, x+px, y+py, tostring(here.population));
+				resources::smallfont.color = 0xFFFFFF;
+				resources::smallfont.render(out, x+bx, y+by, tostring(here.totbridges));
 			}
 			
 			int totbridges = map.get(here.rootnode).totbridges;
@@ -789,21 +803,21 @@ public:
 			
 			if (here.bridges[1] == 1)
 			{
-				out.insert_tile(x+14, y - here.bridgelen[1]*48 + 37, 11, here.bridgelen[1]*48-34, res.bridgev);
+				out.insert_tile(x+14, y - here.bridgelen[1]*48 + 37, 11, here.bridgelen[1]*48-34, resources::bridgev);
 			}
 			if (here.bridges[1] == 2)
 			{
-				out.insert_tile(x+6,  y - here.bridgelen[1]*48 + 37, 11, here.bridgelen[1]*48-34, res.bridgev);
-				out.insert_tile(x+24, y - here.bridgelen[1]*48 + 37, 11, here.bridgelen[1]*48-34, res.bridgev);
+				out.insert_tile(x+6,  y - here.bridgelen[1]*48 + 37, 11, here.bridgelen[1]*48-34, resources::bridgev);
+				out.insert_tile(x+24, y - here.bridgelen[1]*48 + 37, 11, here.bridgelen[1]*48-34, resources::bridgev);
 			}
 			if (here.bridges[2] == 1)
 			{
-				out.insert_tile(x - here.bridgelen[2]*48 + 37, y+13, here.bridgelen[2]*48-34, 11, res.bridgeh);
+				out.insert_tile(x - here.bridgelen[2]*48 + 37, y+13, here.bridgelen[2]*48-34, 11, resources::bridgeh);
 			}
 			if (here.bridges[2] == 2)
 			{
-				out.insert_tile(x - here.bridgelen[2]*48 + 37, y+6,  here.bridgelen[2]*48-34, 11, res.bridgeh);
-				out.insert_tile(x - here.bridgelen[2]*48 + 37, y+24, here.bridgelen[2]*48-34, 11, res.bridgeh);
+				out.insert_tile(x - here.bridgelen[2]*48 + 37, y+6,  here.bridgelen[2]*48-34, 11, resources::bridgeh);
+				out.insert_tile(x - here.bridgelen[2]*48 + 37, y+24, here.bridgelen[2]*48-34, 11, resources::bridgeh);
 			}
 		}
 		
@@ -896,11 +910,11 @@ public:
 			
 			if (dir == 0)
 			{
-				out.insert_tile_with_border(x+37, y+14, len*48-34, 12, res.arrowh, 6, 9, 0, 0);
+				out.insert_tile_with_border(x+37, y+14, len*48-34, 12, resources::arrowh, 6, 9, 0, 0);
 			}
 			else
 			{
-				out.insert_tile_with_border(x+13, y+37, 12, len*48-34, res.arrowv, 0, 0, 6, 9);
+				out.insert_tile_with_border(x+13, y+37, 12, len*48-34, resources::arrowv, 0, 0, 6, 9);
 			}
 			
 			if ((bool)(in_press & (1<<k_click)) != (bool)(in_press & 1<<k_rclick))
@@ -1014,12 +1028,12 @@ public:
 		if (game_kb_state != 0)
 		{
 			//TODO: better image
-			out.insert(sx + game_kb_x*48 + game_kb_state*10, sy + game_kb_y*48, res.kbfocus);
+			out.insert(sx + game_kb_x*48 + game_kb_state*10, sy + game_kb_y*48, resources::kbfocus);
 		}
 		
-		birdfg.draw(out, res.bird, tileset);
+		birdfg.draw(out, resources::bird, tileset);
 		
-		out.insert(599, 459, tileset==2 ? res.menuopenborder : res.menuopen);
+		out.insert(599, 459, tileset==2 ? resources::menuopenborder : resources::menuopen);
 		
 		if (in_press & 1<<k_cancel)
 		{
@@ -1035,7 +1049,7 @@ public:
 		
 		if (game_menu_pos < 480)
 		{
-			out.insert_tile_with_border(0, game_menu_pos, 640, 40, res.popupsm, 10,30, 0,40);
+			out.insert_tile_with_border(0, game_menu_pos, 640, 40, resources::popupsm, 10,30, 0,40);
 			
 			if (in_press & 1<<k_left)
 			{
@@ -1053,11 +1067,11 @@ public:
 			{
 				int y = game_menu_pos + 10;
 				
-				res.smallfont.color = 0x000000;
-				out.insert_text(x+1, y, res.smallfont, text);
-				out.insert_text(x, y+1, res.smallfont, text);
-				res.smallfont.color = 0xFFFFFF;
-				int width = out.insert_text(x, y+1, res.smallfont, text);
+				resources::smallfont.color = 0x000000;
+				resources::smallfont.render(out, x+1, y, text);
+				resources::smallfont.render(out, x, y+1, text);
+				resources::smallfont.color = 0xFFFFFF;
+				int width = resources::smallfont.render(out, x, y+1, text);
 				
 				bool active = false;
 				bool clicked = false;
@@ -1073,7 +1087,7 @@ public:
 				}
 				if (id!=0 && active)
 				{
-					out.insert(x-11, y+6, res.menuchoice);
+					out.insert(x-11, y+6, resources::menuchoice);
 				}
 				
 				return clicked;
@@ -1098,7 +1112,7 @@ public:
 if(map.finished())map.solve_another();else map.solve();
 }
 			
-			out.insert(600, game_menu_pos+18, res_menuclose);
+			out.insert(600, game_menu_pos+18, resources::menuclose);
 			if ((in_press & 1<<k_click) && in.mousex >= 595 && in.mousex < 637 &&
 			    in.mousey >= game_menu_pos+13 && in.mousey < game_menu_pos+35)
 			{
@@ -1159,27 +1173,27 @@ to_title(); //TODO
 				if (popup_id == 0) break;
 				[[fallthrough]];
 			case 0:
-				out.insert_tile_with_border(290, 80, 60, 20, res.popup, 10,30, 0,110);
+				out.insert_tile_with_border(290, 80, 60, 20, resources::popup, 10,30, 0,110);
 				break;
 			case 1:
 			case 9:
-				out.insert_tile_with_border(240, 70, 160, 40, res.popup, 10,30, 0,110);
+				out.insert_tile_with_border(240, 70, 160, 40, resources::popup, 10,30, 0,110);
 				break;
 			case 2:
 			case 8:
-				out.insert_tile_with_border(190, 60, 260, 60, res.popup, 10,30, 0,110);
+				out.insert_tile_with_border(190, 60, 260, 60, resources::popup, 10,30, 0,110);
 				break;
 			case 3:
 			case 7:
-				out.insert_tile_with_border(140, 50, 360, 80, res.popup, 10,30, 0,110);
+				out.insert_tile_with_border(140, 50, 360, 80, resources::popup, 10,30, 0,110);
 				break;
 			case 4:
 			case 6:
-				out.insert_tile_with_border(90, 50, 460, 100, res.popup, 10,30, 0,110);
+				out.insert_tile_with_border(90, 50, 460, 100, resources::popup, 10,30, 0,110);
 				break;
 				
 			case 5:
-				out.insert_tile_with_border(40, 40, 560, 120, res.popup, 10,30, 0,120);
+				out.insert_tile_with_border(40, 40, 560, 120, resources::popup, 10,30, 0,120);
 				
 				static const char * const helptexts[] = {
 					NULL,
@@ -1313,36 +1327,36 @@ to_title(); //TODO
 				
 				if (popup_id == pop_welldone || popup_id == pop_welldone_kb)
 				{
-					res.smallfont.scale = 6;
-					res.smallfont.color = 0xFFFF00;
-					out.insert_text(158-1, 60-1, res.smallfont, "WELL DONE!", 6);
-					out.insert_text(158+1, 60-1, res.smallfont, "WELL DONE!", 6);
-					out.insert_text(158-1, 60+1, res.smallfont, "WELL DONE!", 6);
-					out.insert_text(158+1, 60+1, res.smallfont, "WELL DONE!", 6);
-					res.smallfont.color = 0xFF0000;
-					out.insert_text(158,   60,   res.smallfont, "WELL DONE!", 6);
-					res.smallfont.scale = 2;
+					resources::smallfont.scale = 6;
+					resources::smallfont.color = 0xFFFF00;
+					resources::smallfont.render(out, 158-1, 60-1, "WELL DONE!", 6);
+					resources::smallfont.render(out, 158+1, 60-1, "WELL DONE!", 6);
+					resources::smallfont.render(out, 158-1, 60+1, "WELL DONE!", 6);
+					resources::smallfont.render(out, 158+1, 60+1, "WELL DONE!", 6);
+					resources::smallfont.color = 0xFF0000;
+					resources::smallfont.render(out, 158,   60,   "WELL DONE!", 6);
+					resources::smallfont.scale = 2;
 				}
 				
 				int y = 48;
 				y += helptexts[popup_id][0] * 11;
 				
-				res.smallfont.height = 11;
-				res.smallfont.color = 0x000000;
-				out.insert_text_wrap(60, y+1, 520, res.smallfont, helptexts[popup_id]+1);
-				out.insert_text_wrap(61, y,   520, res.smallfont, helptexts[popup_id]+1);
+				resources::smallfont.height = 11;
+				resources::smallfont.color = 0x000000;
+				resources::smallfont.render_wrap(out, 60, y+1, 520, helptexts[popup_id]+1);
+				resources::smallfont.render_wrap(out, 61, y,   520, helptexts[popup_id]+1);
 				
-				res.smallfont.width[3] = 17;
-				res.smallfont.fallback = bind_lambda([this](image& out, const font& fnt, int32_t x, int32_t y, uint8_t ch)
+				resources::smallfont.width[3] = 17;
+				resources::smallfont.fallback = bind_lambda([this](image& out, const font& fnt, int32_t x, int32_t y, uint8_t ch)
 					{
-						if (ch == '\1') res.smallfont.color = 0xFFFF00;
-						if (ch == '\2') res.smallfont.color = 0xFFFFFF;
-						if (ch == '\3') out.insert(x, y+2, res.menuopen);
+						if (ch == '\1') resources::smallfont.color = 0xFFFF00;
+						if (ch == '\2') resources::smallfont.color = 0xFFFFFF;
+						if (ch == '\3') out.insert(x, y+2, resources::menuopen);
 					});
-				res.smallfont.color = 0xFFFFFF;
-				out.insert_text_wrap(60, y, 520, res.smallfont, helptexts[popup_id]+1);
-				res.smallfont.height = 9;
-				res.smallfont.fallback = NULL;
+				resources::smallfont.color = 0xFFFFFF;
+				resources::smallfont.render_wrap(out, 60, y, 520, helptexts[popup_id]+1);
+				resources::smallfont.height = 9;
+				resources::smallfont.fallback = NULL;
 				
 				if (popup_frame == 17)
 					popup_frame--; // make sure it stays on the 'full popup visible' frame

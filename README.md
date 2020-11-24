@@ -21,6 +21,8 @@ Adjust the above.
 
 Install Python and MinGW; I use [https://sourceforge.net/projects/mingw-w64/files/Toolchains%20targetting%20Win64/Personal%20Builds/mingw-builds/8.1.0/threads-win32/seh/](mingw-w64), others (for example MSYS2) are untested but will probably work. Run `mingw32-make OPT=1`. (Not tested on a real Windows, I just use mingw in Wine.)
 
+Alternatively, if you prefer binaries, [here's mine](https://github.com/Alcaro/bridges/raw/master/bridges.exe).
+
 ## Compilation - other
 
 Untested and unlikely to work, but if you're feeling adventurous, feel free to try.
