@@ -134,7 +134,10 @@ struct ser15 {
 	template<typename T>
 	void serialize(T& s)
 	{
-		s.items("a", a, "b", ser_include_if(b, b), "c", ser_include_if(c, c), "d", d);
+		s.items("a", a,
+		        "b", ser_include_if(b, b),
+		        "c", ser_include_if_true(c),
+		        "d", d);
 	}
 };
 
@@ -156,7 +159,7 @@ template<typename... Ts>
 void assert_eq_unordered(cstring in, const char * tmpl, Ts... args)
 {
 	const char * parts[] = { args... };
-	array<bool> parts_used;
+	bitarray parts_used;
 	parts_used.resize(sizeof...(args));
 	
 	size_t off = 0;

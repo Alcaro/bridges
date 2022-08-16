@@ -4,8 +4,7 @@ PROGRAM = bridges
 ARGAME = 1
 AROPENGL = 1
 
-#threads can be disabled if you don't want them
-#this makes level generator delays annoyingly large, but is otherwise safe
+#threads are also optional; the level generator delay is huge without them, but it's otherwise safe
 ARTHREAD = 1
 
 include arlib/Makefile

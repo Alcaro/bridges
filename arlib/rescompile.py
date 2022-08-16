@@ -4,7 +4,7 @@ import os, struct, zlib
 
 # silly tricks so __pycache__ goes away
 # why is there no programmatic control over that thing, other than setting an env and reexecing? why is it not a dotfile?
-# why does it even exist? no other scripting language I'm aware of does that, other than memory-only things
+# why does it even exist? no other scripting language I'm aware of caches the compiled form to disk
 __name__ = "not __main__"
 exec(open(os.path.dirname(__file__)+"/redeflate.py","rt").read())
 #from redeflate import deflate_slow
@@ -22,7 +22,7 @@ header = 'namespace resources {\nvoid init();\n'
 body_early += '#include "resources.h"\nnamespace resources {\n'
 body = ""
 body_late = ""
-constructor = "RUN_ONCE_FN(init_inner)\n{\n"
+constructor = ""
 constructor_late = ""
 asm = ""
 
@@ -36,10 +36,12 @@ img_type_names = ["IMG_0F", "IMG_17", "IMG_1F", "IMG_80", "IMG_81", "IMG_83", "I
 
 if use_incbin:
 	body += r"""
+#  define ASM_DATA(text) __asm__(".data\n" text ".text\n")
 #if defined(__unix__)
 #  define ASM_RODATA(text) \
      __asm__(".section .rodata,\"a\",@progbits\n" text ".text\n")
 #  define ASM_LABEL(varname, size) \
+     ".globl " varname "\n" \
      ".size " varname ", " STR(size) "\n" \
      ".type " varname ", @object\n" \
      varname ":\n"
@@ -47,6 +49,7 @@ if use_incbin:
 #  define ASM_RODATA(text) __asm__(".section .rdata,\"dr\"\n" text ".text\n")
 #  define ASM_LABEL(varname, size) varname ":\n"
 #endif
+
 
 #if UINTPTR_MAX == UINT64_MAX
 #  define ASM_POINTER ".quad "
@@ -56,13 +59,13 @@ if use_incbin:
 #  define ASM_POINTER_SIZE 4
 #endif
 
-
 #  define ASM_INCLUDE_LIST(text) ASM_RODATA(text)
 #  define ASM_INCLUDE(varname, size, filename) \
      ASM_LABEL(varname, size) \
      ".incbin \"" filename "\"\n"
-
-
+"""
+	
+	body_imgdecode = r"""
 #if END_LITTLE
 #  define ifmt_argb8888_c ifmt_bgra8888_by_c
 #else
@@ -82,7 +85,7 @@ static_assert(ifmt_xrgb8888_c == ifmt_xrgb8888);
     ".balign 4\n" \
     ASM_LABEL("_ZN9resources15imgbuf_inflatedE", bufsize) \
     ".zero " STR(bufsize) "\n"); \
-    ASM_RODATA(text)
+    ASM_DATA(text)
 #define ASM_IMAGE(varname, width, height, format_c, ptr) \
     ".globl " varname "\n" \
     ASM_LABEL(varname, ASM_POINTER_SIZE) \
@@ -408,6 +411,8 @@ for fn in sorted(os.listdir("resources/")):
 	header += "extern const uint8_t "+varname_raw+"["+str(filesize)+"];\n"
 
 if imgbytes_decomp:
+	body += body_imgdecode
+	
 	try:
 		imgbytes_comp = open("resources/images.deflate","rb").read()
 	except:
@@ -429,8 +434,9 @@ if imgbytes_decomp:
 	               ", imgbuf_inflated+"+str(imgbuf_size_buf)+", images_deflate, sizeof(images_deflate));\n"
 
 header = header_early + header + "}\n"
-constructor = constructor + constructor_late + "}\n"
-constructor += "void init() { init_inner(); }\n"
+if constructor:
+	constructor = "RUN_ONCE_FN(init_inner)\n{\n" + constructor + constructor_late + "}\n"
+	constructor += "void init() { init_inner(); }\n"
 body = body_early + body + body_late + constructor + "}\n"
 
 if use_incbin and asm: body += 'ASM_INCLUDE_LIST(\n'+asm+');\n'

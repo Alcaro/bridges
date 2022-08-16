@@ -1,11 +1,12 @@
-#if defined(ARLIB_GAME) && defined(ARGUIPROT_X11)
+#if defined(ARLIB_GAME) && defined(ARLIB_GUI_X11)
 #include "game.h"
-#include "runloop.h"
+#include "runloop2.h"
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/XKBlib.h>
 #include <X11/Xatom.h>
 #include <unistd.h>
+#include <signal.h>
 
 struct window_x11_info window_x11 = {};
 
@@ -16,7 +17,7 @@ class gameview_x11;
 gameview_x11* g_gameview = NULL;
 // I get segfaults if I XCloseDisplay without glXDestroyContext, or dlclose(libGL.so) then XCloseDisplay
 // easiest fix is to not XCloseDisplay; it's a memory leak, but if this module is an executable, it doesn't matter
-// and if it's a dll, it most likely shouldn't be using gameview in the first place
+// and if it's a dll, it shouldn't be using gameview in the first place; it sets some global state on the X connection
 //ondeinit() { if (window_x11.display) XCloseDisplay(window_x11.display); }
 
 class gameview_x11 : public gameview {
@@ -42,20 +43,22 @@ struct atoms_t {
 #undef ATOM
 } atoms;
 
+struct waiter_t : public waiter<void, waiter_t> {
+	void complete() { container_of<&gameview_x11::wait>(this)->process_events(); }
+} wait;
 
-static bool process_events()
+
+void process_events()
 {
-	bool ret = false;
 	while (XPending(window_x11.display))
 	{
-		ret = true;
-		
 		XEvent ev;
 		XNextEvent(window_x11.display, &ev);
-		if (g_gameview && ev.xany.window == g_gameview->window)
-			g_gameview->process_event(&ev);
+		if (ev.xany.window == this->window)
+			this->process_event(&ev);
 	}
-	return ret;
+	
+	runloop2::await_read(ConnectionNumber(window_x11.display)).then(&wait);
 }
 
 static void global_init()
@@ -70,10 +73,7 @@ static void global_init()
 	}
 	window_x11.screen = DefaultScreen(window_x11.display);
 	
-	runloop::global()->set_fd(ConnectionNumber(window_x11.display), [](uintptr_t){ process_events(); });
-	
-	Bool ignore;
-	XkbSetDetectableAutoRepeat(window_x11.display, true, &ignore);
+	XkbSetDetectableAutoRepeat(window_x11.display, true, NULL);
 	
 	// this may be useful on Solaris, but I can't find any trace of it doing anything anywhere else
 	// https://bugzilla.gnome.org/show_bug.cgi?id=76681
@@ -93,6 +93,8 @@ static uintptr_t root_parent()
 
 gameview_x11(Window window, uint32_t width, uint32_t height, cstring title) : window(window)
 {
+	signal(SIGPIPE, SIG_IGN);
+	
 	g_gameview = this;
 	display = window_x11.display;
 	
@@ -123,6 +125,8 @@ gameview_x11(Window window, uint32_t width, uint32_t height, cstring title) : wi
 	XMapWindow(window_x11.display, window);
 	
 	calc_keyboard_map();
+	
+	runloop2::await_read(ConnectionNumber(window_x11.display)).then(&wait);
 }
 
 function<void()> cb_exit = [this](){ stop(); };
@@ -325,15 +329,13 @@ void send_mouse(int x, int y, uint32_t state)
 
 
 
-// sending a frame to OpenGL makes X server reply, which makes runloop break and render next frame
-// TODO: delete once runloop rewrite is done
-/*public*/ void tmp_step(bool wait)
+/*public*/ void step(bool wait)
 {
 	got_event = false;
 	process_events(); // in case someone else (for example ctx-x11.cpp) did synchronous X calls behind our back
-	runloop::global()->step(false);
+	runloop2::step(false);
 	while (wait && !got_event)
-		runloop::global()->step(true);
+		runloop2::step(true);
 }
 
 };

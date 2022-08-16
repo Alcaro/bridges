@@ -43,13 +43,13 @@ public:
 		int animframe = frame/10 & 1;
 		bird.init_ref_sub(birdsmap, animframe*8, tileset*6, 8, 6);
 		
-		int x = xmid + cos(angle)*spd*frame;
-		int y = ymid + sin(angle)*spd*frame;
+		int x = xmid + cosf(angle)*spd*frame;
+		int y = ymid + sinf(angle)*spd*frame;
 		
 		for (int n=0;n<5;n++)
 		{
-			out.insert(x + cos(angle + flock_angle_rad)*n*flock_dist, y + sin(angle + flock_angle_rad)*n*flock_dist, bird);
-			out.insert(x + cos(angle - flock_angle_rad)*n*flock_dist, y + sin(angle - flock_angle_rad)*n*flock_dist, bird);
+			out.insert(x + cosf(angle + flock_angle_rad)*n*flock_dist, y + sinf(angle + flock_angle_rad)*n*flock_dist, bird);
+			out.insert(x + cosf(angle - flock_angle_rad)*n*flock_dist, y + sinf(angle - flock_angle_rad)*n*flock_dist, bird);
 		}
 		
 		frame++;
@@ -100,6 +100,8 @@ public:
 	uint64_t gamegen_next[3] = { 0, 0, 0 };
 	uint8_t gamegen_type;
 	gamemap::generator* gamegen_core = NULL;
+	bool gamegen_validated[3] = { false, false, false };
+	uint32_t gamegen_diff_expect[3];
 #endif
 	
 	int game_kb_x;
@@ -1356,7 +1358,7 @@ to_title(); //TODO
 				resources::smallfont.color = 0xFFFFFF;
 				resources::smallfont.render_wrap(out, 60, y, 520, helptexts[popup_id]+1);
 				resources::smallfont.height = 9;
-				resources::smallfont.fallback = NULL;
+				resources::smallfont.fallback = nullptr;
 				
 				if (popup_frame == 17)
 					popup_frame--; // make sure it stays on the 'full popup visible' frame
@@ -1376,10 +1378,13 @@ to_title(); //TODO
 		
 #ifdef ARLIB_THREAD
 		gamegen_next[0] = b.u64l();
+		gamegen_diff_expect[0] = b.u32l();
 		gamegen_next[1] = b.u64l();
+		gamegen_diff_expect[1] = b.u32l();
 		gamegen_next[2] = b.u64l();
+		gamegen_diff_expect[2] = b.u32l();
 #else
-		b.u64l(); b.u64l(); b.u64l();
+		b.u64l(); b.u64l(); b.u64l(); b.u32l();
 #endif
 	}
 	
@@ -1392,12 +1397,18 @@ to_title(); //TODO
 		
 #ifdef ARLIB_THREAD
 		writeu_le64(dat.skip(2 ).ptr(), gamegen_next[0]);
-		writeu_le64(dat.skip(10).ptr(), gamegen_next[1]);
-		writeu_le64(dat.skip(18).ptr(), gamegen_next[2]);
+		writeu_le32(dat.skip(10).ptr(), gamegen_diff_expect[0]);
+		writeu_le64(dat.skip(14).ptr(), gamegen_next[1]);
+		writeu_le32(dat.skip(22).ptr(), gamegen_diff_expect[1]);
+		writeu_le64(dat.skip(26).ptr(), gamegen_next[2]);
+		writeu_le32(dat.skip(34).ptr(), gamegen_diff_expect[2]);
 #else
 		writeu_le64(dat.skip(2 ).ptr(), 0);
-		writeu_le64(dat.skip(10).ptr(), 0);
-		writeu_le64(dat.skip(18).ptr(), 0);
+		writeu_le32(dat.skip(10).ptr(), 0);
+		writeu_le64(dat.skip(14).ptr(), 0);
+		writeu_le32(dat.skip(22).ptr(), 0);
+		writeu_le64(dat.skip(26).ptr(), 0);
+		writeu_le32(dat.skip(34).ptr(), 0);
 #endif
 	}
 	
@@ -1409,19 +1420,31 @@ to_title(); //TODO
 			if (gamegen_core->done(NULL))
 			{
 				gamegen_next[gamegen_type] = gamegen_core->pack();
+				gamegen_diff_expect[gamegen_type] = gamegen_core->found_difficulty();
 				delete gamegen_core;
 				gamegen_core = NULL;
+				gamegen_validated[gamegen_type] = true;
 			}
 			else return;
 		}
 		
 		for (int i=0;i<3;i++)
 		{
+			if (gamegen_next[i] && !gamegen_validated[i])
+			{
+				// ensure that the cached levels are still valid
+				// i.e. level generator (or its underlying RNG) haven't changed since the save was created
+				gamemap tmp;
+				gamemap::generator::unpack(game_params(100+i), gamegen_next[i], tmp);
+				if (tmp.solve_difficulty() != gamegen_diff_expect[i]) gamegen_next[i] = 0;
+				gamegen_validated[i] = true;
+				return; // only do a little each frame
+			}
 			if (!gamegen_next[i])
 			{
 				gamegen_core = new gamemap::generator(game_params(100+i));
 				gamegen_type = i;
-				return;
+				return; // only one at the time; it's already multithreaded, no point slamming the system
 			}
 		}
 #endif

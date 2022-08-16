@@ -1,23 +1,19 @@
 #include "game.h"
 
-extern const char * const game_maps[];
-
 int main(int argc, char** argv)
 {
-	argparse args;
-#ifndef STDOUT_ERROR
-	bool do_bench_solv = false;
-	args.add("perf-solv", &do_bench_solv);
-	bool do_bench_ui = false;
-	args.add("perf-ui", &do_bench_ui);
-#endif
-	arlib_init(args, argv);
-	
 	static uint32_t pixels[640*480]; // static to keep the stack frame small
 	image out; // initialized up here so perf-ui can use it too
 	out.init_ptr(pixels, 640, 480, sizeof(uint32_t)*640, ifmt_xrgb8888); // xrgb is faster than 0rgb
 	
 #ifndef STDOUT_ERROR
+	argparse args;
+	bool do_bench_solv = false;
+	args.add("perf-solv", &do_bench_solv);
+	bool do_bench_ui = false;
+	args.add("perf-ui", &do_bench_ui);
+	args.parse(argv);
+	
 	if (do_bench_solv && do_bench_ui)
 	{
 		puts("can't benchmark both solver and UI");
@@ -133,8 +129,9 @@ int main(int argc, char** argv)
 	gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	
-	//save support not implemented here, just hardcode something reasonable
-	static const uint8_t save[] = { 31,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
+	// save support not implemented here, just hardcode something reasonable
+	// the long-term plan has always been making this game a libretro core, this frontend is mostly a far-too-long-lived placeholder
+	static const uint8_t save[] = { 31,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
 	autoptr<game> g = game::create(save);
 	game::input in = {};
 	
@@ -204,8 +201,8 @@ int main(int argc, char** argv)
 		
 		gl.swapBuffers();
 		
-		gv->tmp_step(!active);
-		active = (gv->focused()); // keep them in this order, so the framestop implementation works
+		gv->step(!active);
+		active = (gv->focused()); // keep them in this order, so the pause-if-inactive implementation works
 	}
 	
 	return 0;

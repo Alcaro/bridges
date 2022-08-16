@@ -978,8 +978,8 @@ template<char... chars> struct parse_outer<parser::str<chars...>> {
 
 
 struct pair {
-	const char * start = nullptr;
-	const char * end = nullptr;
+	const char * start;
+	const char * end;
 #ifdef HAVE_ARLIB
 	cstring str() const { return arrayview<char>(start, end-start); }
 	operator cstring() const { return str(); }
@@ -991,12 +991,12 @@ template<size_t N> class match_t {
 	
 public:
 	template<size_t Ni> friend class match_t;
-	match_t() {}
+	match_t() { memset(group, 0, sizeof(group)); }
 	template<size_t Ni> match_t(const match_t<Ni>& inner)
 	{
-		static_assert(Ni < N);
-		memset(group, 0, sizeof(group));
+		static_assert(Ni < N); // if equal, it goes to the implicitly defaulted copy ctor
 		memcpy(group, inner.group, sizeof(inner.group));
+		memset(group+Ni, 0, sizeof(pair)*(N-Ni));
 	}
 	
 	static const size_t size = N;
@@ -1231,7 +1231,9 @@ public:
 		return {};
 	}
 #ifdef HAVE_ARLIB
-	static match_t<n_capture> search(cstring str)
+	// must not take a temporary, that's a use-after-free
+	static match_t<n_capture> search(cstring&& str) = delete;
+	static match_t<n_capture> search(const cstring& str)
 	{
 		return search((char*)str.bytes().ptr(), (char*)str.bytes().ptr()+str.length());
 	}

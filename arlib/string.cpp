@@ -13,17 +13,13 @@ extern const uint8_t char_props[256] = {
 	0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x00,0x00,0x00,0x00,0x00, // 5x PQRSTUVWXYZ[\]^_
 	0x00,0x25,0x25,0x25,0x25,0x25,0x25,0x24,0x24,0x24,0x24,0x24,0x24,0x24,0x24,0x24, // 6x `abcdefghijklmno
 	0x24,0x24,0x24,0x24,0x24,0x24,0x24,0x24,0x24,0x24,0x24,0x00,0x00,0x00,0x00,0x00, // 7x pqrstuvwxyz{|}~
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, // 8x
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, // 9x
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, // Ax
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, // Bx
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, // Cx
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, // Dx
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, // Ex
-	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, // Fx
+	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // 8x-9x
+	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // Ax-Bx
+	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // Cx-Dx
+	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // Ex-Fx
 };
 
-void string::resize(uint32_t newlen)
+void string::resize(size_t newlen)
 {
 	switch (!inlined()<<1 | (newlen>max_inline()))
 	{
@@ -56,7 +52,8 @@ void string::resize(uint32_t newlen)
 		break;
 	case 3: // big->big
 		{
-			m_data = xrealloc(m_data, bytes_for(newlen));
+			if (bytes_for(newlen) != bytes_for(m_len))
+				m_data = xrealloc(m_data, bytes_for(newlen));
 			m_data[newlen] = '\0';
 			m_len = newlen;
 		}
@@ -64,7 +61,7 @@ void string::resize(uint32_t newlen)
 	}
 }
 
-void string::init_from_outline(const uint8_t * str, uint32_t len)
+void string::init_from_outline(const uint8_t * str, size_t len)
 {
 	if (len <= max_inline())
 	{
@@ -78,7 +75,7 @@ void string::init_from_outline(const uint8_t * str, uint32_t len)
 	}
 }
 
-void string::init_from_large(const uint8_t * str, uint32_t len)
+void string::init_from_large(const uint8_t * str, size_t len)
 {
 	m_inline_len_w() = -1;
 	
@@ -101,7 +98,7 @@ void string::init_from(const cstring& other)
 void string::reinit_from(arrayview<uint8_t> data)
 {
 	const uint8_t * str = data.ptr();
-	uint32_t len = data.size();
+	size_t len = data.size();
 	
 	if (str >= this->ptr() && str <= this->ptr()+this->length())
 	{
@@ -112,8 +109,30 @@ void string::reinit_from(arrayview<uint8_t> data)
 	}
 	else
 	{
-		release();
+		deinit();
 		init_from(data);
+	}
+}
+
+void string::append(arrayview<uint8_t> newdat)
+{
+	// cache these four, for performance
+	uint8_t* p1 = ptr();
+	const uint8_t* p2 = newdat.ptr();
+	uint32_t l1 = length();
+	uint32_t l2 = newdat.size();
+	
+	if (UNLIKELY(p2 >= p1 && p2 < p1+l1))
+	{
+		uint32_t offset = p2-p1;
+		resize(l1+l2);
+		p1 = ptr();
+		memcpy(p1+l1, p1+offset, l2);
+	}
+	else
+	{
+		resize(l1+l2);
+		memcpy(ptr()+l1, p2, l2);
 	}
 }
 
@@ -123,14 +142,17 @@ string string::create_usurp(char * str)
 	string ret;
 	memcpy((void*)&ret, (void*)&tmp, sizeof(string));
 	if (tmp.inlined()) free(str);
+	else ret.m_data = xrealloc(ret.m_data, bytes_for(ret.m_len));
 	return ret;
 }
 
-string::string(array<uint8_t>&& bytes) : cstring(noinit())
+string::string(array<uint8_t>&& bytes) : cstrnul(noinit())
 {
 	cstring tmp(bytes);
 	memcpy((void*)this, (void*)&tmp, sizeof(string));
-	if (!tmp.inlined()) bytes.release();
+	
+	uint8_t* ptr = bytes.release().ptr();
+	if (tmp.inlined()) free(ptr);
 }
 
 size_t cstring::indexof(cstring other, size_t start) const
@@ -248,7 +270,7 @@ string cstring::replace(cstring in, cstring out) const
 			if (!haystack) break;
 			
 			haystack += in.length();
-			outlen += out.length(); // outlen-inlen is type uint - bad idea
+			outlen += out.length(); // outlen-inlen is type uint32 - bad idea
 			outlen -= in.length();
 		}
 	}
@@ -437,10 +459,48 @@ array<cstring> cstring::csplit(bool(*find)(const uint8_t * start, const uint8_t 
 		gstart = mend;
 		at = gstart;
 	}
-	if (gstart != dataend)
-		ret.append(arrayview<uint8_t>(gstart, dataend-gstart));
+	ret.append(arrayview<uint8_t>(gstart, dataend-gstart));
 	return ret;
 }
+
+#ifdef __SSE2__
+bool operator==(const cstring& left, const cstring& right)
+{
+	static_assert(sizeof(cstring) == 16);
+	if (left.inlined())
+	{
+		if (left.m_inline_len() != right.m_inline_len()) return false; // if right isn't inlined, m_inline_len is -1 aka not equal
+		__m128i a = _mm_loadu_si128((__m128i*)&left);
+		__m128i b = _mm_loadu_si128((__m128i*)&right);
+		int eq = _mm_movemask_epi8(_mm_cmpeq_epi8(a, b));
+		return ((((~eq) << left.m_inline_len()) & 0xFFFF) == 0);
+	}
+	else
+	{
+		// this is basically a memcmp, but I know size >= 16, so I can jump straight to the SIMD loop
+		
+		auto memeq16 = [](const uint8_t * ap, const uint8_t * bp)
+		{
+			__m128i a = _mm_loadu_si128((__m128i*)ap);
+			__m128i b = _mm_loadu_si128((__m128i*)bp);
+			return (_mm_movemask_epi8(_mm_cmpeq_epi8(a, b)) == 0xFFFF);
+		};
+		if (right.inlined() || left.m_len != right.m_len) return false;
+		
+		const uint8_t * leftp = left.m_data;
+		const uint8_t * rightp = right.m_data;
+		size_t stop = left.m_len - 16;
+		
+		size_t iter = 0;
+		do { // entering this loop at all is pointless if len == 16, but do-while is a few bytes smaller than while
+			if (!memeq16(leftp+iter, rightp+iter)) return false;
+			iter += 16;
+		} while (iter < stop);
+		
+		return (memeq16(leftp+stop, rightp+stop));
+	}
+}
+#endif
 
 int string::compare3(cstring a, cstring b)
 {
@@ -462,7 +522,7 @@ int string::icompare3(cstring a, cstring b)
 	{
 		if (ab[n] != bb[n])
 		{
-			if (ret_i == 0) ret_i = (int)ab[n] - (int)bb[n];
+			if (ret_i == 0) ret_i = ab[n] - bb[n];
 			
 			uint8_t ac = toupper(ab[n]);
 			uint8_t bc = toupper(bb[n]);
@@ -515,8 +575,7 @@ int string::natcompare3(cstring a, cstring b, bool case_insensitive)
 			// same length - compare char by char (no leading zero, same length, so first difference wins)
 			while (abs < ab)
 			{
-				if (*abs != *bbs)
-					return (int)*abs - (int)*bbs;
+				if (*abs != *bbs) return *abs - *bbs;
 				abs++;
 				bbs++;
 			}
@@ -527,10 +586,10 @@ int string::natcompare3(cstring a, cstring b, bool case_insensitive)
 			uint8_t bc = *bb;
 			if (ac != bc)
 			{
-				if (ret_case == 0) ret_case = (int)ac - (int)bc;
+				if (ret_case == 0) ret_case = ac - bc;
 				if (case_insensitive) ac = toupper(ac);
 				if (case_insensitive) bc = toupper(bc);
-				if (ac != bc) return (int)ac - (int)bc;
+				if (ac != bc) return ac - bc;
 			}
 			ab++;
 			bb++;
@@ -583,7 +642,27 @@ bool cstring::contains_nul() const
 		// iszero << m_inline_len puts the NUL at the 0x8000 bit; if anything lower is also true, that's a NUL in the input
 		return ((iszero << m_inline_len()) & 0x7FFF);
 	}
-	else return memchr(m_data, '\0', m_len);
+	else
+	{
+		// similar design to operator==(cstring,cstring)
+		
+		auto hasnul16 = [](const uint8_t * ap)
+		{
+			__m128i a = _mm_loadu_si128((__m128i*)ap);
+			return (_mm_movemask_epi8(_mm_cmpeq_epi8(a, _mm_setzero_si128())) != 0x0000);
+		};
+		
+		const uint8_t * ptr = m_data;
+		size_t stop = m_len - 16;
+		
+		size_t iter = 0;
+		do {
+			if (hasnul16(ptr+iter)) return true;
+			iter += 16;
+		} while (iter < stop);
+		
+		return (hasnul16(ptr+stop));
+	}
 #else
 	return memchr(ptr(), '\0', length());
 #endif
@@ -591,41 +670,35 @@ bool cstring::contains_nul() const
 
 size_t string::codepoint(uint8_t* out, uint32_t cp)
 {
-	if (cp <= 0x7F)
+	if (LIKELY(cp <= 0x7F))
 	{
 		out[0] = cp;
 		return 1;
 	}
-	else if (cp <= 0x07FF)
+	
+	if (cp >= 0xD800 && cp <= 0xDFFF) cp = 0xFFFD; // curse utf16 forever
+	if (cp > 0x10FFFF) cp = 0xFFFD;
+	
+	// some bit magic on the codepoint / utf8 representation, smaller and faster than more obvious approaches
+	uint32_t bits = cp;
+	bits = (bits&0x00fff000)<<4 | (bits&0x00000fff);
+	bits = (bits&0x0fc00fc0)<<2 | (bits&0x003f003f);
+	
+	// check how many bytes that'd need, fill in the mandatory 1 bits, and write it out
+	if (bits <= 0x00001fff) // cp <= 0x7ff
 	{
-		out[0] = ((cp>> 6)     )|0xC0;
-		out[1] = ((cp    )&0x3F)|0x80;
+		writeu_be32(out, (bits|0xC080)<<16);
 		return 2;
 	}
-	else if (cp >= 0xD800 && cp <= 0xDFFF)
+	else if (bits <= 0x000fffff) // cp <= 0xffff
 	{
-		writeu_be32(out, 0xEFBFBD00); // curse utf16 forever
+		writeu_be32(out, (bits|0xE08080)<<8);
 		return 3;
-	}
-	else if (cp <= 0xFFFF)
-	{
-		out[0] = ((cp>>12)&0x0F)|0xE0;
-		out[1] = ((cp>>6 )&0x3F)|0x80;
-		out[2] = ((cp    )&0x3F)|0x80;
-		return 3;
-	}
-	else if (cp <= 0x10FFFF)
-	{
-		out[0] = ((cp>>18)&0x07)|0xF0;
-		out[1] = ((cp>>12)&0x3F)|0x80;
-		out[2] = ((cp>>6 )&0x3F)|0x80;
-		out[3] = ((cp    )&0x3F)|0x80;
-		return 4;
 	}
 	else
 	{
-		writeu_be32(out, 0xEFBFBD00);
-		return 3;
+		writeu_be32(out, bits|0xF0808080);
+		return 4;
 	}
 }
 
@@ -644,99 +717,55 @@ bool cstring::isutf8() const
 	while (bytes < end)
 	{
 		uint8_t head = *bytes++;
-		if (LIKELY(head < 0x80))
-			continue;
+		if (LIKELY(head < 0x80)) continue;
 		
-		if (head < 0xC2) // continuation or overlong twobyte
-			return false;
-		if (head < 0xE0) // twobyte
-			goto cont1;
-		if (head == 0xE0 && *bytes <= 0x9F) // threebyte overlong
-			return false;
-		if (head == 0xED && *bytes >  0x9F) // utf16 surrogate range
-			return false;
-		if (head < 0xF0) // threebyte
-			goto cont2;
-		if (head == 0xF0 && *bytes <= 0x8F) // fourbyte overlong
-			return false;
-		if (head == 0xF4 && *bytes >  0x8F) // fourbyte, above U+110000
-			return false;
-		if (head < 0xF5) // fourbyte
-			goto cont3;
-		return false; // fivebyte, U+140000 or above, or otherwise invalid
+		uint32_t bits = head;
+		while (bytes != end && (*bytes&0xC0) == 0x80)
+		{
+			// if there are four or more continuations, the head will be shifted out of bits
+			// it'll end up between 0x80808080 and 0xBFBFBFBF, which doesn't match any approved range below
+			bits = bits<<8 | *bytes++;
+		}
 		
-	cont3:
-		if (bytes == end || ((*bytes++) & 0xC0) != 0x80) return false;
-	cont2:
-		if (bytes == end || ((*bytes++) & 0xC0) != 0x80) return false;
-	cont1:
-		if (bytes == end || ((*bytes++) & 0xC0) != 0x80) return false;
+		if (bits >= 0xC280 && bits <= 0xDFBF) {}
+		else if (bits >= 0xE0A080 && (bits^0x020000) <= 0xEF9FBF) {} // extra xor to catch utf16
+		else if (bits >= 0xF0908080 && bits <= 0xF48FBFBF) {}
+		else return false;
 	}
 	
 	return true;
 }
 
-int32_t cstring::codepoint_at(uint32_t& idx, int32_t eof) const
+uint32_t cstring::codepoint_at(uint32_t& idx) const
 {
 	const uint8_t * bytes = ptr();
-	uint32_t len = length();
-	if (UNLIKELY(idx == len)) return eof;
+	uint32_t remaining = length()-idx;
 	
-	uint8_t head = bytes[idx++];
-	if (LIKELY(head < 0x80)) return head;
+	uint8_t head = bytes[idx];
+	if (LIKELY(head < 0x80)) { idx++; return head; }
 	
-	if (head <= 0xDF)
+	uint32_t bits = 0; // same general idea as isutf8, but a little more careful
+	uint8_t iter = head; // valid codepoint followed by continuation should report valid codepoint
+	int n = 0;
+	do {
+		bits = bits<<8 | bytes[idx + n];
+		n++;
+		iter <<= 1;
+	} while ((iter & 0x80) && --remaining && (bytes[idx+n]&0xC0) == 0x80);
+	
+	if (bits >= 0xC280 && bits <= 0xDFBF) {}
+	else if (bits >= 0xE0A080 && (bits^0x020000) <= 0xEF9FBF) bits &= ~0x200000; // otherwise that bit becomes 0x8000 in codepoint
+	else if (bits >= 0xF0908080 && bits <= 0xF48FBFBF) {} // for other top bytes, the fixed bits are zero or masked off
+	else
 	{
-		if (idx > len-1)
-			goto fail;
-		if (head < 0xC2) // continuation or overlong twobyte
-			goto fail;
-		if ((bytes[idx+0]&0xC0) != 0x80)
-			goto fail;
-		
-		idx += 1;
-		
-		return (head<<6) + (bytes[idx-1]<<0) - ((0xC0<<6) + (0x80<<0));
+		idx++;
+		return 0xDC00 | head;
 	}
 	
-	if (head <= 0xEF)
-	{
-		if (idx > len-2)
-			goto fail;
-		if (head == 0xE0 && bytes[idx+0] < 0xA0) // overlong
-			goto fail;
-		if (head == 0xED && bytes[idx+0] >= 0xA0) // surrogate
-			goto fail;
-		if ((bytes[idx+0]&0xC0)!=0x80)
-			goto fail;
-		if ((bytes[idx+1]&0xC0)!=0x80)
-			goto fail;
-		
-		idx += 2;
-		return (head<<12) + (bytes[idx-2]<<6) + (bytes[idx-1]<<0) - ((0xE0<<12) + (0x80<<6) + (0x80<<0));
-	}
-	
-	if (head <= 0xF4)
-	{
-		if (idx > len-3)
-			goto fail;
-		if (head == 0xF0 && bytes[idx+0] < 0x90) // overlong
-			goto fail;
-		if (head == 0xF4 && bytes[idx+0] >= 0x90) // above U+10FFFF
-			goto fail;
-		if ((bytes[idx+0]&0xC0)!=0x80)
-			goto fail;
-		if ((bytes[idx+1]&0xC0)!=0x80)
-			goto fail;
-		if ((bytes[idx+2]&0xC0)!=0x80)
-			goto fail;
-		
-		idx += 3;
-		return (head<<18) + (bytes[idx-3]<<12) + (bytes[idx-2]<<6) + (bytes[idx-1]<<0) - ((0xF0<<18)+(0x80<<12)+(0x80<<6)+(0x80<<0));
-	}
-	
-fail:
-	return 0xDC00 | head;
+	idx += n;
+	bits = (bits&0x003f003f) | (bits&0x0f003f00)>>2;
+	bits = (bits&0x00000fff) | (bits&0x0fff0000)>>4;
+	return bits;
 }
 
 bool cstring::matches_glob(cstring pat, bool case_insensitive) const
@@ -788,28 +817,28 @@ string cstring::leftPad (size_t len, uint8_t ch) const {
 
 
 
-static inline int test_isspace(int c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
-static inline int test_isdigit(int c) { return c >= '0' && c <= '9'; }
-static inline int test_isalpha(int c) { return (c&~0x20) >= 'A' && (c&~0x20) <= 'Z'; }
-static inline int test_islower(int c) { return c >= 'a' && c <= 'z'; }
-static inline int test_isupper(int c) { return c >= 'A' && c <= 'Z'; }
-static inline int test_isalnum(int c) { return test_isalpha(c) || test_isdigit(c); }
-static inline int test_isxdigit(int c) { return test_isdigit(c) || ((c&~0x20) >= 'A' && (c&~0x20) <= 'F'); }
-static inline int test_tolower(int c) { if (test_isupper(c)) return c|0x20; else return c; }
-static inline int test_toupper(int c) { if (test_islower(c)) return c&~0x20; else return c; }
+static bool test_isspace(uint8_t c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
+static bool test_isdigit(uint8_t c) { return c >= '0' && c <= '9'; }
+static bool test_islower(uint8_t c) { return c >= 'a' && c <= 'z'; }
+static bool test_isupper(uint8_t c) { return c >= 'A' && c <= 'Z'; }
+static bool test_isalpha(uint8_t c) { return test_islower(c) || test_isupper(c); }
+static bool test_isalnum(uint8_t c) { return test_isalpha(c) || test_isdigit(c); }
+static bool test_isxdigit(uint8_t c) { return test_isdigit(c) || ((c&~0x20) >= 'A' && (c&~0x20) <= 'F'); }
+static uint8_t test_tolower(uint8_t c) { if (test_isupper(c)) return c+0x20; else return c; }
+static uint8_t test_toupper(uint8_t c) { if (test_islower(c)) return c-0x20; else return c; }
 
 test("ctype", "", "string")
 {
 	for (int i=0;i<=255;i++)
 	{
 		testctx(tostring(i)) {
-			assert_eq(!!isspace(i), !!test_isspace(i));
-			assert_eq(!!isdigit(i), !!test_isdigit(i));
-			assert_eq(!!isalpha(i), !!test_isalpha(i));
-			assert_eq(!!islower(i), !!test_islower(i));
-			assert_eq(!!isupper(i), !!test_isupper(i));
-			assert_eq(!!isalnum(i), !!test_isalnum(i));
-			assert_eq(!!isxdigit(i), !!test_isxdigit(i));
+			assert_eq(isspace(i), test_isspace(i));
+			assert_eq(isdigit(i), test_isdigit(i));
+			assert_eq(isalpha(i), test_isalpha(i));
+			assert_eq(islower(i), test_islower(i));
+			assert_eq(isupper(i), test_isupper(i));
+			assert_eq(isalnum(i), test_isalnum(i));
+			assert_eq(isxdigit(i), test_isxdigit(i));
 			assert_eq(tolower(i), test_tolower(i));
 			assert_eq(toupper(i), test_toupper(i));
 		}
@@ -860,7 +889,7 @@ test("strtoken", "", "string")
 	//assert(strtoken("", "", ','));
 }
 
-test("string", "array,memeq", "string")
+test("string base", "array,memeq", "string")
 {
 	{
 		const char * g = "hi";
@@ -879,15 +908,30 @@ test("string", "array,memeq", "string")
 		assert_eq(a.length(), 3);
 		assert_eq((char)a[2], '!');
 		
-		//a.replace(1,1, "ello");
-		//assert_eq(a, "hello!");
-		//assert_eq(a.substr(1,3), "el");
-		//a.replace(1,4, "i");
-		//assert_eq(a, "hi!");
-		//a.replace(1,2, "ey");
-		//assert_eq(a, "hey");
-		//
-		//assert_eq(a.substr(2,2), "");
+		string c;
+		cstring d;
+		
+		assert_eq(c, "");
+		assert_eq(d, "");
+		
+		assert(!c);
+		assert(!d);
+	}
+	
+	{
+		uint8_t buf1[65] = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+		uint8_t buf2[65] = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+		for (size_t len=0;len<=34;len++)
+		{
+			assert_eq(cstring(bytesr(buf1, len)), cstring(bytesr(buf2, len)));
+			assert_ne(cstring(bytesr(buf1, len)), cstring(bytesr(buf2, len+1)));
+			for (size_t pos=0;pos<len;pos++)
+			{
+				buf2[pos] = 'b';
+				assert_ne(cstring(bytesr(buf1, len)), cstring(bytesr(buf2, len)));
+				buf2[pos] = 'a';
+			}
+		}
 	}
 	
 	{
@@ -904,10 +948,6 @@ test("string", "array,memeq", "string")
 		assert_eq(a.substr(1,~1), "2345678901234567812345678901234567");
 		assert_eq(a.substr(2,2), "");
 		assert_eq(a.substr(22,22), "");
-		//a.replace(1,5, "-");
-		//assert_eq(a, "1-789012345678123456789012345678");
-		//a.replace(4,20, "-");
-		//assert_eq(a, "1-78-12345678");
 	}
 	
 	{
@@ -933,7 +973,7 @@ test("string", "array,memeq", "string")
 		a += "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 		assert_eq(a, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ");
 		assert_eq(b, "abcdefghijklmnopqrstuvwxyz");
-		a = a;
+		a.operator=(a);
 		a = a.substr(0, ~1);
 	}
 	
@@ -1050,35 +1090,6 @@ test("string", "array,memeq", "string")
 	}
 	
 	{
-		cstring a(nullptr);
-		cstring b = nullptr;
-		cstring c;
-		cstring d; c = nullptr;
-		string e(nullptr);
-		string f = nullptr;
-		string g;
-		string h; h = nullptr;
-		
-		assert_eq(a, "");
-		assert_eq(b, "");
-		assert_eq(c, "");
-		assert_eq(d, "");
-		assert_eq(e, "");
-		assert_eq(f, "");
-		assert_eq(g, "");
-		assert_eq(h, "");
-		
-		assert(!a);
-		assert(!b);
-		assert(!c);
-		assert(!d);
-		assert(!e);
-		assert(!f);
-		assert(!g);
-		assert(!h);
-	}
-	
-	{
 		cstring a = "floating munchers";
 		assert_eq(a.indexof("f"), 0);
 		assert_eq(a.indexof("l"), 1);
@@ -1095,18 +1106,19 @@ test("string", "array,memeq", "string")
 		assert(a.icontains("F"));
 		assert(a.icontains("L"));
 		assert(a.icontains("Unc"));
-		assert(a.icontains("Ers"));
+		assert(a.icontains("eRS"));
 		assert(!a.icontains("x"));
 	}
 	
 	{
+		// ensure it chooses the correct overloads
 		array<uint8_t> src = cstring("floating munchers").bytes();
-		string dst = src; // ensure it chooses the arrayview<uint8_t> overload
+		string dst = src;
 		assert_eq(dst, "floating munchers");
 		assert_eq(src, dst.bytes());
 		dst = "";
 		test_nomalloc {
-			string tmp = std::move(src); // and this should use the 
+			string tmp = std::move(src);
 			dst = std::move(tmp);
 		};
 		assert_eq(dst, "floating munchers");
@@ -1201,116 +1213,6 @@ test("string", "array,memeq", "string")
 	}
 	
 	{
-		cstring strs[] = {
-		  "A3A",
-		  "A03A",
-		  "A3a",
-		  "A03a",
-		  "a1",
-		  "a2",
-		  "a02",
-		  "a2a",
-		  "a2a1",
-		  "a02a2",
-		  "a2a3",
-		  "a2b",
-		  "a02b",
-		  "a3A",
-		  "a03A",
-		  "a3a",
-		  "a03a",
-		  "a10",
-		  "a11",
-		  "a18446744073709551616", // ensure no integer overflow
-		  "a018446744073709551616",
-		  "a18446744073709551617",
-		  "a018446744073709551617",
-		  "a184467440737095516160000",
-		  "a0184467440737095516160000",
-		  "a184467440737095516160001",
-		  "a0184467440737095516160001",
-		  "a184467440737095516170000",
-		  "a0184467440737095516170000",
-		  "a184467440737095516170001",
-		  "a0184467440737095516170001",
-		  "aa",
-		};
-		
-		for (size_t a=0;a<ARRAY_SIZE(strs);a++)
-		for (size_t b=0;b<ARRAY_SIZE(strs);b++)
-		{
-			if (a <  b) testctx(strs[a]+" < "+strs[b]) assert_lt(string::natcompare3(strs[a], strs[b]), 0);
-			if (a == b) testctx(strs[a]+" = "+strs[b]) assert_eq(string::natcompare3(strs[a], strs[b]), 0);
-			if (a >  b) testctx(strs[a]+" > "+strs[b]) assert_gt(string::natcompare3(strs[a], strs[b]), 0);
-			testctx(strs[a]+" <=> "+strs[b]) assert_eq(string::natless(strs[a], strs[b]), a<b);
-		}
-	}
-	
-	{
-		cstring strs[] = {
-		  "a1",
-		  "a2",
-		  "a02",
-		  "a2a",
-		  "a2a1",
-		  "a02a2",
-		  "a2a3",
-		  "a2b",
-		  "a02b",
-		  "A3A",
-		  "A3a",
-		  "a3A",
-		  "a3a",
-		  "A03A",
-		  "A03a",
-		  "a03A",
-		  "a03a",
-		  "a10",
-		  "a11",
-		  "a18446744073709551616",
-		  "a018446744073709551616",
-		  "a18446744073709551617",
-		  "a018446744073709551617",
-		  "a184467440737095516160000",
-		  "a0184467440737095516160000",
-		  "a184467440737095516160001",
-		  "a0184467440737095516160001",
-		  "a184467440737095516170000",
-		  "a0184467440737095516170000",
-		  "a184467440737095516170001",
-		  "a0184467440737095516170001",
-		  "aa",
-		};
-		
-		/*
-		puts("");
-		for (size_t a=0;a<ARRAY_SIZE(strs);a++)
-		{
-			printf("%s%-5s",(a?" | ":"        "),strs[a].c_str().c_str());
-		}
-		puts("");
-		for (size_t b=0;b<ARRAY_SIZE(strs);b++)
-		{
-			printf("%-5s", strs[b].c_str().c_str());
-			for (size_t a=0;a<ARRAY_SIZE(strs);a++)
-			{
-				printf(" | %-5d",string::inatcompare3(strs[a], strs[b]));
-			}
-			puts("");
-		}
-		*/
-		
-		for (size_t a=0;a<ARRAY_SIZE(strs);a++)
-		for (size_t b=0;b<ARRAY_SIZE(strs);b++)
-		{
-			if (a <  b) testctx(strs[a]+" < "+strs[b]) assert_lt(string::inatcompare3(strs[a], strs[b]), 0);
-			if (a == b) testctx(strs[a]+" = "+strs[b]) assert_eq(string::inatcompare3(strs[a], strs[b]), 0);
-			if (a >  b) testctx(strs[a]+" > "+strs[b]) assert_gt(string::inatcompare3(strs[a], strs[b]), 0);
-			testctx(strs[a]+" <=> "+strs[b]) assert_eq(string::inatless(strs[a], strs[b]), a<b);
-		}
-	}
-	
-	{
 		cstring strs[]    = { "fl","lo","oa","at","ti","in","ng","g "," m","mu","un","nc","ch","he","er","rs" };
 		cstring strsort[] = { " m","at","ch","er","fl","g ","he","in","lo","mu","nc","ng","oa","rs","ti","un" };
 		
@@ -1347,9 +1249,24 @@ test("string", "array,memeq", "string")
 	}
 	
 	{
+		cstring a = "ø\x80";
+		uint32_t n = 0;
+		assert_eq(a.codepoint_at(n), 0xF8);
+		assert_eq(a.codepoint_at(n), 0xDC80);
+		assert_eq(n, a.length());
+	}
+	
+	{
 		cstring a = "💩";
 		uint32_t n = 0;
 		assert_eq(a.codepoint_at(n), 0x1F4A9);
+		assert_eq(n, a.length());
+	}
+	
+	{
+		cstring a = "☃";
+		uint32_t n = 0;
+		assert_eq(a.codepoint_at(n), 0x2603);
 		assert_eq(n, a.length());
 	}
 	
@@ -1366,7 +1283,7 @@ test("string", "array,memeq", "string")
 		assert_eq(string::codepoint(0x41), "A");
 		assert_eq(string::codepoint(0xF8), "ø");
 		assert_eq(string::codepoint(0x2603), "☃");
-		assert_eq(string::codepoint(0xD800), "�");
+		assert_eq(string::codepoint(0xD805), "�");
 		assert_eq(string::codepoint(0x1F4A9), "💩");
 	}
 	
@@ -1411,15 +1328,33 @@ test("string", "array,memeq", "string")
 			"",
 			"_",
 			"a",
-			"aaaa_aa",
-			"aaaa_aaa",
-			"_______________",
+			"aaaa_aa", // length 7
+			"aaaa_aaa", // length 8
+			"_______________", // length 15
 			"aaaaaaaaaaaaaaa",
 			"aaaaaaaaaaaaaa_",
 			"_aaaaaaaaaaaaaa",
-			"aaaaaaaaaaaaaaaa",
+			"aaaaaaaaaaaaaaaa", // length 16
 			"aaaaaaaaaaaaaaa_",
 			"_aaaaaaaaaaaaaaa",
+			"_aaaaaaaaaaaaaaaa", // length 17
+			"_aaaaaaaaaaaaaa_a",
+			"aaaaaaaaaaaaaaaa_",
+			"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", // length 31
+			"_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"aaaaaaaaaaaaaaa_aaaaaaaaaaaaaaa",
+			"aaaaaaaaaaaaaaaa_aaaaaaaaaaaaaa",
+			"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_",
+			"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", // length 32
+			"aaaaaaaaaaaaaaa_aaaaaaaaaaaaaaaa",
+			"aaaaaaaaaaaaaaaa_aaaaaaaaaaaaaaa",
+			"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_",
+			"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", // length 33
+			"_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"aaaaaaaaaaaaaaa_aaaaaaaaaaaaaaaaa",
+			"aaaaaaaaaaaaaaaa_aaaaaaaaaaaaaaaa",
+			"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_a",
+			"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_",
 		};
 		
 		for (const char * test : tests)
@@ -1437,6 +1372,153 @@ test("string", "array,memeq", "string")
 				}
 				assert_eq(a.contains_nul(), nul);
 			}
+		}
+	}
+	
+	{
+		string s1;
+		bytearray b1;
+		b1.resize(8);
+		string s2;
+		bytearray b2;
+		b2.resize(32);
+		test_nomalloc {
+			string tmp1 = std::move(b1); // will free b1; this is fine, only allocating is forbidden
+			s1 = std::move(tmp1);
+			string tmp2 = std::move(b2);
+			s2 = std::move(tmp2);
+		}
+		assert_eq(b1.size(), 0);
+		assert_eq(b2.size(), 0);
+		assert_eq((uintptr_t)b1.ptr(), 0);
+		assert_eq((uintptr_t)b2.ptr(), 0);
+		assert_eq(s1.length(), 8);
+		assert_eq(s2.length(), 32);
+	}
+	
+	{
+		string a = "aaaaaaaaaaaaaaaaaaaaaaaa";
+		test_nomalloc {
+			assert(a == "aaaaaaaaaaaaaaaaaaaaaaaa");
+			a += "aaaaaaa";
+			assert(a == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+		}
+	}
+}
+
+test("string::natcompare", "array,memeq", "string")
+{
+	{
+		cstring strs[] = {
+		  "A3A",
+		  "A03A",
+		  "A3a",
+		  "A03a",
+		  "a$",
+		  "a1",
+		  "a2",
+		  "a02",
+		  "a2a",
+		  "a2a1",
+		  "a02a2",
+		  "a2a3",
+		  "a2b",
+		  "a02b",
+		  "a3A",
+		  "a03A",
+		  "a3a",
+		  "a03a",
+		  "a10",
+		  "a11",
+		  "a18446744073709551616", // ensure no integer overflow
+		  "a018446744073709551616",
+		  "a18446744073709551617",
+		  "a018446744073709551617",
+		  "a184467440737095516160000",
+		  "a0184467440737095516160000",
+		  "a184467440737095516160001",
+		  "a0184467440737095516160001",
+		  "a184467440737095516170000",
+		  "a0184467440737095516170000",
+		  "a184467440737095516170001",
+		  "a0184467440737095516170001",
+		  "a@",
+		  "aa",
+		};
+		
+		for (size_t a=0;a<ARRAY_SIZE(strs);a++)
+		for (size_t b=0;b<ARRAY_SIZE(strs);b++)
+		{
+			if (a <  b) testctx(strs[a]+" < "+strs[b]) assert_lt(string::snatcompare3(strs[a], strs[b]), 0);
+			if (a == b) testctx(strs[a]+" = "+strs[b]) assert_eq(string::snatcompare3(strs[a], strs[b]), 0);
+			if (a >  b) testctx(strs[a]+" > "+strs[b]) assert_gt(string::snatcompare3(strs[a], strs[b]), 0);
+			testctx(strs[a]+" <=> "+strs[b]) assert_eq(string::snatless(strs[a], strs[b]), a<b);
+		}
+	}
+	
+	{
+		cstrnul strs[] = {
+		  "a$",
+		  "a1",
+		  "a2",
+		  "a02",
+		  "a2a",
+		  "a2a1",
+		  "a02a2",
+		  "a2a3",
+		  "a2b",
+		  "a02b",
+		  "A3A",
+		  "A3a",
+		  "a3A",
+		  "a3a",
+		  "A03A",
+		  "A03a",
+		  "a03A",
+		  "a03a",
+		  "a10",
+		  "a11",
+		  "a18446744073709551616",
+		  "a018446744073709551616",
+		  "a18446744073709551617",
+		  "a018446744073709551617",
+		  "a184467440737095516160000",
+		  "a0184467440737095516160000",
+		  "a184467440737095516160001",
+		  "a0184467440737095516160001",
+		  "a184467440737095516170000",
+		  "a0184467440737095516170000",
+		  "a184467440737095516170001",
+		  "a0184467440737095516170001",
+		  "a@",
+		  "aa",
+		};
+		
+		/*
+		puts("");
+		for (size_t a=0;a<ARRAY_SIZE(strs);a++)
+		{
+			printf("%s%-5s",(a?" | ":"        "),(const char*)strs[a]);
+		}
+		puts("");
+		for (size_t b=0;b<ARRAY_SIZE(strs);b++)
+		{
+			printf("%-5s", (const char*)strs[b]);
+			for (size_t a=0;a<ARRAY_SIZE(strs);a++)
+			{
+				printf(" | %-5d",string::inatcompare3(strs[a], strs[b]));
+			}
+			puts("");
+		}
+		*/
+		
+		for (size_t a=0;a<ARRAY_SIZE(strs);a++)
+		for (size_t b=0;b<ARRAY_SIZE(strs);b++)
+		{
+			if (a <  b) testctx(strs[a]+" < "+strs[b]) assert_lt(string::inatcompare3(strs[a], strs[b]), 0);
+			if (a == b) testctx(strs[a]+" = "+strs[b]) assert_eq(string::inatcompare3(strs[a], strs[b]), 0);
+			if (a >  b) testctx(strs[a]+" > "+strs[b]) assert_gt(string::inatcompare3(strs[a], strs[b]), 0);
+			testctx(strs[a]+" <=> "+strs[b]) assert_eq(string::inatless(strs[a], strs[b]), a<b);
 		}
 	}
 }

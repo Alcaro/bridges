@@ -28,7 +28,7 @@ static uint16_t bitreverse16(uint16_t arg)
 #define HUFF_FAST_BITS_MASK ((1<<HUFF_FAST_BITS)-1)
 #define HUFF_SLOW_BITS_MASK ((1<<HUFF_SLOW_BITS)-1)
 
-// in: length in bits of each huffman symbol, 0..15
+// in: length in bits of each huffman symbol, 0..15 (0 means unrepresentable)
 
 // out:     8000 - symbol type flag
 //          7800 - bits taken by symbol thus far (0..15)
@@ -36,29 +36,45 @@ static uint16_t bitreverse16(uint16_t arg)
 // (type=0) 0600 - unused
 // (type=1) 07FF - branch target; low HUFF_SLOW_BITS bits are always zero
 
-// if sum(0x10000>>in[n] if in[n]!=0) != 0x10000:
-//   if sum < 0x10000, and there's exactly one nonzero symbol:
-//     the remaining slots are filled with 'bad_symbol'
+// if sum(0x10000>>in[n] where in[n]!=0) != 0x10000:
+//   if sum < 0x10000, there are no symbols with size >= 2 bits, and bad_symbol != 19:
+//     the remaining slots (either half of them, or all) are filled with 'bad_symbol'
 //   else error
-static bool unpack_huffman(uint16_t * out, const uint8_t * in, size_t in_len, size_t bad_symbol)
+
+// this is quite specialized for what DEFLATE needs
+static bool unpack_huffman_dfl(uint16_t * out, const uint8_t * in, size_t in_len, size_t bad_symbol)
 {
 	uint16_t n_len[16] = {};
 	for (size_t n=0;n<in_len;n++)
 		n_len[in[n]]++;
 	
 	size_t used_bits = 0;
-	size_t n_set = 0;
 	uint16_t bits_start[16];
 	for (size_t n=1;n<16;n++)
 	{
 		bits_start[n] = used_bits;
 		used_bits += (0x10000>>n) * n_len[n];
-		n_set += n_len[n];
 	}
-	// several DEFLATE decoders contain this check, but I can't find any such rule in RFC 1951
-	// for example https://github.com/madler/zlib/blob/cacf7f1d4e3d44d871b605da3b647f07d718623f/inftrees.c#L130-L138
-	if (used_bits != 0x10000 && n_set != 1) return false;
-	if (used_bits > 0x10000) return false;
+	
+	// if everything defined as accepted by RFC 1951 is a valid DEFLATE bytestram and everything else is forbidden,
+	//  then a huffman table containing two or more zeroes and nothing else is illegal
+	//  "One distance code of zero bits means that there are no distance codes used at all (the data is all literals)."
+	// if everything with a reasonable and unambiguous definition in 1951 is legal, then all incomplete huffman tables are legal,
+	//  if the unused bit sequences never show up
+	// zlib matches neither behavior; it accepts a huffman table containing multiple zeroes and nothing else,
+	//  as well as one 1-bit symbol and the rest zeroes, but anything else is rejected
+	// this one matches zlib
+	// https://github.com/madler/zlib/blob/cacf7f1d4e3d44d871b605da3b647f07d718623f/inftrees.c#L130-L138
+	// https://tools.ietf.org/html/rfc1951#page-13
+	if (UNLIKELY(used_bits != 0x10000))
+	{
+		if (used_bits > 0x10000) return false; // no overfull tables
+		if (used_bits != (size_t)(n_len[1]<<15)) return false; // only 1-bit and unrepresentable symbols
+		if (bad_symbol == 19) return false; // huffman huffman table can't be incomplete
+		// (zlib implements this check differently, but our results are the same)
+		assert_reached();
+	}
+	// used_bits can be 0, 0x8000, or 0x10000
 	
 	size_t out_tree = 1<<HUFF_FAST_BITS;
 	memset(out, 0xFF, sizeof(uint16_t)<<HUFF_FAST_BITS);
@@ -68,7 +84,7 @@ static bool unpack_huffman(uint16_t * out, const uint8_t * in, size_t in_len, si
 		int n_bits = in[n];
 		if (!n_bits) continue;
 		uint16_t bits = bitreverse16(bits_start[n_bits]);
-		bits_start[n_bits] += 0x10000 >> n_bits; // it's all backwards
+		bits_start[n_bits] += 0x10000 >> n_bits;
 		
 		uint32_t layer_start = 0;
 		int layer_bits = HUFF_FAST_BITS;
@@ -120,8 +136,11 @@ static bool unpack_huffman(uint16_t * out, const uint8_t * in, size_t in_len, si
 		}
 	}
 	
-	if (used_bits != 0x10000)
+	if (UNLIKELY(used_bits != 0x10000))
 	{
+		// used_bits can be 0, 0x8000, or 0x10000, and can't be the last one in this branch
+		// if 0, erase all; if 0x8000, erase only odd indices, up to out_tree
+		// I can't find any solution better than the obvious one - just wipe all slots that are 0xFFFF
 		for (size_t i=0;i<out_tree;i++)
 		{
 			if (out[i] == 0xFFFF)
@@ -130,37 +149,6 @@ static bool unpack_huffman(uint16_t * out, const uint8_t * in, size_t in_len, si
 	}
 	
 	return true;
-}
-
-// updates dest/src; does NOT update count, since it'd just be zero on exit anyways
-// must behave properly both if dest/src are nonoverlapping, if src is slightly before dest,
-//  and if src is equal to or slightly after dest (latter can happen in a cyclical buffer)
-forceinline void rep_movsb(uint8_t * & dest, const uint8_t * & src, size_t count)
-{
-#if defined(__i386__) || defined(__x86_64__)
-	const uint8_t * rsi = src;
-	uint8_t * rdi = dest;
-	__asm__("rep movsb" : "+S"(rsi), "+D"(rdi), "+c"(count)
-#ifdef __clang__
-	                    : : "memory"); // https://bugs.llvm.org/show_bug.cgi?id=47866
-#else
-	                    , "+m"(*(uint8_t(*)[])rdi) : "m"(*(const uint8_t(*)[])rsi));
-#endif
-	src = rsi;
-	dest = rdi;
-#else
-	if (count & 2) { *dest++ = *src++; *dest++ = *src++; }
-	if (count & 1) { *dest++ = *src++; }
-	
-	count >>= 2;
-	while (count--)
-	{
-		*dest++ = *src++;
-		*dest++ = *src++;
-		*dest++ = *src++;
-		*dest++ = *src++;
-	}
-#endif
 }
 
 void inflator::bits_refill_fast()
@@ -172,7 +160,7 @@ void inflator::bits_refill_fast()
 		m_in_nbits += 32;
 		m_in_at += 4;
 	}
-	else bits_refill_all(); // refill to max (after this, in is known empty)
+	else bits_refill_all(); // refill to max (after this, m_in is known empty)
 }
 
 void inflator::bits_refill_all()
@@ -227,6 +215,23 @@ uint32_t inflator::bits_read_huffman(const uint16_t * huff)
 	return target;
 }
 
+// TODO: optimize out resumption support, if every caller uses static bool inflate(bytesw out, bytesr in) and not the other two
+// needs LTO, .a optimization, and a good optimizer (Clang can do it, GCC gets confused (last tested on 11.1))
+// a.cpp:
+//   static bool need_resume = false;
+//   void enable_resume_private() { need_resume = true; }
+//   if (need_resume) { ... }
+// b.cpp:
+//   oninit() { enable_resume_private(); }
+//   void enable_resume() {} // intentionally left blank
+// if anything calls enable_resume anywhere, b.cpp is included, its oninit runs, and need_resume becomes true
+// if nothing calls it, b.cpp is excluded, and need_resume remains false
+// in both cases, need_resume is assumed constant throughout the entire program (including, questionably and fragilely, in other ctors),
+//   and LTO optimizes it accordingly
+// need to test how this interacts with zlib headers; even if unused, they reference enable_resume
+// also looks highly fragile, need to inspect the assembly
+// alternatively, if every caller is the nonresuming one, perhaps LTO inlines inflate() into it and realizes that m_state is constant,
+//   in which case I don't need to do anything at all
 #define RET_FAIL() do { assert_reached(); return ret_error; } while(0)
 inflator::ret_t inflator::inflate()
 {
@@ -249,7 +254,7 @@ inflator::ret_t inflator::inflate()
 		[[fallthrough]];
 		case st_blockinit:
 			bits_refill_fast();
-			if (UNLIKELY(m_in_nbits < 3+7)) // empty block with default huffman tables is 3+7 bits
+			if (UNLIKELY(m_in_nbits < 3+7)) // empty block with default huffman tables is 3+7 bits; literal can also use 3+7
 			{
 				assert_reached();
 				m_state = st_blockinit;
@@ -277,7 +282,6 @@ inflator::ret_t inflator::inflate()
 					len = m_in_bits_buf; // this truncates to 32 bits
 					len = len ^ ((~len)<<16);
 					if (UNLIKELY(len >= 0x10000)) RET_FAIL();
-					len &= 0xFFFF;
 					m_in_nbits -= 32;
 					m_in_bits_buf >>= 32;
 				}
@@ -331,7 +335,7 @@ inflator::ret_t inflator::inflate()
 						goto do_ret_more_input;
 					}
 					// if we run out of bits, we'll read infinite zeroes, which will either error out or emit nonsense tables
-					// in both cases, it will terminate, so it's safe to defer the overflow check to later
+					// in both cases, it will terminate, so it's safe to defer the underflow check to later
 					
 					// dynamic huffman
 					uint32_t huff_sizes;
@@ -349,6 +353,7 @@ inflator::ret_t inflator::inflate()
 						uint32_t hclen = (huff_sizes>>10) + 4;
 						
 						// DEFLATE can represent 288 symbols and 32 distance codes, but only 286 resp. 30 are valid. why
+						// RFC 1951 seems to explicitly allow HDIST > 30 (though using them is forbidden), but zlib rejects it
 						if (UNLIKELY(hlit > 286 || hdist > 30)) RET_FAIL();
 						
 						bits_refill_all();
@@ -367,7 +372,7 @@ inflator::ret_t inflator::inflate()
 						
 						for (uint32_t i=0;i<hclen;i++) huff_al_len[huff_al_order[i]] = bits_extract(3);
 						
-						bool ok = unpack_huffman(m_huff_symbol, huff_al_len, 19, 19);
+						bool ok = unpack_huffman_dfl(m_huff_symbol, huff_al_len, 19, 19);
 						if (UNLIKELY(!ok)) RET_FAIL();
 					}
 					
@@ -408,32 +413,31 @@ inflator::ret_t inflator::inflate()
 							for (uint32_t j=0;j<n_rep;j++)
 								m_symbol_lengths[i++] = last;
 						}
-						else if (LIKELY(sym <= 18)) // zeroes
+						else // sym 17 or 18 (invalid symbols are impossible)
 						{
 							uint32_t n_rep = bits_extract((sym-17)*4+3) + (sym-17)*8+3; // takes 7 bits
 							if (UNLIKELY(i+n_rep > hlit+hdist)) RET_FAIL();
 							for (uint32_t j=0;j<n_rep;j++)
 								m_symbol_lengths[i++] = 0;
 						}
-						else RET_FAIL(); // sym=19 can happen if huffman table contains only one entry
 					}
 					
-					if (UNLIKELY(!unpack_huffman(m_huff_symbol, m_symbol_lengths, hlit, 287))) RET_FAIL();
+					if (UNLIKELY(!unpack_huffman_dfl(m_huff_symbol, m_symbol_lengths, hlit, 287))) RET_FAIL();
 					uint8_t tmp[32];
 					memcpy(tmp, m_symbol_lengths+hlit, 32); // copy it - m_symbol_lengths is a union with m_huff_distance
-					if (UNLIKELY(!unpack_huffman(m_huff_distance, tmp, hdist, 31))) RET_FAIL();
+					if (UNLIKELY(!unpack_huffman_dfl(m_huff_distance, tmp, hdist, 31))) RET_FAIL();
 				}
 				else
 				{
 					// static huffman
 					uint8_t len[288];
 					for (int i=0 ; i<=32; i++) len[i] = 5;
-					unpack_huffman(m_huff_distance, len, 32, 0);
+					unpack_huffman_dfl(m_huff_distance, len, 32, 0);
 					for (int i=0 ; i<=143;i++) len[i] = 8;
 					for (int i=144;i<=255;i++) len[i] = 9;
 					for (int i=256;i<=279;i++) len[i] = 7;
 					for (int i=280;i<=287;i++) len[i] = 8;
-					unpack_huffman(m_huff_symbol, len, 288, 0);
+					unpack_huffman_dfl(m_huff_symbol, len, 288, 0);
 				}
 				
 				m_state = st_mainloop;
@@ -453,7 +457,7 @@ inflator::ret_t inflator::inflate()
 				
 				ret_t ret_state = ret_done;
 				
-				if (UNLIKELY(m_state != st_mainloop))
+				if (m_state != st_mainloop)
 				{
 					if (m_state == st_copy) goto st_copy_inner;
 					else if (m_state == st_litbyte) goto st_litbyte_inner;
@@ -540,7 +544,7 @@ inflator::ret_t inflator::inflate()
 							len += (detail&511);
 							
 							// do not refill after underflow, shift by huge is UB
-							if (UNLIKELY((uint32_t)nbits >= 15+13)) assert_reached();
+							if (LIKELY((uint32_t)nbits >= 15+13)) assert_reached();
 							else if (LIKELY(in_at != in_end))
 							{
 								assert_reached();
@@ -559,6 +563,7 @@ inflator::ret_t inflator::inflate()
 							BITS_FAST(dist_bits, dist); // takes 13 bits
 							dist += dist_base;
 							
+							if (dist == 32768) assert_reached();
 							if (UNLIKELY(dist > 32768)) RET_FAIL(); // dist_key >= 30 ends up here
 							// no need to check earlier, underflow just yields endless zeroes
 							if (UNLIKELY((int32_t)nbits < 0)) RET_FAIL();
@@ -605,7 +610,7 @@ inflator::ret_t inflator::inflate()
 				}
 				
 			inner_return:
-				// most of these don't change, no need to write them back
+				// most of the variables don't change, no need to write them back
 				m_in_at = in_at;
 				m_in_bits_buf = bits_buf;
 				m_in_nbits = nbits;
@@ -728,7 +733,7 @@ static size_t huff_max_size(size_t num_syms)
 	
 	uint16_t huff_tbl[2048];
 	memset(huff_tbl, 0xFF, sizeof(huff_tbl));
-	assert(unpack_huffman(huff_tbl, sym_lengths, i, 0));
+	assert(unpack_huffman_dfl(huff_tbl, sym_lengths, i, 0));
 	
 	for (i=0;huff_tbl[i]!=0xFFFF;i++) {}
 	return i;
@@ -819,12 +824,11 @@ static void test1f(bytesr comp)
 
 // Input format: Sequence of
 // '<' followed by bits, little endian. Can also use + to zero pad to next byte boundary, or / to specify that this is a byte boundary.
-// '>' followed by hex digits, or "#3 1234" (same as 123412341234). If prefixed with '<', will rewind to the start of the buffer.
+// '>' followed by hex digits, or "#3 1234" (same as 123412341234). If immediately followed by '<', will rewind to the start of the buffer.
 // '!' to specify that it should signal an error
 // '.' to specify that it should signal completion (NUL does that too, but an extra < after . is legal)
 // The last '<' is marked as the final block. It is allowed to leave it empty.
-// Output: '>' followed by hex digits.
-// Space is allowed at any point in input, and between output pairs.
+// Space is allowed at any point in input, and between (but not inside) output digit pairs.
 // Throws errors if the decompressor asks for something other than what the string expects.
 // May give false positives if the decompressor is refactored to buffer more or less input before processing it.
 static void test1x(const char * compdesc)
@@ -933,7 +937,8 @@ static void test1x(const char * compdesc)
 			
 			if (rewind)
 			{
-				// the public API doesn't permit mixing next/grow like this, but the rewinder does
+				// the public API doesn't permit mixing next/grow like this,
+				// but tests are written against the implementation, not the specification
 				assert_gte(out_pos, 32768);
 				out_pos = 0;
 				inf.set_output_next(bytesw(out, out_exp.size()));
@@ -1002,7 +1007,8 @@ test("deflate decompression", "", "deflate")
 	test1("\x95\xc0\x81\x00\x00\x00\x00\x80\x20\xd6\xfc\x25\x66\x38\x9e\x00", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 	test1("\x95\xc1\x81\x0c\x00\x00\x00\x80\x30\xd6\xf2\x87\x88\xa1\x1d\x59\x02", "abababababababababababababababababababababababab");
 	
-	test1x("< 110 00000 00+"); // same as \x03\x00 above, just to test this tester function
+	// remember that every integer must be encoded backwards
+	test1x("< 110 00000/00+"); // same as \x03\x00 above, just to test this tester function
 	test1x("< 110 00000 < 00+");
 	
 	test1x("< 010 00000000" // static huffman, empty block, to make it refill a lot
@@ -1019,19 +1025,20 @@ test("deflate decompression", "", "deflate")
 	test1x("< 001 10111 10111 1111" // undersubscribed
 	         "001 001 001 001 001 001 001 001 001 001 001 001 001 001 101 101 101 001 101"
 	       "+!");
-	test1x("< 001 10111 10111 1111" // ran out of bits
+	test1x("< 001 10111 +!"); // too few bits
+	test1x("< 001 10111 10111 1111" // too few bits again
 	         "101 101 101 001 001 001 001 001 001 001 001 001 001 001 101 001 101 001 101"
 	       "+!");
 	test1x("< 001 10111 10111 1111" // first symbol is repeat last symbol
 	         "101 101 101 001 001 001 001 001 001 001 001 001 001 001 101 001 101 001 101"
-	         // key: 0000..1100 -> 0..11
-	         //      11010..11111 -> 12..19
+	         // key: 0000..1100 -> 0..12
+	         //      11010..11111 -> 13..18
 	         "11101 00" // 16 00
 	       "+!");
 	test1x("< 001 10111 10111 1111" // overflowing repeat
 	         "101 101 101 001 001 001 001 001 001 001 001 001 001 001 101 001 101 001 101"
-	         // key: 0000..1100 -> 0..11
-	         //      11010..11111 -> 12..19
+	         // key: 0000..1100 -> 0..12
+	         //      11010..11111 -> 13..18
 	         "11111 1111111" // sym 18 - 138 zeroes
 	         "11111 1111111" // sym 18 - 138 zeroes
 	         "11111 0011100" // sym 18 - 39 zeroes
@@ -1039,43 +1046,61 @@ test("deflate decompression", "", "deflate")
 	       "+!");
 	test1x("< 001 10111 10111 1111" // overflowing zero fill
 	         "101 101 101 001 001 001 001 001 001 001 001 001 001 001 101 001 101 001 101"
-	         // key: 0000..1100 -> 0..11
-	         //      11010..11111 -> 12..19
+	         // key: 0000..1100 -> 0..12
+	         //      11010..11111 -> 13..18
 	         "11111 1111111" // sym 18 - 138 zeroes
 	         "11111 1111111" // sym 18 - 138 zeroes
 	         "11111 0111100" // sym 18 - 41 zeroes
 	       "+!");
-	test1x("< 001 10111 10111 1111" // invalid symbol in huffman table
-	         "111 000 000 000 000 000 000 000 000 000 000 000 000 000 000 000 000 000 000"
-	         // key: 0000000 -> 16
-	         // anything else -> error
-	         "0000001"
-	       "+!");
-	test1x("< 001 10111 10111 1111" // invalid symbol huffman table
+	test1x("< 001 10111 10111 1111" // empty symbol huffman table
 	         "101 101 101 001 001 001 001 001 001 001 001 001 001 001 101 001 101 001 101"
-	         // key: 0000..1100 -> 0..11
-	         //      11010..11111 -> 12..19
+	         // key: 0000..1100 -> 0..12
+	         //      11010..11111 -> 13..18
 	         "11111 1111111" // sym 18 - 138 zeroes
 	         "11111 1111111" // sym 18 - 138 zeroes
 	         "11111 1011100" // sym 18 - 40 zeroes
 	       "+!");
-	test1x("< 001 10111 10111 1111" // invalid distance huffman table
+	test1x("< 001 10111 10111 1111" // oversubscribed symbol huffman table
 	         "101 101 101 001 001 001 001 001 001 001 001 001 001 001 101 001 101 001 101"
-	         // key: 0000..1100 -> 0..11
-	         //      11010..11111 -> 12..19
+	         // key: 0000..1100 -> 0..12
+	         //      11010..11111 -> 13..18
+	         "0001"
+	         "0001"
+	         "0001"
+	         "11111 1111111" // sym 18 - 138 zeroes
+	         "11111 1111111" // sym 18 - 138 zeroes
+	         "11111 0101100" // sym 18 - 37 zeroes
+	       "+!");
+	test1x("< 001 10111 10111 1111" // oversubscribed distance huffman table
+	         "101 101 101 001 001 001 001 001 001 001 001 001 001 001 101 001 101 001 101"
+	         // key: 0000..1100 -> 0..12
+	         //      11010..11111 -> 13..18
 	         "0001" // sym 1 - length 1
 	         "11111 0111111" // sym 18 - 137 zeroes
 	         "11111 1111111" // sym 18 - 138 zeroes
-	         "11111 1011100" // sym 18 - 40 zeroes
+	         "11111 0101100" // sym 18 - 37 zeroes
+	         "0001"
+	         "0001"
+	         "0001"
 	       "+!");
+	test1x("< 101 10111 10111 1111" // empty distance huffman table
+	         "101 101 101 001 001 001 001 001 001 001 001 001 001 001 101 001 101 001 101"
+	         // key: 0000..1100 -> 0..12
+	         //      11010..11111 -> 13..18
+	         "11111 1111111" // sym 18 - 138 zeroes
+	         "11111 1101011" // sym 18 - 118 zeroes
+	         "0001" // sym 1 - length 1
+	         "11111 0000110" // sym 18 - 59 zeroes
+	         "0"
+	       "+");
 	test1x("< 001 10111 10111 1111" // invalid huffman symbol, dynamic table
 	         "101 101 101 001 001 001 001 001 001 001 001 001 001 001 101 001 101 001 101"
-	         // key: 0000..1100 -> 0..11
-	         //      11010..11111 -> 12..19
+	         // key: 0000..1100 -> 0..12
+	         //      11010..11111 -> 13..18
 	         "0001" // sym 1 - length 1
 	         "11111 0111111" // sym 18 - 137 zeroes
 	         "11111 1111111" // sym 18 - 138 zeroes
-	         "11111 0011100" // sym 18 - 40 zeroes
+	         "11111 0011100" // sym 18 - 39 zeroes
 	         "0001" // sym 286 - length 1
 	         "1"
 	       "+!");
@@ -1121,7 +1146,7 @@ test("deflate decompression", "", "deflate")
 	       "> #3 90 #3 90 #10 00");
 	test1x("< 110" // repeat with invalid distance key
 	         "0000001" // sym 257, repeat 3 bytes
-	           "11111" // distance key 31
+	           "11111" // distance key 31, but no distance
 	       "+!");
 	test1x("< 110" // repeat that runs out of bits
 	         "0000001" // sym 257, repeat 3 bytes
@@ -1131,20 +1156,23 @@ test("deflate decompression", "", "deflate")
 	         "0000001 00000" // sym 257, repeat 3 bytes from 1 byte back
 	         "+" // not enough bits for next symbol
 	       "!");
-	test1x("< 101 10111 10000 1111" // repeat across the block boundary
+	test1x("< 101 10111 10111 1111" // repeat across the block boundary
 	         "101 101 101 001 001 001 001 001 001 001 001 001 001 001 101 001 101 001 101"
-	         // key: 0000..1100 -> 0..11
-	         //      11010..11111 -> 12..19
+	         // key: 0000..1100 -> 0..12
+	         //      11010..11111 -> 13..18
 	         "0011" // sym 0 - length 3
 	         "0011" // sym 1 - length 3
-	         "0011" // sym 2 - length 3
-	         "11111 0100111" // sym 18 - 125 zeroes
-	         "11111 1010111" // sym 18 - 128 zeroes
+	         "0011" // sym 2 - length 3 (unused)
+	         "11111 0100111" // sym 3-127 - 125 zeroes
+	         "11111 1010111" // sym 128-255 - 128 zeroes
 	         "0011" // sym 256 - length 3
-	         "11111 1000100" // sym 18 - 29 zeroes
+	         "11111 1000100" // sym 257-284 - 28 zeroes
 	         "0001" // sym 285 - length 1
-	         "0001" // dist 1 - length 1
-	         "0001" // dist 2 - length 1
+	         "0001" // dist 0 - length 1
+	         "0010" // dist 1 - length 2
+	         "11111 0000100" // dist 2-28 - 27 zeroes
+	         "0010" // dist 29 - length 2
+	         
 	         
 	         "100" // byte 00
 	         "00" // sym 285 - repeat 258 bytes from 1 byte back
@@ -1155,10 +1183,11 @@ test("deflate decompression", "", "deflate")
 	         // total 32768 bytes written
 	         "100" // byte 00
 	         
-	         "01" // sym 285 - repeat 258 bytes from 2 bytes back
+	         "010" // sym 285 - repeat 258 bytes from 2 bytes back
+	         "011 1111111111111" // sym 285 - repeat 258 bytes from 32768 bytes back
 	         "111+"
 	       "> #32767 00 01"
-	       ">< 00 #129 0100"
+	       ">< 00 #129 0100 #258 00"
 	       );
 	
 	assert_all_reached();

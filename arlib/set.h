@@ -4,9 +4,13 @@
 #include "hash.h"
 #include "linqbase.h"
 #include "string.h"
+#include "stringconv.h"
 
 template<typename T>
 class set : public linqbase<set<T>> {
+	template<typename,typename>
+	friend class map;
+	
 	//this is a hashtable, using open addressing and linear probing
 	
 	enum { i_empty, i_deleted };
@@ -15,17 +19,42 @@ class set : public linqbase<set<T>> {
 	char tag(size_t id) const { return *(char*)(m_data+id); }
 	
 	T* m_data; // length is always same as m_valid, no need to duplicate its length
-	array<bool> m_valid;
-	size_t m_count;
+	bitarray m_valid;
+	size_t m_used_slots; // number of nodes in m_data that are not i_empty
+	size_t m_count; // number of nodes in m_data currently containing valid data
+	
+	// will spuriously fail during rehash
+	//void validate() const
+	//{
+	//	if (!m_data) return;
+	//	
+	//	size_t a = 0;
+	//	size_t b = 0;
+	//	size_t c = 0;
+	//	for (size_t n=0;n<m_valid.size();n++)
+	//	{
+	//		if (m_valid[n]) a++;
+	//		else if (tag(n) == i_empty) b++;
+	//		else c++;
+	//	}
+	//	size_t a2 = m_count;
+	//	size_t b2 = m_valid.size()-m_used_slots;
+	//	size_t c2 = m_used_slots-m_count;
+	//	if (a != a2 || b != b2 || c != c2)
+	//	{
+	//		printf("%lu,%lu %lu,%lu %lu,%lu\n", a,a2, b,b2, c,c2);
+	//		*(char*)1 = 1;
+	//	}
+	//}
 	
 	void rehash(size_t newsize)
 	{
-//debug("rehash pre");
 		T* prev_data = m_data;
-		array<bool> prev_valid = std::move(m_valid);
+		bitarray prev_valid = std::move(m_valid);
 		
 		m_data = xcalloc(newsize, sizeof(T));
-		m_valid.reset();
+		static_assert(sizeof(T) >= 1); // otherwise the tags mess up (zero-size objects are useless in sets, 
+		m_valid.reset();               // and I'm not sure if they're expressible in standard C++, but no reason not to check)
 		m_valid.resize(newsize);
 		
 		for (size_t i=0;i<prev_valid.size();i++)
@@ -38,18 +67,35 @@ class set : public linqbase<set<T>> {
 			m_valid[pos] = true;
 		}
 		free(prev_data);
-//debug("rehash post");
+		m_used_slots = m_count;
 	}
 	
 	void grow()
 	{
 		// half full -> rehash
-		if (m_count >= m_valid.size()/2) rehash(m_valid.size()*2);
+		if (m_count >= m_valid.size()/2)
+			rehash(m_valid.size()*2);
+		else if (m_used_slots >= m_valid.size()/4*3)
+			rehash(m_valid.size());
 	}
 	
 	bool slot_empty(size_t pos) const
 	{
 		return !m_valid[pos];
+	}
+	
+	template<typename T2>
+	static std::enable_if_t<!!sizeof(hash(std::declval<T2>())), size_t>
+	local_hash(const T2& item, int overload_resolut)
+	{
+		return hash(item);
+	}
+	
+	template<typename T2> // don't enable_if sizeof((T)declval<T2>()), check if that's legal breaks struct JSON { map<string,JSON> children; }
+	static std::enable_if_t<!std::is_same_v<T, T2>, size_t>
+	local_hash(const T2& item, float overload_resolut)
+	{
+		return hash((T)item);
 	}
 	
 	//If the object exists, returns the index where it can be found.
@@ -60,7 +106,7 @@ class set : public linqbase<set<T>> {
 	{
 		if (!m_data) return -1;
 		
-		size_t hashv = hash_shuffle(hash(item));
+		size_t hashv = hash_shuffle(local_hash<T2>(item, 0));
 		size_t i = 0;
 		
 		size_t emptyslot = -1;
@@ -70,7 +116,8 @@ class set : public linqbase<set<T>> {
 			//I could use hashv + i+(i+1)/2 <http://stackoverflow.com/a/15770445>
 			//but due to hash_shuffle, it hurts as much as it helps.
 			size_t pos = (hashv + i) & (m_valid.size()-1);
-			if (want_used && m_valid[pos] && m_data[pos] == item) return pos;
+			if (want_used && m_valid[pos] && m_data[pos] == item)
+				return pos;
 			if (!m_valid[pos])
 			{
 				if (emptyslot == (size_t)-1) emptyslot = pos;
@@ -81,11 +128,7 @@ class set : public linqbase<set<T>> {
 				}
 			}
 			i++;
-			if (i == m_valid.size())
-			{
-				//happens if all empty slots are i_deleted, no i_empty
-				return -1;
-			}
+//if(i > m_valid.size()) *(char*)1=1;
 		}
 	}
 	
@@ -98,18 +141,9 @@ class set : public linqbase<set<T>> {
 	template<typename T2>
 	size_t find_pos_insert(const T2& item)
 	{
-		size_t pos = find_pos_full<true>(item);
-		if (pos == (size_t)-1)
-		{
-			rehash(m_valid.size());
-			//after rehashing, there is always a suitable empty slot
-			return find_pos_full<true, false>(item);
-		}
-		return pos;
+		return find_pos_full<true>(item);
 	}
 	
-	template<typename,typename>
-	friend class map;
 	//used by map
 	//if the item doesn't exist, NULL
 	template<typename T2>
@@ -123,6 +157,9 @@ class set : public linqbase<set<T>> {
 	template<typename T2>
 	T& get_create(const T2& item, bool known_new = false)
 	{
+		if (!m_data)
+			rehash(m_valid.size());
+		
 		size_t pos = known_new ? -1 : find_pos_insert(item);
 		
 		if (pos == (size_t)-1 || !m_valid[pos])
@@ -131,6 +168,7 @@ class set : public linqbase<set<T>> {
 			pos = find_pos_insert(item); // recalculate this, grow() may have moved it
 			//do not move grow() earlier; it invalidates references, get_create(item_that_exists) is not allowed to do that
 			
+			if (tag(pos) == i_empty) m_used_slots++;
 			new(&m_data[pos]) T(item);
 			m_valid[pos] = true;
 			m_count++;
@@ -144,12 +182,14 @@ class set : public linqbase<set<T>> {
 		m_data = NULL;
 		m_valid.resize(8);
 		m_count = 0;
+		m_used_slots = 0;
 	}
 	void construct(const set& other)
 	{
 		m_data = xcalloc(other.m_valid.size(), sizeof(T));
 		m_valid = other.m_valid;
 		m_count = other.m_count;
+		m_used_slots = other.m_count;
 		
 		for (size_t i=0;i<m_valid.size();i++)
 		{
@@ -164,6 +204,7 @@ class set : public linqbase<set<T>> {
 		m_data = std::move(other.m_data);
 		m_valid = std::move(other.m_valid);
 		m_count = std::move(other.m_count);
+		m_used_slots = std::move(other.m_used_slots);
 		
 		other.construct();
 	}
@@ -178,6 +219,7 @@ class set : public linqbase<set<T>> {
 			}
 		}
 		m_count = 0;
+		m_used_slots = 0;
 		free(m_data);
 		m_valid.reset();
 	}
@@ -234,7 +276,7 @@ public:
 		void to_valid()
 		{
 			while (pos < parent->m_valid.size() && !parent->m_valid[pos]) pos++;
-			if (pos == parent->m_valid.size()) pos = -1;
+			if (pos >= parent->m_valid.size()) pos = -1; // can be > if m_valid shrank while the iterator exists
 		}
 		
 		iterator(const set<T>* parent, size_t pos) : parent(parent), pos(pos)
@@ -256,7 +298,7 @@ public:
 			return *this;
 		}
 		
-		bool operator!=(const iterator& other)
+		bool operator!=(const iterator& other) const
 		{
 			return (this->parent != other.parent || this->pos != other.pos);
 		}
@@ -265,10 +307,10 @@ public:
 	//messing with the set during iteration half-invalidates all iterators
 	//a half-invalid iterator may return values you've already seen and may skip values, but will not crash or loop forever
 	//exception: you may not dereference a half-invalid iterator, use operator++ first
-	//'for (T i : my_set) { my_set.remove(i); }' is safe, though it may not necessarily remove everything
+	//'for (T i : my_set) { my_set.remove(i); }' is safe, but is not guaranteed to remove everything
 	iterator begin() const { return iterator(this, 0); }
 	iterator end() const { return iterator(this, -1); }
-
+	
 //string debug_node(int n) { return tostring(n); }
 //string debug_node(string& n) { return n; }
 //template<typename T2> string debug_node(T2& n) { return "?"; }
@@ -323,7 +365,8 @@ public:
 		//node(node other) : key(other.key), value(other.value) {}
 		
 		size_t hash() const { return ::hash(key); }
-		bool operator==(const Tkey& other) { return key == other; }
+		template<typename T>
+		bool operator==(const T& other) { return key == other; }
 		bool operator==(const node& other) { return key == other.key; }
 	};
 private:
@@ -380,7 +423,7 @@ public:
 		else return def;
 	}
 	template<typename Tk2> // sizeof && because not using Tk2 is a hard error, not a SFINAE
-	std::enable_if_t<sizeof(Tk2) && std::is_same_v<Tvalue, string>, cstring>
+	std::enable_if_t<sizeof(Tk2) && std::is_same_v<Tvalue, string>, cstrnul>
 	get_or(const Tk2& key, const char * def) const
 	{
 		node* ret = items.get_or_null(key);
@@ -404,6 +447,14 @@ public:
 	Tvalue& get_create(const Tkey& key)
 	{
 		return items.get_create(key).value;
+	}
+	template<typename Tvc>
+	std::enable_if_t<std::is_invocable_r_v<Tvalue, Tvc>, Tvalue&>
+	get_create(const Tkey& key, Tvc&& cr)
+	{
+		node* ret = items.get_or_null(key);
+		if (ret) return ret->value;
+		else return items.get_create(node(key, cr()), true).value;
 	}
 	Tvalue& operator[](const Tkey& key) // C# does this better...
 	{
@@ -436,50 +487,60 @@ public:
 	
 private:
 	class iterator {
+		friend class map;
+		friend class iterwrap<iterator>;
 		typename set<node>::iterator it;
-	public:
 		iterator(typename set<node>::iterator it) : it(it) {}
 		
+	public:
 		node& operator*() { return const_cast<node&>(*it); }
 		iterator& operator++() { ++it; return *this; }
 		bool operator!=(const iterator& other) { return it != other.it; }
 	};
 	
 	class c_iterator {
+		friend class map;
+		friend class iterwrap<c_iterator>;
 		typename set<node>::iterator it;
-	public:
 		c_iterator(typename set<node>::iterator it) : it(it) {}
 		
+	public:
 		const node& operator*() { return *it; }
 		c_iterator& operator++() { ++it; return *this; }
 		bool operator!=(const c_iterator& other) { return it != other.it; }
 	};
 	
 	class k_iterator {
+		friend class map;
+		friend class iterwrap<k_iterator>;
 		typename set<node>::iterator it;
-	public:
 		k_iterator(typename set<node>::iterator it) : it(it) {}
 		
+	public:
 		const Tkey& operator*() { return (*it).key; }
 		k_iterator& operator++() { ++it; return *this; }
 		bool operator!=(const k_iterator& other) { return it != other.it; }
 	};
 	
 	class v_iterator {
+		friend class map;
+		friend class iterwrap<v_iterator>;
 		typename set<node>::iterator it;
-	public:
 		v_iterator(typename set<node>::iterator it) : it(it) {}
 		
+	public:
 		Tvalue& operator*() { return const_cast<Tvalue&>((*it).value); }
 		v_iterator& operator++() { ++it; return *this; }
 		bool operator!=(const v_iterator& other) { return it != other.it; }
 	};
 	
 	class cv_iterator {
+		friend class map;
+		friend class iterwrap<cv_iterator>;
 		typename set<node>::iterator it;
-	public:
 		cv_iterator(typename set<node>::iterator it) : it(it) {}
 		
+	public:
 		const Tvalue& operator*() { return (*it).value; }
 		cv_iterator& operator++() { ++it; return *this; }
 		bool operator!=(const cv_iterator& other) { return it != other.it; }

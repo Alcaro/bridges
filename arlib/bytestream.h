@@ -3,8 +3,8 @@
 #include "endian.h"
 #include "string.h"
 
-//you're welcome to extend this object if you need a more rare operation, like leb128
 //signature and u8_or check for overflow; for anything else, use remaining()
+//you're welcome to extend this object if you need a more rare operation, like leb128
 class bytestream {
 protected:
 	const uint8_t* start;
@@ -91,44 +91,22 @@ public:
 	forceinline uint32_t u64l() { return readu_le64(bytes(8).ptr()); }
 	forceinline uint32_t u64b() { return readu_be64(bytes(8).ptr()); }
 	
-	forceinline float f32l()
-	{
-		static_assert(sizeof(float) == 4);
-		uint32_t a = u32l();
-		float b;
-		memcpy(&b, &a, sizeof(float));
-		return b;
-	}
-	forceinline float f32b()
-	{
-		static_assert(sizeof(float) == 4);
-		uint32_t a = u32b();
-		float b;
-		memcpy(&b, &a, sizeof(float));
-		return b;
-	}
-	forceinline double f64l()
-	{
-		static_assert(sizeof(double) == 8);
-		uint64_t a = u64l();
-		double b;
-		memcpy(&b, &a, sizeof(double));
-		return b;
-	}
-	forceinline double f64b()
-	{
-		static_assert(sizeof(double) == 8);
-		uint64_t a = u64b();
-		double b;
-		memcpy(&b, &a, sizeof(double));
-		return b;
-	}
+	forceinline float f32l() { return readu_lef32(bytes(4).ptr()); }
+	forceinline float f32b() { return readu_bef32(bytes(4).ptr()); }
+	forceinline float f64l() { return readu_lef64(bytes(8).ptr()); }
+	forceinline float f64b() { return readu_bef64(bytes(8).ptr()); }
 	
 	forceinline cstring strnul()
 	{
 		const uint8_t * tmp = at;
 		while (*at) at++;
 		return cstring(arrayview<uint8_t>(tmp, (at++)-tmp));
+	}
+	forceinline const char * strnul_ptr()
+	{
+		const uint8_t * ret = at;
+		while (*at++) {}
+		return (char*)ret;
 	}
 	
 	forceinline size_t tell() { return at-start; }
@@ -138,8 +116,6 @@ public:
 	forceinline void seek(size_t pos) { at = start+pos; }
 	forceinline void skip(ssize_t off) { at += off; }
 	
-	forceinline uint32_t u32lat(size_t pos) { return readu_le32(start+pos); }
-	forceinline uint32_t u32bat(size_t pos) { return readu_be32(start+pos); }
 	forceinline arrayview<uint8_t> peek_at(size_t pos, size_t len) { return arrayview<uint8_t>(start+pos, len); }
 	
 	// for bytestream_dbg
@@ -212,7 +188,7 @@ protected:
 private:
 	void dump()
 	{
-		puts(log.substr(1,~0).c_str());
+		puts(log.substr_nul(1));
 		size_t rem = inner.remaining();
 		if (rem == 0) return;
 		else if (inner.remaining() < 64) puts(tostringhex_dbg(inner.bytes(rem)));
@@ -279,13 +255,12 @@ public:
 #endif
 
 
-// TODO: create a bytestream whose output size is known beforehand, so it doesn't malloc
-class bytestreamw {
+class bytestreamw_dyn {
 protected:
-	array<uint8_t> buf;
+	bytearray buf;
 	
 public:
-	void bytes(arrayview<uint8_t> data)
+	void bytes(bytesr data)
 	{
 		buf += data;
 	}
@@ -293,12 +268,26 @@ public:
 	{
 		buf += str.bytes();
 	}
+	void text(const char * str)
+	{
+		buf += bytesr((uint8_t*)str, strlen(str));
+	}
+	void strnul(cstring str)
+	{
+		buf += str.bytes();
+		u8(0);
+	}
+	void strnul(const char * str)
+	{
+		buf += bytesr((uint8_t*)str, strlen(str)+1);
+	}
 	template<typename... Ts>
 	void u8s(Ts... bs)
 	{
 		uint8_t raw[] = { (uint8_t)bs... };
 		bytes(raw);
 	}
+	
 	void u8(uint8_t val) { buf += arrayview<uint8_t>(&val, 1); }
 	void u16l(uint16_t val) { buf += pack_le16(val); }
 	void u16b(uint16_t val) { buf += pack_be16(val); }
@@ -307,39 +296,29 @@ public:
 	void u64l(uint64_t val) { buf += pack_le64(val); }
 	void u64b(uint64_t val) { buf += pack_be64(val); }
 	
+	class pointer {
+		bytearray* buf;
+		size_t pos;
+		friend class bytestreamw_dyn;
+		pointer(bytearray* buf, size_t pos) : buf(buf), pos(pos) {}
+	public:
+		void fill32l() { writeu_le32(buf->ptr()+pos, buf->size()); }
+		void fill32b() { writeu_be32(buf->ptr()+pos, buf->size()); }
+		void fill64l() { writeu_le64(buf->ptr()+pos, buf->size()); }
+		void fill64b() { writeu_be64(buf->ptr()+pos, buf->size()); }
+	};
+	pointer ptr32() { buf.resize(buf.size()+4); return pointer { &buf, buf.size()-4 }; }
+	pointer ptr64() { buf.resize(buf.size()+8); return pointer { &buf, buf.size()-8 }; }
+	
+	void f32l(float  val) { buf += pack_lef32(val); }
+	void f32b(float  val) { buf += pack_bef32(val); }
+	void f64l(double val) { buf += pack_lef64(val); }
+	void f64b(double val) { buf += pack_bef64(val); }
+	
 	void align8() {}
 	void align16() { buf.resize((buf.size()+1)&~1); }
 	void align32() { buf.resize((buf.size()+3)&~3); }
 	void align64() { buf.resize((buf.size()+7)&~7); }
-	
-	void f32l(float val)
-	{
-		static_assert(sizeof(float) == 4);
-		uint32_t ival;
-		memcpy(&ival, &val, sizeof(float));
-		u32l(ival);
-	}
-	void f32b(float val)
-	{
-		static_assert(sizeof(float) == 4);
-		uint32_t ival;
-		memcpy(&ival, &val, sizeof(float));
-		u32b(ival);
-	}
-	void f64l(double val)
-	{
-		static_assert(sizeof(double) == 8);
-		uint64_t ival;
-		memcpy(&ival, &val, sizeof(double));
-		u64l(ival);
-	}
-	void f64b(double val)
-	{
-		static_assert(sizeof(double) == 8);
-		uint64_t ival;
-		memcpy(&ival, &val, sizeof(double));
-		u64b(ival);
-	}
 	
 	arrayview<uint8_t> peek()
 	{
@@ -348,5 +327,82 @@ public:
 	array<uint8_t> finish()
 	{
 		return std::move(buf);
+	}
+};
+
+class bytestreamw {
+protected:
+	uint8_t* start;
+	uint8_t* at;
+	uint8_t* end;
+	
+public:
+	bytestreamw(bytesw by)
+	{
+		start = by.ptr();
+		at = by.ptr();
+		end = by.ptr() + by.size();
+	}
+	template<size_t N>
+	bytestreamw(uint8_t(&ptr)[N])
+	{
+		start = ptr;
+		at = ptr;
+		end = ptr + N;
+	}
+	forceinline void bytes(bytesr data)
+	{
+		memcpy(at, data.ptr(), data.size());
+		at += data.size();
+	}
+	forceinline void text(cstring str)
+	{
+		bytes(str.bytes());
+	}
+	forceinline void text(const char * str)
+	{
+		bytes(bytesr((uint8_t*)str, strlen(str)));
+	}
+	forceinline void strnul(cstring str)
+	{
+		bytes(str.bytes());
+		u8(0);
+	}
+	forceinline void strnul(const char * str)
+	{
+		bytes(bytesr((uint8_t*)str, strlen(str)+1));
+	}
+	template<typename... Ts>
+	forceinline void u8s(Ts... bs)
+	{
+		uint8_t raw[] = { (uint8_t)bs... };
+		bytes(raw);
+	}
+	
+	forceinline void u8(uint8_t val) { *at++ = val; }
+	forceinline void u16l(uint16_t val) { bytes(pack_le16(val)); }
+	forceinline void u16b(uint16_t val) { bytes(pack_be16(val)); }
+	forceinline void u32l(uint32_t val) { bytes(pack_le32(val)); }
+	forceinline void u32b(uint32_t val) { bytes(pack_be32(val)); }
+	forceinline void u64l(uint64_t val) { bytes(pack_le64(val)); }
+	forceinline void u64b(uint64_t val) { bytes(pack_be64(val)); }
+	
+	forceinline void f32l(float  val) { bytes(pack_lef32(val)); }
+	forceinline void f32b(float  val) { bytes(pack_bef32(val)); }
+	forceinline void f64l(double val) { bytes(pack_lef64(val)); }
+	forceinline void f64b(double val) { bytes(pack_bef64(val)); }
+	
+	forceinline size_t tell() { return at-start; }
+	forceinline size_t capacity() { return end-start; }
+	forceinline size_t remaining() { return end-at; }
+	
+	//void align8() {}
+	//void align16() { buf.resize((buf.size()+1)&~1); }
+	//void align32() { buf.resize((buf.size()+3)&~3); }
+	//void align64() { buf.resize((buf.size()+7)&~7); }
+	
+	forceinline arrayvieww<uint8_t> finish()
+	{
+		return bytesw(start, at-start);
 	}
 };

@@ -1,8 +1,8 @@
 #include "regex.h"
 
 #if __cplusplus > 201703
-#error "switch to string literal as template parameter, it's legal now"
-#error "add some concepts, for type checking; if it hurts performance, undo it"
+//#error "switch to string literal as template parameter, it's legal now"
+//#error "add some concepts, for type checking; if it hurts performance, undo it"
 #endif
 
 #ifdef ARLIB_TEST // discard this if not testing, for compile time reasons
@@ -106,6 +106,7 @@ test("regex", "string", "regex")
 	test1("((a)|(b)){2}", "ba", "ba", "a", "a", nullptr);
 	test1("((a)\\2|(b)\\3){2}", "aabb", "aabb", "bb", nullptr, "b");
 	test1("((a)\\2|(b)\\3){2}", "bbaa", "bbaa", "aa", "a", nullptr);
+	test1("^(a|ab)*$", "aabababaaaabab", "aabababaaaabab", "ab"); // matches only "aa" without $; unexpected, but every regex engine does that
 	
 	assert_eq((cstring)(REGEX("bc").search("abc")[0].start), "bc");
 	assert_eq(REGEX("f(oo)").replace("foofoobarfoo", "\\1"), "oooobaroo");
@@ -113,5 +114,7 @@ test("regex", "string", "regex")
 	assert_eq(cstring("foo bar baz").csplit(REGEX("\\b|a")).join(","), "foo, ,b,r, ,b,z");
 	assert_eq(cstring("foo bar baz").csplit<1>(REGEX(" |(?=\\n)")).join(","), "foo,bar baz");
 	assert_eq(cstring("foo\nbar baz").csplit<1>(REGEX(" |(?=\\n)")).join(","), "foo,\nbar baz");
+	assert_eq(cstring("").csplit<1>(REGEX("a")).size(), 1);
+	assert_eq(cstring("aabcaada").csplit(REGEX("a")).join(","), ",,bc,,d,");
 }
 #endif

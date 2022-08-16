@@ -237,7 +237,7 @@ bool try_add_island(int x, int y)
 			break;
 		case 6: // square, up left
 			//+ instead of || because otherwise it short-circuits and only creates L-shaped islands (| would work as well)
-			//rand()%100 to ensure it does create some L shapes - it's kinda silly to know that L shapes always have something in the hole
+			//rand(100) to ensure it does create some L shapes - it's kinda silly to know that L shapes always have something in the hole
 			(X(-1,0) + X(0,-1)) && rand(100)<75 && X(-1,-1);
 			break;
 		case 7: // square, up right

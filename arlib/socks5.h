@@ -1,38 +1,33 @@
 #pragma once
+#ifdef ARLIB_SOCKET
 #include "socket.h"
-#include "bytestream.h"
-#include "stringconv.h"
-
-struct socks5_par {
-	runloop* loop;
-	socket* to_proxy;
-	string target;
-	uint16_t port;
-};
-socket* wrap_socks5(const socks5_par& param);
 
 class socks5 {
 	string m_host;
 	uint16_t m_port;
 	
-public:
-	void configure(cstring host, int port, runloop* loop) {
-		//ignore runloop, but demand it because everything else does
-		m_host = host;
-		m_port = port;
-	}
-	bool configure(cstring hostport, runloop* loop) {
-		array<cstring> parts = hostport.csplit<1>(":");
-		m_host = parts[0];
-		if (parts.size() == 1) { m_port = 1080; return true; }
-		if (parts.size() != 2) return false;
-		if (!fromstring(parts[1], m_port)) return false;
-		return true;
-	}
+	async<autoptr<socket2>> create_inner(cstring domain, uint16_t port);
 	
+public:
+	// If host is empty, this connects to the target directly.
+	void configure(cstring host, uint16_t port = 1080) { m_host = host; m_port = port; }
+	
+	// These functions act identically to their counterparts in socket2::.
+	inline async<autoptr<socket2>> create(cstring domain, uint16_t port)
+	{
+		if (!m_host)
+			return socket2::create(domain, port);
+		return create_inner(domain, port);
+	}
 #ifdef ARLIB_SSL
-	socket* connect(bool ssl, cstring domain, int port, runloop* loop);
-#else
-	socket* connect(cstring domain, int port, runloop* loop);
+	inline async<autoptr<socket2>> create_ssl(cstrnul domain, uint16_t port)
+	{
+		co_return co_await socket2::wrap_ssl(co_await create(domain, port), domain);
+	}
 #endif
+	inline async<autoptr<socket2>> create_sslmaybe(bool ssl, cstrnul domain, uint16_t port)
+	{
+		co_return co_await socket2::wrap_sslmaybe(ssl, co_await create(domain, port), domain);
+	}
 };
+#endif

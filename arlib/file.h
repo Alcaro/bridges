@@ -2,6 +2,17 @@
 #include "global.h"
 #include "string.h"
 #include "array.h"
+#include "time.h"
+#ifdef __unix__
+#include <unistd.h>
+#include <sys/uio.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <dirent.h>
+#endif
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 // TODO: this class needs to be rewritten
 // commonly needed usecases, like file::readall, should not depend on unnecessary functionality, like seeking
@@ -19,6 +30,7 @@
 // read all should, as now, be a single function, but implemented in the backend
 //  since typical usecase is passing return value to e.g. JSON::parse, it should return normal array<uint8_t> or string
 // mmap shouldn't be in the file object either, but take a filename and return an arrayview(w)<uint8_t> child with a dtor
+//  mmap resizable 
 // read-and-lock should also be a function, also returning an arrayview<uint8_t> child with a dtor
 //  this one should also have a 'replace contents' member, initially writing to filename+".swptmp" (remember to fsync)
 //   the standard recommendation is using unique names; the advantage is no risk that two programs use the temp name simultaneously,
@@ -26,32 +38,195 @@
 //    such overlapping writes are unsafe anyways - if two programs simultaneously update a file using unique names,
 //     one will be reverted, after telling program it succeeded
 //   ideally, it'd be open(O_TMPFILE)+linkat(O_REPLACE), but kernel doesn't allow that
-//   alternatively ioctl(FISWAPRANGE) https://lwn.net/Articles/818977/
-//   for Windows, just go for ReplaceFile(), and don't even try to not create temp files (fsync() is FlushFileBuffers())
-// async can be ignored for now; it's rarely useful, async local file needs threads on linux, and async without coroutines is painful
+//   alternatively ioctl(FISWAPRANGE) https://lwn.net/Articles/818977/, except it was never merged
+//   for Windows, just go for ReplaceFile(), don't even try to not create temp files (fsync() is FlushFileBuffers())
+// async can be ignored for now; it's rarely useful, and async without coroutines is painful
 // the other four combinations belong in the file object; replace/append streaming is useful for logs
 //  they should use seek/read/size as primitives, not pread
+//
+// may also want some kind of resilient file object, guaranteeing complete write or rollback
+// unfortunately, guarantees about mmap (or even write) atomicity are rare or nonexistent
+//  other than rename-overwrite, which requires a poorly documented fsync dance before any atomicity guarantees exist,
+//   and does way more than it should
+//
+// http support should be deprecated, filesystem only
+
+#ifdef _WIN32
+struct iovec {
+	void* iov_base;
+	size_t iov_len;
+};
+typedef off64_t off_t;
+static_assert(sizeof(off_t) == 8);
+#endif
+
+template<typename T> class async;
 
 class file2 : nocopy {
-	file2() = delete;
-public:
-	//arrayview<uint8_t> readall()
-	//cstring readallt()
+#ifdef __unix__
+	typedef int fd_t;
+	static const constexpr fd_t null_fd = -1;
+	fd_t fd = -1;
+	void reset() { if (fd != null_fd) ::close(fd); fd = null_fd; }
+#endif
+#ifdef _WIN32
+	typedef HANDLE fd_t;
+#define null_fd INVALID_HANDLE_VALUE
+	fd_t fd = null_fd;
+	void reset() { if (fd != null_fd) CloseHandle(fd); fd = null_fd; }
+#endif
 	
-	class mmap_t : public arrayview<uint8_t>, nocopy {
-		friend class file2;
-		mmap_t(nullptr_t) : success(false) {}
-		mmap_t(const uint8_t * ptr, size_t count) : arrayview(ptr, count), success(true) {}
-		bool success;
-	public:
-		mmap_t(const mmap_t&) = delete;
-		mmap_t(mmap_t&& other) : arrayview(other) { other.items = nullptr; other.count = 0; }
-		operator bool() const { return success; }
-		~mmap_t();
+public:
+	enum mode {
+		m_read,
+		m_write,          // If the file exists, opens it. If it doesn't, creates a new file.
+		m_wr_existing,    // Fails if the file doesn't exist.
+		m_replace,        // If the file exists, it's either deleted and recreated, or truncated.
+		m_create_excl,    // Fails if the file does exist.
+		
+		m_exclusive = 8, // OR with any other mode. Tries to claim exclusive write access, or with m_read, simply deny all writers.
+		                 // The request may be bypassable, or not honored by default, on some OSes. However, if both processes use Arlib, the second one will be stopped.
 	};
 	
-	static mmap_t mmap(cstring filename);
-	//static mmapw_t mmapw(cstring filename);
+	class mmapw_t;
+	class mmap_t : public arrayview<uint8_t>, nocopy {
+		friend class file2;
+		friend class mmapw_t;
+		static void map(bytesr& by, file2& src, bool writable);
+		static void unmap(bytesr& by);
+		
+		void unmap() { unmap(*this); }
+		void move_from(bytesr& other) { arrayview::operator=(other); other = nullptr; }
+	public:
+		mmap_t() {}
+		mmap_t(mmap_t&& other) { move_from(other); }
+		mmap_t(mmapw_t&& other) { move_from(other); }
+		mmap_t& operator=(nullptr_t) { unmap(); return *this; }
+		mmap_t& operator=(mmap_t&& other) { unmap(); move_from(other); return *this; }
+		~mmap_t() { unmap(); }
+	};
+	class mmapw_t : public arrayvieww<uint8_t>, nocopy {
+		friend class file2;
+		void unmap() { mmap_t::unmap(*this); }
+		void move_from(bytesr& other) { arrayview::operator=(other); other = nullptr; }
+	public:
+		mmapw_t() {}
+		mmapw_t(mmapw_t&& other) { move_from(other); }
+		mmapw_t& operator=(nullptr_t) { unmap(); return *this; }
+		mmapw_t& operator=(mmapw_t&& other) { unmap(); move_from(other); return *this; }
+		~mmapw_t() { unmap(); }
+	};
+	
+	file2() {}
+	file2(file2&& f) { fd = f.fd; f.fd = null_fd; }
+	file2& operator=(file2&& f) { reset(); fd = f.fd; f.fd = null_fd; return *this; }
+	file2(cstrnul filename, mode m = m_read) { open(filename, m); }
+	~file2() { reset(); }
+	bool open(cstrnul filename, mode m = m_read);
+	void close() { reset(); }
+	operator bool() const { return fd != null_fd; }
+	
+	void create_usurp(fd_t fd) { reset(); this->fd = fd; }
+	fd_t peek_handle() { return this->fd; }
+	fd_t release_handle() { fd_t ret = this->fd; this->fd = null_fd; return ret; }
+	void create_dup(fd_t fd); // consider create_usurp() and release_handle(), if possible; they're faster
+	
+#ifndef __unix__
+	// All return number of bytes processed. 0 means both EOF and error, return can't be negative.
+	// Max size is 2**31-1 bytes, for both reads and writes.
+	size_t read(bytesw by);
+	size_t pread(off_t pos, bytesw by); // The p variants will not affect the current write pointer.
+	size_t write(bytesr by);
+	size_t pwrite(off_t pos, bytesr by);
+	size_t writev(arrayview<iovec> iov); // No readv, hard to know sizes before reading.
+	size_t pwritev(off_t pos, arrayview<iovec> iov);
+	// TODO: async read/write (io_uring or WriteFileEx), but as a separate class (windows needs FILE_FLAG_OVERLAPPED)
+	
+	size_t sector_size();
+	
+	off_t size(); // Will return zero for certain weird files, like /dev/urandom.
+	bool resize(off_t newsize); // May or may not seek to the file's new size.
+	void seek(off_t pos); // Seeking outside the file is not allowed.
+	off_t tell();
+	
+	timestamp time();
+	void set_time(timestamp t);
+#else
+	size_t read(bytesw by) { return max(::read(fd, by.ptr(), by.size()), 0); }
+	size_t pread(off_t pos, bytesw by) { return max(::pread(fd, by.ptr(), by.size(), pos), 0); }
+	size_t write(bytesr by) { return max(::write(fd, by.ptr(), by.size()), 0); }
+	size_t pwrite(off_t pos, bytesr by) { return max(::pwrite(fd, by.ptr(), by.size(), pos), 0); }
+	size_t writev(arrayview<iovec> iov) { return max(::writev(fd, iov.ptr(), iov.size()), 0); }
+	size_t pwritev(off_t pos, arrayview<iovec> iov) { return max(::pwritev(fd, iov.ptr(), iov.size(), pos), 0); }
+	
+	size_t sector_size() { struct stat st; fstat(fd, &st); return st.st_blksize; }
+	
+	off_t size() { struct stat st; fstat(fd, &st); return st.st_size; }
+	bool resize(off_t newsize) { return (ftruncate(fd, newsize) == 0); }
+	//void seek(off_t pos);
+	//off_t tell() { 
+	
+	timestamp time() { struct stat st; fstat(fd, &st); return timestamp::from_native(st.st_mtim); }
+	void set_time(timestamp t) { struct timespec times[] = { { 0, UTIME_OMIT }, t.to_native() }; futimens(fd, times); }
+#endif
+	
+	// mmap objects are not tied to the file object. You can keep using the mmap, unless you need the sync_map function.
+	// mmap() will always map the file, and will update if the file is written.
+	// If you don't care about concurrent writers, and the file is small, it may be faster to read into a normal malloc.
+	// As long as the file is mapped, it can't be resized.
+	mmap_t mmap() { return mmapw(false); }
+	static mmap_t mmap(cstrnul filename) { return file2(filename).mmap(); }
+	// If not writable, the compiler will let you write, but doing so will segfault at runtime.
+	mmapw_t mmapw(bool writable = true)
+	{
+		mmapw_t ret;
+		mmap_t::map(ret, *this, writable);
+		return ret;
+	}
+	static mmapw_t mmapw(cstrnul filename) { return file2(filename, m_wr_existing).mmapw(); }
+	
+	// Resizes the file, and its associated mmap object. Same as unmapping, resizing and remapping, but optimizes slightly better.
+	bool resize(off_t newsize, mmap_t& map) { return resize(newsize, (bytesr&)map, false); }
+	bool resize(off_t newsize, mmapw_t& map, bool writable = true) { return resize(newsize, (bytesr&)map, writable); }
+private:
+	bool resize(off_t newsize, bytesr& map, bool writable);
+public:
+	
+	// Flushes write() calls to disk. Normally done automatically after a second or so.
+#ifndef __unix__
+	void sync();
+#else
+	void sync() { fdatasync(fd); }
+#endif
+	
+	// Flushes the mapped bytes to disk. Input must be mapped from this file object.
+	// Would fit better directly on mmapw_t, but a full flush on Windows requires both FlushViewOfFile and FlushFileBuffers.
+#ifndef __unix__
+	void sync_map(const mmapw_t& map);
+#else
+	void sync_map(const mmapw_t& map) { msync((void*)map.ptr(), map.size(), MS_SYNC); }
+#endif
+#undef null_fd
+	
+	// Reads the entire file in a single function call.
+	// Max size is 16MB; for anything bigger, use mmap() or a file object.
+	static bytearray readall(cstrnul filename)
+	{
+		file2 f(filename);
+		if (!f)
+			return {};
+		size_t len = f.size();
+		if (len > 16*1024*1024)
+			return {};
+		bytearray ret;
+		ret.resize(len);
+		if (f.read(ret) != len)
+			return {};
+		return ret;
+	}
+	
+	// Like the above, but also accepts URIs (file, http or https).
+	static async<bytearray> readall_full(cstrnul path);
 };
 
 class file : nocopy {
@@ -280,7 +455,7 @@ private:
 			return true;
 		}
 		
-		arrayview<uint8_t>   mmap(size_t start, size_t len) { return datard.slice(start, len); }
+		arrayview<uint8_t>  mmap (size_t start, size_t len) { return datard.slice(start, len); }
 		arrayvieww<uint8_t> mmapw(size_t start, size_t len) { if (!datawr) return NULL; return datawr->slice(start, len); }
 		void  unmap(arrayview<uint8_t>  data) {}
 		bool unmapw(arrayvieww<uint8_t> data) { return true; }
@@ -315,7 +490,7 @@ public:
 	// Absolute paths start with two slashes, or letter+colon+slash.
 	// Half-absolute paths, like /foo.txt or C:foo.txt on Windows, are considered corrupt and are undefined behavior.
 	//The path component separator is the forward slash on all operating systems, including Windows.
-	//Paths to directories end with a slash, Paths to files do not. For example, /home/ and c:/windows/ are valid,
+	//Paths to directories end with a slash, paths to files do not. For example, /home/ and c:/windows/ are valid,
 	// but /home and c:/windows are not.
 	static bool is_absolute(cstring path)
 	{
@@ -338,15 +513,17 @@ public:
 	//Returns sub if it's absolute, else resolve(parent+sub). parent must end with a slash.
 	static string resolve(cstring parent, cstring sub)
 	{
-		if (is_absolute(sub)) return sub;
+		if (is_absolute(sub)) return resolve(sub);
 		else return resolve(parent+sub);
 	}
 	
-	//Returns the path of the executable, including filename.
-	//The cstring is owned by Arlib and lives forever.
+	//Returns the location of the currently executing code, whether that's EXE or DLL.
+	//May be blank if the path can't be determined. The cstring is owned by Arlib and lives forever.
 	static cstring exepath();
+	//Returns the directory of the above.
+	static cstring exedir();
 	//Returns the current working directory.
-	static cstring cwd();
+	static const string& cwd();
 	
 	static string realpath(cstring path) { return resolve(cwd(), path); }
 private:

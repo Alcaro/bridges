@@ -1,5 +1,6 @@
 #pragma once
 #include "global.h"
+#include "array.h"
 
 //Hash values are guaranteed stable within the process, but nothing else. Do not persist them outside the process.
 //They are allowed to change along with the build target, Arlib version, build time, kernel version, etc.
@@ -20,6 +21,37 @@ static inline size_t hash(const char * val)
 {
 	return hash((uint8_t*)val, strlen(val));
 }
+static inline size_t hash(const bytesr& val)
+{
+	return hash(val.ptr(), val.size());
+}
+static inline size_t hash(const bytesw& val)
+{
+	return hash(val.ptr(), val.size());
+}
+static inline size_t hash(const bytearray& val)
+{
+	return hash(val.ptr(), val.size());
+}
+
+template<typename T>
+class hashable_pointer {
+	T* ptr;
+public:
+	hashable_pointer() = default;
+	hashable_pointer(T* ptr) : ptr(ptr) {}
+	T* operator->() { return ptr; }
+	T& operator*() { return *ptr; }
+	const T* operator->() const { return ptr; }
+	const T& operator*() const { return *ptr; }
+	operator T*() { return ptr; }
+	operator const T*() const { return ptr; }
+	explicit operator bool() const { return ptr; }
+	size_t hash() const { return (uintptr_t)ptr; }
+	bool operator==(const hashable_pointer& other) const { return ptr == other.ptr; }
+	bool operator==(T* other) const { return ptr == other; }
+};
+
 
 
 //implementation from https://stackoverflow.com/a/263416
@@ -47,6 +79,7 @@ inline uint32_t hash_shuffle(uint32_t val)
 inline uint64_t hash_shuffle(uint64_t val)
 {
 	//http://zimbry.blogspot.se/2011/09/better-bit-mixing-improving-on.html Mix13
+	// update staticmap.cpp if changing this
 	val ^= val >> 30;
 	val *= 0xbf58476d1ce4e5b9;
 	val ^= val >> 27;

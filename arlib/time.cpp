@@ -1,5 +1,5 @@
 #include "os.h"
-#include "test.h"
+#include "time.h"
 
 // Returns a*b/c, but gives the correct answer if a*b doesn't fit in uint64_t.
 // (May give wrong answer if a*b/c doesn't fit, or if b*c > UINT64_MAX.)
@@ -8,7 +8,7 @@ inline uint64_t muldiv64(uint64_t a, uint64_t b, uint64_t c)
 #ifdef __x86_64__
 	uint64_t out;
 	uint64_t clobber;
-	asm("imul %2\nidiv %3" : "=a"(out), "=d"(clobber) : "r"(b), "r"(c), "a"(a), "d"(0));
+	__asm__("imul %2\nidiv %3" : "=a"(out), "=d"(clobber) : "r"(b), "r"(c), "a"(a), "d"(0));
 	return out;
 #else
 	// doing it in __int128 would be easier, but that ends up calling __udivti3 which is a waste of time.
@@ -46,6 +46,37 @@ uint64_t time_ms()
 {
 	return time_us() / 1000;
 }
+
+#define WINDOWS_TICK 10000000
+#define SEC_TO_UNIX_EPOCH 11644473600LL
+
+timestamp timestamp::from_native(FILETIME time)
+{
+	int64_t tmp = ((uint64_t)time.dwHighDateTime << 32) | time.dwLowDateTime;
+	
+	timestamp ret;
+	ret.sec = tmp / WINDOWS_TICK - SEC_TO_UNIX_EPOCH;
+	ret.nsec = tmp % WINDOWS_TICK * (1000000000/WINDOWS_TICK);
+	return ret;
+}
+
+FILETIME timestamp::to_native() const
+{
+	int64_t tmp = (sec + SEC_TO_UNIX_EPOCH) * WINDOWS_TICK + nsec / (1000000000/WINDOWS_TICK);
+	
+	FILETIME ret;
+	ret.dwLowDateTime = tmp & 0xFFFFFFFF;
+	ret.dwHighDateTime = tmp>>32;
+	return ret;
+}
+
+timestamp timestamp::now()
+{
+	// this one has an accuracy of 10ms by default
+	FILETIME ft;
+	GetSystemTimeAsFileTime(&ft);
+	return from_native(ft);
+}
 #else
 #include <time.h>
 #include <unistd.h>
@@ -79,8 +110,8 @@ uint64_t time_ms()
 uint64_t time_us_ne()
 {
 	struct timespec tp;
-	clock_gettime(CLOCK_MONOTONIC, &tp); // CLOCK_MONOTONIC_RAW makes more sense, but MONOTONIC uses vdso and skips the syscall
-	return (uint64_t)tp.tv_sec*(uint64_t)1000000 + div1000(tp.tv_nsec);
+	clock_gettime(CLOCK_MONOTONIC, &tp); // CLOCK_MONOTONIC_RAW makes more sense per docs, but just about everything recommends MONOTONIC
+	return (uint64_t)tp.tv_sec*(uint64_t)1000000 + div1000(tp.tv_nsec); // even vdso - it implements MONOTONIC, but not M_RAW
 }
 uint64_t time_ms_ne()
 {
@@ -126,6 +157,8 @@ time_t timegm(struct tm * t)
 }
 #endif
 
+#include "test.h"
+
 test("time", "", "time")
 {
 	uint64_t time_u_ft = (uint64_t)time(NULL)*1000000;
@@ -136,7 +169,7 @@ test("time", "", "time")
 	
 	uint64_t time_une_fm = time_ms_ne()*1000;
 	uint64_t time_une_fu = time_us_ne();
-	assert_range(time_une_fu, time_une_fm-1100,    time_une_fm+1500);
+	assert_range(time_une_fu, time_une_fm-1100, time_une_fm+1500);
 	
 #ifdef _WIN32
 	Sleep(50);
@@ -152,7 +185,7 @@ test("time", "", "time")
 	
 	uint64_t time2_une_fm = time_ms_ne()*1000;
 	uint64_t time2_une_fu = time_us_ne();
-	assert_range(time2_une_fu, time2_une_fm-1100,    time2_une_fm+1500);
+	assert_range(time2_une_fu, time2_une_fm-1100, time2_une_fm+1500);
 	
 #ifndef _WIN32
 	assert_range(time2_u_fm-time_u_fm, 40000, 60000);

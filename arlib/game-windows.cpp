@@ -1,11 +1,13 @@
 #if defined(ARLIB_GAME) && defined(_WIN32)
 #include "game.h"
-#include "runloop.h"
+#include "runloop2.h"
 #include <windowsx.h> // GET_X_LPARAM isn't in the usual header
 
 #define WS_BASE WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX // okay microsoft, did I miss anything?
 #define WS_RESIZABLE (WS_BASE|WS_MAXIMIZEBOX|WS_THICKFRAME)
 #define WS_NONRESIZ (WS_BASE|WS_BORDER)
+
+extern const IMAGE_DOS_HEADER __ImageBase;
 
 class gameview_windows : public gameview {
 public:
@@ -22,8 +24,7 @@ gameview_windows(uint32_t width, uint32_t height, cstring windowtitle, uintptr_t
 	wc.lpfnWndProc = DefWindowProc;
 	wc.cbClsExtra = 0;
 	wc.cbWndExtra = 0;
-	GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-	                   (LPCSTR)(void*)s_WindowProc, &wc.hInstance); // gameview shouldn't be used from a dll path, but why not
+	wc.hInstance = (HMODULE)&__ImageBase; // gameview shouldn't be used from a dll path, but why not
 	wc.hIcon = LoadIcon(wc.hInstance, MAKEINTRESOURCE(0));
 	wc.hCursor = LoadCursor(NULL, IDC_ARROW);
 	wc.hbrBackground = GetSysColorBrush(COLOR_3DFACE);
@@ -208,7 +209,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 
 
-/*public*/ void tmp_step(bool wait) { runloop::global()->step(wait); }
+/*public*/ void step(bool wait) { runloop2::step(wait); }
 
 };
 

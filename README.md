@@ -7,7 +7,7 @@ Enhanced remake of http://www.notdoppler.com/kingofbridges.php
 ## Compilation - Linux (Debian/Ubuntu)
 
 ```
-sudo apt-get install build-essential g++ libx11-dev mesa-common-dev python3
+sudo apt-get install make libx11-dev mesa-common-dev python3
 # (not sure if the above is complete)
 git clone
 make OPT=1

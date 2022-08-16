@@ -11,7 +11,8 @@ class zip : nocopy {
 	centdirrec* getcdr(arrayview<uint8_t> data, endofcdr* end);
 	centdirrec* nextcdr(arrayview<uint8_t> data, centdirrec* cdr);
 	locfhead* geth(arrayview<uint8_t> data, centdirrec* cdr);
-	arrayview<uint8_t> fh_fname(arrayview<uint8_t> data, locfhead* fh);
+	string fh_fname(arrayview<uint8_t> data, locfhead* fh, centdirrec* cdr);
+	arrayview<uint8_t> fh_extra(arrayview<uint8_t> data, locfhead* fh, centdirrec* cdr);
 	arrayview<uint8_t> fh_data(arrayview<uint8_t> data, locfhead* fh, centdirrec* cdr);
 	
 	array<string> filenames;
@@ -95,7 +96,7 @@ public:
 	void sort(); // Sorts the internal files alphabetically.
 	void repack(); // Decompresses all files, then recompresses them. Keeps whichever version is smaller.
 	
-	//Deletes __MACOSX folders and other OS caches. Returns whether it did anything.
+	//Deletes __MACOSX, .DS_Store, Thumbs.db, and other displeasing OS metadata. Returns whether it did anything.
 	bool clean();
 	
 private:

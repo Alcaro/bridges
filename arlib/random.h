@@ -3,24 +3,23 @@
 #ifdef __linux__
 #include <unistd.h>
 #endif
-#if defined(_WIN32) && _WIN32_WINNT >= _WIN32_WINNT_WIN7
-#include <windows.h>
-#include <bcrypt.h>
-#endif
-#if defined(_WIN32) && _WIN32_WINNT < _WIN32_WINNT_WIN7
-#include <wincrypt.h>
-extern HCRYPTPROV rand_seed_prov;
+
+#if defined(_WIN32)
+#include <windows.h> // ntsecapi.h doesn't include its dependencies properly
+#include <ntsecapi.h>
 #endif
 
-// Max size is 256. Despite the return value, it always succeeds.
+// Yields cryptographically secure random numbers. Max size is 256. Despite the return value, it always succeeds.
 static bool rand_secure(void* out, size_t n)
 {
 #if defined(__linux__)
-	return getentropy(out, n) == 0; // can't fail unless kernel < 3.17 (oct 2014), bad pointer, size > 256, or malicious seccomp/ptrace
-#elif defined(_WIN32) && _WIN32_WINNT >= _WIN32_WINNT_WIN7
-	return BCryptGenRandom(nullptr, (uint8_t*)out, n, BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0;
-#elif defined(_WIN32) && _WIN32_WINNT < _WIN32_WINNT_WIN7
-	return CryptGenRandom(rand_seed_prov, n, (uint8_t*)out);
+	return getentropy(out, n) == 0; // can't fail unless kernel < 3.17 (oct 2014), bad pointer, size > 256, or strange seccomp/ptrace/etc
+#elif defined(_WIN32)
+	// documented on msdn as having no import library, but works in mingw (other than the WINAPI goof)
+	// msdn doesn't claim it's cryptographically secure, but everything else that talks about it treats it as such
+	// msdn also says I should use CryptGenRandom, but that requires creating a random number provider and offers no clear benefits
+	// BCryptGenRandom exists, but doesn't help until 7+, is in a rarer DLL than RtlGenRandom, and offers no clear benefits either
+	return RtlGenRandom(out, n);
 #else
 	#error unsupported
 #endif
@@ -32,8 +31,9 @@ class random_base_t : nocopy {
 protected:
 	uint64_t state;
 public:
+	// CSPRNG is overkill, but the alternative is time, which has a few drawbacks of its own. Better overkill than underkill.
 	void seed() { rand_secure(&state, sizeof(state)); }
-	void seed(uint64_t num) { state = num; rand32(); }
+	void seed(uint64_t num) { state = num; rand32(); } // discard first output, otherwise seed(1) would return 1 as next output
 	
 	uint32_t rand32();
 	uint64_t rand64();
@@ -50,4 +50,8 @@ public:
 	random_t() { seed(); }
 	random_t(uint64_t num) { seed(num); } // Not recommended unless you need predictable output.
 };
+#ifdef ARLIB_THREAD
 extern random_base_t<true> g_rand; // g_rand is thread safe, random_t is not
+#else
+extern random_base_t<false> g_rand;
+#endif

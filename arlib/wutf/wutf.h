@@ -103,19 +103,12 @@ extern "C" {
 
 #ifdef _WIN32
 //Main function; this one does the actual magic. Call this as early as possible.
-//If you're using WuTF as part of Arlib, there's no need to call this manually; arlib_init() does it already.
 void WuTF_enable();
 
 //Converts argc/argv to UTF-8. Uses only documented functions, so it has zero chance of blowing up.
 //Doesn't depend on WuTF itself. It works whether you call WuTF_enable() earlier, later, or not at all.
 //However, it does leak memory, so don't call it more than once. (The leaks are cleaned up on process exit anyways.)
 void WuTF_args(int* argc, char** * argv);
-
-//DO NOT USE THIS UNLESS YOU'RE INSANE
-//This replaces the 'victim' function such that all calls instead go to 'replacement'.
-//Make sure their signatures, including calling convention, are identical.
-typedef void(*WuTF_funcptr)();
-void WuTF_redirect_function(WuTF_funcptr victim, WuTF_funcptr replacement);
 
 #else
 //Other OSes already use UTF-8.
@@ -124,7 +117,7 @@ static inline void WuTF_args(int* argc, char** * argv) {}
 #endif
 
 //This one just combines the above.
-static inline void WuTF_enable_args(int* argc, char** * argv) { WuTF_enable(); WuTF_args(argc, argv); }
+static inline void WuTF_enable_args(int * argc, char** * argv) { WuTF_enable(); WuTF_args(argc, argv); }
 
 
 //Lengths are in code units, and include the NUL terminator.
@@ -141,16 +134,13 @@ static inline void WuTF_enable_args(int* argc, char** * argv) { WuTF_enable(); W
 
 #define WUTF_TRUNCATE 0x04 // If the output string doesn't fit, truncate it. Without this flag, truncation yields WUTF_E_TRUNCATE.
 
-#define WUTF_CESU8 0x08 // If the input UTF-8 contains paired UTF-16 surrogates, decode it to a single codepoint. utf8_to only.
+#define WUTF_CESU8 0x08 // If the input UTF-8 contains paired UTF-16 surrogates, decode it to a single codepoint. utf8_to_utf16 only.
 #define WUTF_WTF8  0x10 // If the input contains unpaired UTF-16 surrogates, treat as normal codepoints. Incompatible with INVALID_DCXX.
 
 #define WUTF_E_TRUNCATE -2
 #define WUTF_E_INVALID -1
 
-int WuTF_utf8_to_utf32(int flags, const char* utf8, int utf8_len, uint32_t* utf32, int utf32_len);
-int WuTF_utf32_to_utf8(int flags, const uint32_t* utf32, int utf32_len, char* utf8, int utf8_len);
-
-//Used internally in WuTF. It's STRONGLY RECOMMENDED to not use these; use UTF-32 instead.
+// Used internally in WuTF. Probably shouldn't use them directly.
 int WuTF_utf8_to_utf16(int flags, const char* utf8, int utf8_len, uint16_t* utf16, int utf16_len);
 int WuTF_utf16_to_utf8(int flags, const uint16_t* utf16, int utf16_len, char* utf8, int utf8_len);
 

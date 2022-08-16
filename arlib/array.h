@@ -121,36 +121,38 @@ public:
 	
 	template<typename T2> inline array<T2> cast() const;
 	
-	size_t find(const T& item) const
+private:
+	const T* find_inner(const T& item) const
 	{
+		if constexpr (std::is_same_v<T, char> || std::is_same_v<T, int8_t> || std::is_same_v<T, uint8_t>)
+		{
+			uint8_t* buf = (uint8_t*)this->items;
+			return (T*)memchr(buf, (uint8_t)item, this->count);
+		}
 		for (size_t n=0;n<this->count;n++)
 		{
-			if (this->items[n] == item) return n;
+			if (this->items[n] == item) return &this->items[n];
 		}
-		return -1;
+		return nullptr;
+	}
+public:
+	size_t find(const T& item) const
+	{
+		const T * found = find_inner(item);
+		if (found) return found - this->items;
+		else return -1;
 	}
 	bool contains(const T& item) const
 	{
-		return find(item) != (size_t)-1;
+		return find_inner(item) != nullptr;
 	}
-	
-	//arrayview(const arrayview<T>& other)
-	//{
-	//	clone(other);
-	//}
-	
-	//arrayview<T> operator=(const arrayview<T>& other)
-	//{
-	//	clone(other);
-	//	return *this;
-	//}
 	
 	bool operator==(arrayview<T> other) const
 	{
 		if (size() != other.size()) return false;
 		if (this->trivial_comp())
 		{
-			return memcmp(ptr(), other.ptr(), sizeof(T)*size())==0;
+			return memeq(ptr(), other.ptr(), sizeof(T)*size());
 		}
 		else
 		{
@@ -229,6 +231,8 @@ public:
 		return *this;
 	}
 	
+	arrayview<T> slice(size_t first, size_t count) const { return arrayview<T>(this->items+first, count); }
+	arrayview<T> skip(size_t n) const { return slice(n, this->count-n); }
 	arrayvieww<T> slice(size_t first, size_t count) { return arrayvieww<T>(this->items+first, count); }
 	arrayvieww<T> skip(size_t n) { return slice(n, this->count-n); }
 	
@@ -242,16 +246,17 @@ public:
 		memcpy((void*)(this->items+b), tmp, sizeof(T));
 	}
 	
-	//unstable sort - default because equivalent-but-nonidentical states are rare
+	//unstable sort - default because equivalent but nonidentical states are rare
 	template<typename Tless>
 	void sort(const Tless& less)
 	{
-		//TODO: less lazy
+		// TODO: less lazy
 		ssort(less);
 	}
 	
 	void sort()
 	{
+		// TODO: if integer, use radix sort
 		sort([](const T& a, const T& b) { return a < b; });
 	}
 	
@@ -260,7 +265,8 @@ public:
 	template<typename Tless>
 	void ssort(const Tless& less)
 	{
-		//insertion sort
+		// insertion sort; not the fastest, but it's adaptive, it's simple, and its constant factors are good
+		// no real point upgrading to something faster, stable sort is rare
 		for (size_t a=1;a<this->count;a++)
 		{
 			if (!less(this->items[a], this->items[a-1]))
@@ -547,7 +553,7 @@ public:
 	
 	array<T>& operator+=(arrayview<T> other)
 	{
-		size_t prevcount = this->count;
+		size_t prevcount = this->size();
 		size_t othercount = other.size();
 		
 		const T* src;
@@ -663,14 +669,102 @@ public:
 };
 
 
-template<> class array<bool> {
-protected:
-	//extra variable to silence a warning
-	//  division 'sizeof (uint8_t* {aka unsigned char*}) / sizeof (uint8_t {aka unsigned char})'
-	//  does not compute the number of array elements [-Wsizeof-pointer-div]
-	static const size_t ptr_size = sizeof(uint8_t*);
-	static const size_t n_inline = ptr_size/sizeof(uint8_t)*8;
+//A refarray acts mostly like a normal array. The difference is that it stores pointers rather than the elements themselves;
+//as such, you can't cast to arrayview or pointer, but you can keep pointers or references to the elements, or insert something virtual.
+template<typename T> class refarray {
+	array<autoptr<T>> items;
+public:
+	explicit operator bool() const { return (bool)items; }
+	T& operator[](size_t n) { return *items[n]; }
+	template<typename... Ts>
+	T& append(Ts... args)
+	{
+		T* ret = new T(std::move(args)...);
+		items.append(ret);
+		return *ret;
+	}
+	void append_take(T& item) { items.append(&item); }
+	void append_take(T* item) { items.append(item); }
+	void append_take(autoptr<T> item) { items.append(std::move(item)); }
+	void remove(size_t index) { items.remove(index); }
+	void reset() { items.reset(); }
+	size_t size() { return items.size(); }
 	
+private:
+	class enumerator {
+		autoptr<T>* ptr;
+	public:
+		enumerator(autoptr<T>* ptr) : ptr(ptr) {}
+		
+		T& operator*() { return **ptr; }
+		enumerator& operator++() { ++ptr; return *this; }
+		bool operator!=(const enumerator& other) { return ptr != other.ptr; }
+	};
+public:
+	enumerator begin() { return enumerator(items.ptr()); }
+	enumerator end() { return enumerator(items.ptr() + items.size()); }
+};
+
+
+template<typename T>
+class fifo {
+	T* items = nullptr;
+	size_t capacity = 0;
+	size_t rd = 0;
+	size_t wr = 0;
+public:
+	fifo() = default;
+	fifo(const fifo&) = delete;
+	void push(T item)
+	{
+		if (wr == capacity)
+		{
+			if (rd <= capacity/2)
+			{
+				if (capacity == 0)
+					capacity = 8;
+				else
+					capacity *= 2;
+				items = xrealloc(items, sizeof(T)*capacity);
+			}
+			for (size_t n=0;n<rd;n++)
+				items[n].~T();
+			memmove(items, items+rd, sizeof(T)*(wr-rd));
+			wr -= rd;
+			rd = 0;
+		}
+		new(&items[wr]) T(std::move(item));
+		wr++;
+	}
+	// The popped ref is valid until 
+	T& pop_ref()
+	{
+		return items[rd++];
+	}
+	T pop()
+	{
+		return std::move(pop_ref());
+	}
+	bool empty()
+	{
+		return rd == wr;
+	}
+	~fifo()
+	{
+		for (size_t n=0;n<wr;n++)
+			items[n].~T();
+		free(items);
+	}
+};
+
+
+// bitarray - somewhat like array<bool>, but stores eight bits per byte, not one.
+// Also contains small string optimization, won't allocate until sizeof(uint8_t*)*8.
+class bitarray {
+protected:
+	static const size_t n_inline = 8*sizeof(uint8_t*)/sizeof(uint8_t); // rearranging this may provoke -Wsizeof-pointer-div
+	
+	// unused but allocated bits must, at all points, be clear
 	union {
 		uint8_t bits_inline[n_inline/8];
 		uint8_t* bits_outline;
@@ -689,14 +783,14 @@ protected:
 	}
 	
 	class entry {
-		array<bool>& parent;
+		bitarray& parent;
 		size_t index;
 		
 	public:
 		operator bool() const { return parent.get(index); }
 		entry& operator=(bool val) { parent.set(index, val); return *this; }
 		
-		entry(array<bool>& parent, size_t index) : parent(parent), index(index) {}
+		entry(bitarray& parent, size_t index) : parent(parent), index(index) {}
 	};
 	friend class entry;
 	
@@ -706,8 +800,8 @@ protected:
 		// neither GCC nor Clang can emit bt with a memory operand (and, oddly enough, GCC only emits bt reg,reg on -O2, not -Os)
 		// bt can accept integer arguments, but the assembler errors out if the argument is >= 256,
 		//  and silently emits wrong machine code for arguments >= operand size
-		// bt docs say operation is same as the C version, except it's implementation defined whether it uses u8, u16 or u32
-		// but our buffer is power of two sized, so that's fine
+		// bt docs say operation is same as the C version, except it's implementation defined whether it uses u8, u16 or u32 units
+		// but our buffer size is always a multiple of 4, so that's fine
 		bool ret;
 		__asm__("bt {%2,%1|%1,%2}" : "=@ccc"(ret) : "m"(*(const uint8_t(*)[])bits()), "r"(n) : "cc");
 		return ret;
@@ -736,7 +830,7 @@ protected:
 #endif
 	
 	//does not resize
-	void set_slice(size_t start, size_t num, const array<bool>& other, size_t other_start);
+	void set_slice(size_t start, size_t num, const bitarray& other, size_t other_start);
 	void clear_unused(size_t start, size_t nbytes);
 	
 	size_t alloc_size(size_t len)
@@ -774,7 +868,7 @@ public:
 		set(this->nbits-1, item);
 	}
 	
-	array<bool> slice(size_t first, size_t count) const;
+	bitarray slice(size_t first, size_t count) const;
 	
 private:
 	void destruct()
@@ -786,7 +880,7 @@ private:
 		this->nbits = 0;
 		memset(bits_inline, 0, sizeof(bits_inline));
 	}
-	void construct(const array<bool>& other)
+	void construct(const bitarray& other)
 	{
 		nbits = other.nbits;
 		if (nbits > n_inline)
@@ -800,27 +894,26 @@ private:
 			memcpy(bits_inline, other.bits_inline, sizeof(bits_inline));
 		}
 	}
-	void construct(array<bool>&& other)
+	void construct(bitarray&& other)
 	{
 		memcpy((void*)this, (void*)&other, sizeof(*this));
-		other.nbits = 0;
-		memset(other.bits_inline, 0, sizeof(other.bits_inline));
+		other.construct();
 	}
 public:
 	
-	array() { construct(); }
-	array(const array<bool>& other) { construct(other); }
-	array(array<bool>&& other) { construct(std::move(other)); }
-	~array() { destruct(); }
+	bitarray() { construct(); }
+	bitarray(const bitarray& other) { construct(other); }
+	bitarray(bitarray&& other) { construct(std::move(other)); }
+	~bitarray() { destruct(); }
 	
-	array& operator=(const array<bool>& other)
+	bitarray& operator=(const bitarray& other)
 	{
 		destruct();
 		construct(other);
 		return *this;
 	}
 	
-	array& operator=(array<bool>&& other)
+	bitarray& operator=(bitarray&& other)
 	{
 		destruct();
 		construct(std::move(other));
@@ -830,42 +923,6 @@ public:
 	explicit operator bool() { return size(); }
 };
 
-
-//A refarray acts mostly like a normal array. The difference is that it stores pointers rather than the elements themselves;
-//as such, you can't cast to arrayview or pointer, but you can keep pointers or references to the elements, or insert something virtual.
-template<typename T> class refarray {
-	array<autoptr<T>> items;
-public:
-	explicit operator bool() const { return (bool)items; }
-	T& operator[](size_t n) { return *items[n]; }
-	template<typename... Ts>
-	T& append(Ts... args)
-	{
-		T* ret = new T(std::move(args)...);
-		items.append(ret);
-		return *ret;
-	}
-	void append_take(T& item) { items.append(&item); }
-	void append_take(T* item) { items.append(item); }
-	void append_take(autoptr<T> item) { items.append(std::move(item)); }
-	void remove(size_t index) { items.remove(index); }
-	void reset() { items.reset(); }
-	size_t size() { return items.size(); }
-	
-private:
-	class enumerator {
-		autoptr<T>* ptr;
-	public:
-		enumerator(autoptr<T>* ptr) : ptr(ptr) {}
-		
-		T& operator*() { return **ptr; }
-		enumerator& operator++() { ++ptr; return *this; }
-		bool operator!=(const enumerator& other) { return ptr != other.ptr; }
-	};
-public:
-	enumerator begin() { return enumerator(items.ptr()); }
-	enumerator end() { return enumerator(items.ptr() + items.size()); }
-};
 
 #define X(T) COMMON_INST(array<T>);
 ALLINTS(X)

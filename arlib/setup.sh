@@ -1,12 +1,13 @@
 #!/bin/bash
 [ -e Makefile ] && echo 'Already configured' && exit
 
-[ -e arlib ] || ln -s $(dirname $0) .
+[ -e arlib ] || ln -s $(readlink -f $(dirname $0)) .
 
 program=$1
 [[ -z $program ]] && program=$(basename $(pwd))
 
 mkdir obj
+echo Signature: 8a477f597d28d172789f06886806bc55 > obj/CACHEDIR.TAG
 
 cat > arlib.h <<EOF
 #pragma once
@@ -26,7 +27,7 @@ cat > main.cpp <<EOF
 
 int main(int argc, char** argv)
 {
-	arlib_init(nullptr, argv);
+	puts("Hello world");
 	return 0;
 }
 EOF
@@ -38,6 +39,8 @@ cat > .gitignore <<-EOF
 EOF
 
 cat > Makefile <<-EOF
+	include arlib/Makefile-head
+	
 	PROGRAM = $program
 	ARTYPE = exe
 	ARGUI = 0
@@ -48,7 +51,7 @@ cat > Makefile <<-EOF
 	ARSOCKET = 0
 	ARSOCKET_SSL = openssl
 	ARSOCKET_SSL_WINDOWS = schannel
-	ARSANDBOX = 0
+	ARTERMINAL = 1
 	
 	include arlib/Makefile
 EOF

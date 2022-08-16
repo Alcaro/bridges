@@ -126,7 +126,7 @@ again:
 	return path;
 }
 
-#ifdef ARGUI_NONE
+//#ifndef ARLIB_GUI
 file::impl* file::open_impl(cstring filename, mode m)
 {
 	return open_impl_fs(filename, m);
@@ -141,7 +141,15 @@ bool file::mkdir(cstring filename)
 {
 	return mkdir_fs(filename);
 }
-#endif
+//#endif
+
+bool file2::resize(off_t newsize, bytesr& map, bool writable)
+{
+	mmap_t::unmap(map);
+	if (!resize(newsize)) return false;
+	mmap_t::map(map, *this, writable);
+	return (map.size() != 0);
+}
 
 
 #ifdef ARLIB_TEST
@@ -377,13 +385,21 @@ test("file::change_ext", "array,string", "")
 	assert_eq(file::change_ext("baz.bin", ""), "baz");
 }
 
+test("file::basename", "array,string", "")
+{
+	assert_eq(file::basename("/foo.bar/bar/baz.bin"), "baz.bin");
+	assert_eq(file::basename("bar/baz.bin"), "baz.bin");
+	assert_eq(file::basename("baz.bin"), "baz.bin");
+	assert_eq(file::basename("/foo.bar/bar/"), ""); // TODO: or should this return bar/?
+}
+
 test("file::listdir", "array,string", "")
 {
 	array<string> files = file::listdir("arlib/");
 	assert_gt(files.size(), 50);
 	assert(files.contains("arlib/string.cpp"));
 	assert(files.contains("arlib/.gitignore"));
-	assert(files.contains("arlib/gui/"));
+	assert(files.contains("arlib/deps/"));
 	assert(!files.contains("arlib/."));
 	assert(!files.contains("arlib/.."));
 }

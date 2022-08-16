@@ -2,6 +2,7 @@
 #include "global.h"
 #include "json.h"
 #include "bml.h"
+#include "base64.h"
 
 //Members of the serialize(T& s) argument:
 #if 0
@@ -16,6 +17,7 @@ public:
 	//  ser_hex() - takes an unsigned integer or uint8_t array. For JSON, integers are encoded as integers, not strings.
 	//  ser_compact(val, depth) - (JSON only) deindents val's N-deep children (if depth is 1, val's children are one line each).
 	//  ser_include_if(cond, val) - when serializing, emits val only if cond is true. When deserializing, acts like val.
+	//  ser_include_if_true(val) - when serializing, emits val only if it's truthy. When deserializing, acts like val.
 	template<typename T> void items(cstring name, T& item, ...);
 	
 	// If serializing:
@@ -42,6 +44,10 @@ template<typename T> struct ser_hex_t { T& c; ser_hex_t(T& c) : c(c) {} };
 template<typename T> ser_hex_t<T> ser_hex(T& c) { return ser_hex_t(c); }
 template<typename T> ser_hex_t<const T> ser_hex(const T& c) { return ser_hex_t(c); }
 
+template<typename T> struct ser_base64_t { T& c; ser_base64_t(T& c) : c(c) {} };
+template<typename T> ser_base64_t<T> ser_base64(T& c) { return ser_base64_t(c); }
+template<typename T> ser_base64_t<const T> ser_base64(const T& c) { return ser_base64_t(c); }
+
 template<typename T> struct ser_compact_t { T& c; int depth; ser_compact_t(T& c, int depth) : c(c), depth(depth) {} };
 template<typename T> ser_compact_t<T> ser_compact(T& c, int depth = 0) { return ser_compact_t(c, depth); }
 template<typename T> ser_compact_t<const T> ser_compact(const T& c, int depth = 0) { return ser_compact_t(c, depth); }
@@ -49,6 +55,7 @@ template<typename T> ser_compact_t<const T> ser_compact(const T& c, int depth = 
 template<typename T> struct ser_include_if_t { bool cond; T& c; ser_include_if_t(bool cond, T& c) : cond(cond), c(c) {} };
 template<typename T> ser_include_if_t<T> ser_include_if(bool cond, T& c) { return ser_include_if_t(cond, c); }
 template<typename T> ser_include_if_t<const T> ser_include_if(bool cond, const T& c) { return ser_include_if_t(cond, c); }
+template<typename T> ser_include_if_t<T> ser_include_if_true(T& c) { return ser_include_if_t((bool)c, c); }
 
 template<typename T>
 static constexpr inline
@@ -175,6 +182,12 @@ class jsonserializer {
 	}
 	
 	template<typename T>
+	void add_node(ser_base64_t<T> inner)
+	{
+		add_node_base64(inner.c);
+	}
+	
+	template<typename T>
 	void add_node(ser_compact_t<T> inner)
 	{
 		int prev = delay_compact;
@@ -189,6 +202,7 @@ class jsonserializer {
 	add_node_hex(T inner) { w.num(inner); }
 	
 	void add_node_hex(bytesr inner) { w.str(tostringhex(inner)); }
+	void add_node_base64(bytesr inner) { w.str(base64_enc(inner)); }
 	
 	
 	void items_inner() {}
@@ -414,6 +428,12 @@ class jsondeserializer {
 	}
 	
 	template<typename T>
+	void read_item_raw(ser_base64_t<T> inner)
+	{
+		read_item_base64(inner.c);
+	}
+	
+	template<typename T>
 	void read_item_raw(ser_array_t<T> inner)
 	{
 		if (ev.action == jsonparser::enter_list)
@@ -451,6 +471,13 @@ class jsondeserializer {
 	{
 		if (ev.action != jsonparser::str) { valid = false; return; }
 		valid &= fromstringhex(ev.str, inner);
+	}
+	
+	void read_item_base64(bytearray& inner)
+	{
+		if (ev.action != jsonparser::str) { valid = false; return; }
+		inner = base64_dec(ev.str);
+		valid &= (inner || !ev.str);
 	}
 	
 	
@@ -537,7 +564,8 @@ public:
 	}
 	
 	template<typename T>
-	void each_item(const T& out)
+	std::enable_if_t<std::is_invocable_v<T, cstring, jsondeserializer&>>
+	each_item(const T& out)
 	{
 		while (ev.action == jsonparser::map_key)
 		{
@@ -546,13 +574,34 @@ public:
 			if (ev.action == jsonparser::enter_map)
 			{
 				next_ev();
-				out(*this, key);
+				out(key, *this);
 				finish_item(1);
 			}
 			else
 			{
 				valid = false;
 				finish_item(0); // should do nothing, but may happen if the handler was wrong type and didn't consume the data
+			}
+			next_ev();
+		}
+	}
+	
+	template<typename T>
+	std::enable_if_t<std::is_invocable_v<T, cstring, cstring>>
+	each_item(const T& out)
+	{
+		while (ev.action == jsonparser::map_key)
+		{
+			string key = std::move(ev.str);
+			next_ev();
+			if (ev.action == jsonparser::str)
+			{
+				out(key, ev.str);
+			}
+			else
+			{
+				valid = false;
+				finish_item(0);
 			}
 			next_ev();
 		}
@@ -884,6 +933,11 @@ public:
 	
 	template<typename T>
 	void item(T& out)
+	{
+		read_item(out);
+	}
+	template<typename T>
+	void item(const T& out)
 	{
 		read_item(out);
 	}

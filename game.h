@@ -27,7 +27,7 @@ public:
 	//Call this before exiting the game, and save the result to disk. Next session, pass that struct to create().
 	//For the first run, call create() without an argument.
 	//save()s argument must be of size
-	static const size_t savedat_size = 2+8*3;
+	static const size_t savedat_size = 2+(8+4)*3;
 	virtual void save(bytesw dat) = 0;
 	
 	virtual ~game() {}
@@ -188,13 +188,14 @@ public:
 	public:
 		generator(const gamemap::genparams& par);
 		void cancel(); // Safe to call multiple times.
-		bool done(unsigned* progress);
+		bool done(unsigned* progress); // Progress is optional if you don't care.
 		
 		bool finish(gamemap& map); // If cancelled, fails and does nothing, or yields a map not matching genparams' quality.
 		
 		//Pass this value to unpack(). Passing any other value is likely to give results inconsistent with the generation parameters.
 		//If the return value is 0, generation was cancelled.
 		uint64_t pack();
+		uint32_t found_difficulty() const { return best_diff; }
 		static void unpack(const gamemap::genparams& par, uint64_t seed, gamemap& map);
 		~generator() { cancel(); }
 	};

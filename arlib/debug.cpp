@@ -4,14 +4,15 @@
 #include "test.h"
 #include "file.h"
 
-static FILE* log_file;
+static FILE* log_file = NULL;
 static mutex log_mut;
+static int log_count = 0;
 
 static void debug_log_raw(const char * text) // log_mut must be locked when calling this
 {
 	fputs(text, stderr);
-	if (!log_file) log_file = fopen(file::exepath()+"/arlib-debug.log", "at");
-	if (log_file) fputs(text, log_file);
+	if (!log_file) log_file = fopen("arlib-debug.log", "at"); // probably wrong directory, but calling malloc here can recurse
+	if (log_file) { fputs(text, log_file); fflush(log_file); }
 }
 
 #ifdef __unix__
@@ -20,12 +21,12 @@ static void debug_log_raw(const char * text) // log_mut must be locked when call
 #include <unistd.h>
 #include <fcntl.h>
 
-//method from https://src.chromium.org/svn/trunk/src/base/debug/debugger_posix.cc
+//method from https://src.chromium.org/viewvc/chrome/trunk/src/base/debug/debugger_posix.cc
 static bool has_debugger()
 {
 	char buf[4096];
 	int fd = open("/proc/self/status", O_RDONLY);
-	if (!fd) return false;
+	if (fd < 0) return false;
 	
 	ssize_t bytes = read(fd, buf, sizeof(buf)-1);
 	close(fd);
@@ -40,9 +41,9 @@ static bool has_debugger()
 	return (*tracer != '0');
 }
 
-bool debug_break()
+bool debug_break(const char * text)
 {
-	if (RUNNING_ON_VALGRIND) VALGRIND_PRINTF_BACKTRACE("debug trace");
+	if (RUNNING_ON_VALGRIND) VALGRIND_PRINTF_BACKTRACE("%s", text);
 	else if (has_debugger()) raise(SIGTRAP);
 	else return false;
 	return true;
@@ -55,6 +56,9 @@ void debug_log_stack(const char * text)
 {
 	synchronized(log_mut)
 	{
+		if (log_count > 20) return;
+		log_count++;
+		
 		debug_log_raw(text);
 		
 		void* addrs[20];
@@ -97,7 +101,7 @@ void debug_log_stack(const char * text)
 #ifdef _WIN32
 #include <windows.h>
 
-bool debug_break()
+bool debug_break(const char * text)
 {
 	if (IsDebuggerPresent()) DebugBreak();
 	else return false;
@@ -108,12 +112,14 @@ void debug_log_stack(const char * text)
 {
 	synchronized(log_mut)
 	{
+		if (log_count > 20) return;
+		log_count++;
+		
 		debug_log_raw(text);
 		
 		void* addrs[20];
 		int n_addrs = CaptureStackBackTrace(0, ARRAY_SIZE(addrs), addrs, NULL);
 		
-addrs[0]=(void*)debug_log_stack;n_addrs=1;
 		for (int i=0;i<n_addrs;i++)
 		{
 			HMODULE mod = NULL;
@@ -146,8 +152,17 @@ addrs[0]=(void*)debug_log_stack;n_addrs=1;
 }
 #endif
 
-void debug_log(const char * text) { synchronized(log_mut) { debug_log_raw(text); } }
-void debug_warn(const char * text) { if (!debug_break()) debug_log(text); }
-void debug_fatal(const char * text) { if (!debug_break()) { debug_log(text); } abort(); }
-void debug_warn_stack(const char * text) { if (!debug_break()) debug_log_stack(text); }
-void debug_fatal_stack(const char * text) { if (!debug_break()) { debug_log_stack(text); } abort(); }
+void debug_log(const char * text)
+{
+	synchronized(log_mut) { 
+		if (log_count > 20) return;
+		log_count++;
+		
+		debug_log_raw(text);
+	}
+}
+
+void debug_warn(const char * text) { if (!debug_break(text)) debug_log(text); }
+void debug_fatal(const char * text) { if (!debug_break(text)) { debug_log(text); } abort(); }
+void debug_warn_stack(const char * text) { if (!debug_break(text)) debug_log_stack(text); }
+void debug_fatal_stack(const char * text) { if (!debug_break(text)) debug_log_stack(text); abort(); }

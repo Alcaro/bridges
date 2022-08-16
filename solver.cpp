@@ -80,17 +80,6 @@ links[i].join_root,links[i].join_next);}
 				n_linkable_islands++;
 			}
 		}
-		
-		//TODO: castles
-		//  during the initial phase, mark bridges between known-red and known-blue castles known to not exist
-		//    (requires the ability to query all edges from a vertex, not just two)
-		//  during the main phase, always start from a castle
-		//  if you reach a different-color castle, stop there, consider it a loop, and join them
-		//  alternatively and equivalently, create a fake connection between all castles (or one per color) and allow using that to create loops
-		//  this can make it report 'don't know' for some maps that should be solvable, but that's already the case for some maps, like
-		//   1331
-		//   1331
-		//  (or 22/22 if the no-double-binding-2s rule is relaxed), so a guessing engine is required anyways
 	}
 	
 	uint16_t root(uint16_t index)
@@ -1041,17 +1030,17 @@ static void test_one(cstring test)
 	assert(!m.solve_another());
 }
 
-static void test_unsolv(cstring map)
+static void test_unsolv(cstrnul map)
 {
 	gamemap m;
-	m.init(map.c_str());
+	m.init(map);
 	assert(!m.solve());
 }
 
-static void test_multi(cstring map)
+static void test_multi(cstrnul map)
 {
 	gamemap m;
-	m.init(map.c_str());
+	m.init(map);
 	assert(m.solve());
 	assert(m.finished());
 	assert(m.solve_another());
@@ -1281,7 +1270,7 @@ test("solver", "gamemap", "solver")
 		"25 3\n" /* */ "25 3\n"
 	));
 	//if an assumption is false, and the opposite (plus fill_simple) satisfies all populations,
-	// it that's a valid solution, even if it's disjoint
+	// that's a valid solution, even if it's disjoint
 	testcall(test_multi(
 		"2 12 \n"
 		"4  52\n"
@@ -1295,7 +1284,7 @@ test("solver", "gamemap", "solver")
 		"v<\n" /* */ "30\n"
 		"0<\n" /* */ "30\n"
 	));
-	//the no-double-binding-2s doesn't like large islands
+	//the no-double-binding-2s rule doesn't like large islands
 	testcall(test_one(
 		"v  \n" /* */ "0  \n"
 		"2 2\n" /* */ "2 0\n"

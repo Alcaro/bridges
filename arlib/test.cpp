@@ -2,11 +2,43 @@
 #ifndef ARLIB_TEST
 #define ARLIB_TEST
 #endif
+#endif
+
 #include "test.h"
+
+string tostringhex_dbg(const arrayview<uint8_t>& item)
+{
+	string ret;
+	for (size_t outer=0;outer<item.size();outer+=16)
+	{
+		ret += tostringhex<8>(outer)+"  ";
+		for (size_t inner=0;inner<16;inner++)
+		{
+			if (inner == 8) ret += " ";
+			if (outer+inner >= item.size()) ret += "   ";
+			else ret += tostringhex<2>(item[outer+inner])+" ";
+		}
+		ret += " ";
+		for (size_t inner=0;inner<16;inner++)
+		{
+			if (outer+inner >= item.size()) ret += " ";
+			else
+			{
+				char c = item[outer+inner];
+				if (c >= 0x20 && c <= 0x7e) ret += c;
+				else ret += '.';
+			}
+		}
+		ret += "\n";
+	}
+	return ret;
+}
+
+#ifdef ARLIB_TESTRUNNER
 #include "array.h"
 #include "os.h"
-#include "init.h"
-#include "runloop.h"
+#include "argparse.h"
+#include "runloop2.h"
 
 #ifdef __unix__
 #define ESC_ERASE_LINE "\x1B[2K\r"
@@ -22,7 +54,7 @@ struct testlist {
 	
 	const char * name;
 	
-	const char * requires;
+	const char * needs;
 	const char * provides;
 	testlist* next;
 };
@@ -31,15 +63,15 @@ static testlist* g_testlist = NULL;
 
 static testlist* cur_test;
 
-// funny code because this tests Arlib itself, relying on array<> to work when testing array<> is unwise
-_testdecl::_testdecl(void(*func)(), const char * filename, int line, const char * name, const char * requires, const char * provides)
+// linked lists because this tests Arlib itself, relying on array<> to work when testing array<> is unwise
+_testdecl::_testdecl(void(*func)(), const char * filename, int line, const char * name, const char * needs, const char * provides)
 {
 	testlist* next = xmalloc(sizeof(testlist));
 	next->func = func;
 	next->filename = filename;
 	next->line = line;
 	next->name = name;
-	next->requires = requires;
+	next->needs = needs;
 	next->provides = provides;
 	next->next = g_testlist;
 	g_testlist = next;
@@ -80,13 +112,13 @@ void _test_malloc()
 	if (UNLIKELY(n_malloc_block > 0))
 	{
 		n_malloc_block = 0; // failing usually allocates
-		if (result == err_ok) test_fail("can't malloc here");
+		test_fail("can't malloc here");
 	}
 	n_malloc++;
 }
 void _test_free() { n_free++; }
-void _test_blockmalloc() { n_malloc_block++; }
-void _test_unblockmalloc() { n_malloc_block--; }
+void test_nomalloc_begin() { n_malloc_block++; }
+void test_nomalloc_end() { n_malloc_block--; }
 
 static string fmt_stackentry(bool verbose, cstring file, int line)
 {
@@ -132,38 +164,35 @@ void _test_nothrow(int add)
 	nothrow_level += add;
 }
 
-static void _testfail(cstring why)
+static void _testfail(cstrnul why)
 {
+	n_malloc_block = 0;
 	if (result == err_ok || (result==err_skip && !show_verbose))
 		puts("");
-	
-	result = err_fail;
-	puts(why.c_str());
-	fflush(stdout);
-	debug_break();
+	if (result != err_fail)
+	{
+		result = err_fail;
+		puts(why);
+		fflush(stdout);
+		debug_break("test failed");
+	}
 	test_throw(err_fail);
 }
 
 void _testfail(cstring why, cstring file, int line)
 {
+	n_malloc_block = 0;
 	_testfail(why+stack(file, line));
 }
 
 void _testcmpfail(cstring name, cstring file, int line, cstring expected, cstring actual)
 {
-	//if (expected.contains("\n") || actual.contains("\n") || name.length()+expected.length()+actual.length() > 240)
-	{
-		_testfail("\nFailed assertion "+name+stack(file, line)+"\nexpected: "+expected+"\nactual:   "+actual);
-	}
-	//else
-	//{
-	//	_testfail("\nFailed assertion "+name+stack(file, line)+": expected "+expected+", got "+actual);
-	//}
+	_testfail("\nFailed assertion "+name+stack(file, line)+"\nexpected: "+expected+"\nactual:   "+actual);
 }
 
 void _test_skip(cstring why)
 {
-	if (result!=err_ok) return;
+	if (result != err_ok) return;
 	if (!all_tests)
 	{
 		if (show_verbose) puts("skipped: "+why);
@@ -173,23 +202,38 @@ void _test_skip(cstring why)
 
 void _test_skip_force(cstring why)
 {
-	if (result!=err_ok) return;
+	if (result != err_ok) return;
 	if (show_verbose) puts("skipped: "+why);
 	test_throw(err_skip);
 }
 
 void _test_inconclusive(cstring why)
 {
-	if (result!=err_ok) return;
+	if (result != err_ok) return;
 	puts("inconclusive: "+why);
 	test_throw(err_inconclusive);
 }
 
 void _test_expfail(cstring why)
 {
-	if (result!=err_ok) return;
+	if (result != err_ok) return;
 	puts("expected-fail: "+why);
 	test_throw(err_expfail);
+}
+
+bool test_skipped()
+{
+	return (result != err_ok);
+}
+
+bool test_rethrow()
+{
+	if (result != err_ok)
+	{
+		test_throw(result);
+		return true;
+	}
+	return false;
 }
 
 namespace {
@@ -207,6 +251,7 @@ latrec max_latencies_us[6];
 
 void _test_runloop_latency(uint64_t us)
 {
+	if (!cur_test) return; // happens when global runloop is destructed at process exit
 	max_latencies_us[0].us = us;
 	max_latencies_us[0].name = cur_test->name;
 	max_latencies_us[0].filename = cur_test->filename;
@@ -217,28 +262,28 @@ void _test_runloop_latency(uint64_t us)
 
 static void err_print(testlist* err)
 {
-	printf("%s (at %s:%d, requires %s, provides %s)\n", err->name, err->filename, err->line, err->requires, err->provides);
+	printf("%s (at %s:%d, needs %s, provides %s)\n", err->name, err->filename, err->line, err->needs, err->provides);
 }
 
-//whether 'a' must be before 'b'; alternatively, whether 'a' provides something 'b' requires
+//whether 'a' must be before 'b'; alternatively, whether 'a' provides something 'b' needs
 //false is not conclusive, 'a' could require being before 'c' which is before 'b'
-static bool test_requires(testlist* a, testlist* b)
+static bool test_needs(testlist* a, testlist* b)
 {
-	if (!*a->requires) return false;
+	if (!*a->needs) return false;
 	if (!*b->provides) return false;
 	//kinda funny code to avoid using Arlib features before they're tested
 	//except strtoken, but even in the worst case, I can just revert it or set this to 'return false'
-	return strtoken(a->requires, b->provides, ',');
+	return strtoken(a->needs, b->provides, ',');
 }
 
 //whether 'a' must be before any test in 'list'
 //true if 'a' must be before itself
 //actually returns pointer to the preceding test
-static testlist* test_requires_any(testlist* a, testlist* list)
+static testlist* test_needs_any(testlist* a, testlist* list)
 {
 	while (list)
 	{
-		if (test_requires(a, list)) return list;
+		if (test_needs(a, list)) return list;
 		list = list->next;
 	}
 	return NULL;
@@ -261,7 +306,7 @@ static testlist* sort_tests(testlist* unsorted)
 		
 		while (try_next)
 		{
-			if (!test_requires_any(try_next, unsorted))
+			if (!test_needs_any(try_next, unsorted))
 			{
 				*try_next_p = try_next->next;
 				
@@ -288,15 +333,15 @@ static testlist* sort_tests(testlist* unsorted)
 			testlist* b = unsorted;
 			do
 			{
-				a = test_requires_any(a, unsorted);
-				b = test_requires_any(b, unsorted);
-				b = test_requires_any(b, unsorted);
+				a = test_needs_any(a, unsorted);
+				b = test_needs_any(b, unsorted);
+				b = test_needs_any(b, unsorted);
 			}
 			while (a != b);
 			do
 			{
 				err_print(a);
-				a = test_requires_any(a, unsorted);
+				a = test_needs_any(a, unsorted);
 			}
 			while (a != b);
 			
@@ -350,7 +395,11 @@ int main(int argc, char* argv[])
 	args.add("all", &all_tests);
 	args.add("twice", &run_twice);
 	args.add("filter", &filter);
-	arlib_init(args, argv);
+	args.parse(argv);
+#ifdef ARLIB_GUI
+	void arlib_init();
+	arlib_init();
+#endif
 	
 	printf(ESC_ERASE_LINE "Sorting tests...");
 	g_testlist = list_reverse(g_testlist); // with gcc's initializer run order, this makes them better ordered
@@ -359,8 +408,8 @@ int main(int argc, char* argv[])
 	
 	for (testlist* outer = alltests; outer; outer = outer->next)
 	{
-		if (outer->requires[0] == '\0') continue;
-		array<cstring> required = cstring(outer->requires).csplit(",");
+		if (outer->needs[0] == '\0') continue;
+		array<cstring> required = cstring(outer->needs).csplit(",");
 		for (size_t i=0;i<required.size();i++)
 		{
 			bool found = false;
@@ -376,7 +425,6 @@ int main(int argc, char* argv[])
 			{
 				puts("error: dependency on nonexistent feature "+required[i]);
 				err_print(outer);
-				abort();
 			}
 		}
 	}
@@ -400,7 +448,7 @@ int main(int argc, char* argv[])
 			}
 		}
 	}
-	g_testlist = alltests; // so valgrind doesn't report leaks
+	g_testlist = alltests;
 #else
 	arlib_init(NULL, argv);
 	testlist* alltests = g_testlist;
@@ -450,8 +498,8 @@ int main(int argc, char* argv[])
 				uint64_t end_time = time_us_ne();
 				uint64_t time_us = end_time - start_time;
 				uint64_t time_lim = (all_tests ? 5000*1000 : 500*1000);
-				runloop_blocktest_recycle(runloop::global());
-				runloop::global()->assert_empty();
+				//runloop_blocktest_recycle(runloop::global());
+				runloop2::assert_empty();
 				assert_eq(n_malloc_block, 0);
 				if (time_us > time_lim)
 				{
@@ -508,11 +556,36 @@ int main(int argc, char* argv[])
 #endif
 	}
 	
+	testlist* free_them = g_testlist;
+	while (free_them)
+	{
+		testlist* next = free_them->next;
+		free(free_them);
+		free_them = next;
+	}
+	
 	return 0;
 }
 
 #undef free
 void free_test(void* ptr) { _test_free(); free(ptr); }
+
+void _test_run_coro(async<void> inner)
+{
+	waiter<void, void> wait_co;
+	waiter<void, void> wait_time;
+	inner.then(&wait_co);
+	runloop2::await_timeout(timestamp::now()+duration::ms(10000)).then(&wait_time);
+	while (wait_co.is_waiting() && wait_time.is_waiting())
+		runloop2::step();
+	assert(wait_time.is_waiting()); // timeout means failure
+}
+
+void _test_coro_exception()
+{
+	test_rethrow();
+	assert_unreachable();
+}
 
 #ifdef ARLIB_TEST_ARLIB
 static int testnum = 0;

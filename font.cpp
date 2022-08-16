@@ -1,24 +1,6 @@
 #include "arlib.h"
 #include "font.h"
 
-//returns undefined for in=0
-static int log2(uint32_t in)
-{
-#ifdef __GNUC__
-	static_assert(sizeof(uint32_t) == sizeof(unsigned));
-	// keep it as ^ despite - making more sense, gcc optimizes 31^clz way better than 31-clz
-	return 31 ^ __builtin_clz(in);
-#else
-	int ret = 0;
-	if (in >= 0x00010000) { ret += 16; in >>= 16; }
-	if (in >= 0x00000100) { ret += 8; in >>= 8; }
-	if (in >= 0x00000010) { ret += 4; in >>= 4; }
-	if (in >= 0x00000004) { ret += 2; in >>= 2; }
-	//at this point, in is 1 2 or 3 (0 is UB), so let's take a shortcut
-	return ret + (in>>1);
-#endif
-}
-
 void font::init_from_image(const image& img)
 {
 	memset(characters, 0, sizeof(characters));
@@ -48,7 +30,7 @@ void font::init_from_image(const image& img)
 			maxbits |= bits;
 		}
 		
-		width[charid] = log2(maxbits)+2; // +1 because maxbits=1 has width 1 but log2(1)=0, +1 because letter spacing
+		width[charid] = ilog2(maxbits)+2; // +1 because maxbits=1 has width 1 but log2(1)=0, +1 because letter spacing
 	}
 	
 	height = ch;
@@ -200,24 +182,4 @@ void font::render_wrap(image& img, int32_t x, int32_t y, uint32_t width, cstring
 		}
 		linewidth += this->width[(uint8_t)text[i]] * this->scale;
 	}
-}
-
-test("log2", "", "")
-{
-	//assert_eq(log2(0), -1);
-	assert_eq(log2(1), 0);
-	assert_eq(log2(2), 1);
-	assert_eq(log2(3), 1);
-	assert_eq(log2(4), 2);
-	assert_eq(log2(7), 2);
-	assert_eq(log2(8), 3);
-	assert_eq(log2(15), 3);
-	assert_eq(log2(16), 4);
-	assert_eq(log2(31), 4);
-	assert_eq(log2(32), 5);
-	assert_eq(log2(63), 5);
-	assert_eq(log2(64), 6);
-	assert_eq(log2(127), 6);
-	assert_eq(log2(128), 7);
-	assert_eq(log2(255), 7);
 }

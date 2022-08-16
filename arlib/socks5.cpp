@@ -1,154 +1,104 @@
 #ifdef ARLIB_SOCKET
 #include "socks5.h"
+#include "bytestream.h"
 
-namespace {
-class socket_socks5 : public socket {
-public:
-	runloop* loop;
-	socket* inner;
-	
-	// 0 - expecting (ver)05 (auth)00 (ver)05 (reply=success)00 (reserved)00 (addrtype)??
-	// 1 - expecting number of bytes, for addrtype=03 domain
-	// 2 - all remaining data is uninteresting and will be discarded
-	// 3 - done, all data belongs to caller
-	// 4 - failure, all calls will return failure
-	int phase;
-	int phase_bytes; // for phases 0-2, bytes left until phase switch; for 3/4, ignored
-	
-	bool create(const socks5_par& param)
-	{
-		inner = param.to_proxy;
-		loop = param.loop;
-		
-		uint8_t ipbytes[16];
-		int iplen = socket::string_to_ip(ipbytes, param.target);
-		
-		uint8_t req[] = {
-			/*version*/ 5, /*nmethods*/ 1, /*anonymous*/ 0, // spec demands GSSAPI support, but screw that
-			/*version*/ 5, /*cmd=connect*/ 1, /*reserved*/ 0, (uint8_t)(iplen==4 ? 1 : iplen==16 ? 4 : 3),
-		};
-		if (inner->send(req) < 0) return false;
-		
-		if (iplen)
-		{
-			if (inner->send(arrayview<uint8_t>(ipbytes, iplen)) < 0) return false;
-		}
-		else
-		{
-			uint8_t len = param.target.length();
-			if (len != param.target.length()) return false; // truncation?
-			if (inner->send(arrayview<uint8_t>(&len, 1)) < 0) return false;
-			if (inner->send(param.target.bytes()) < 0) return false;
-		}
-		
-		uint8_t port[] = { (uint8_t)(param.port>>8), (uint8_t)(param.port&255) };
-		if (inner->send(port) < 0) return false;
-		
-		phase_bytes = 6;
-		return true;
-	}
-	
-	int recv(arrayvieww<uint8_t> data)
-	{
-		if (LIKELY(phase == 3)) return inner->recv(data);
-		
-		if (phase < 3)
-		{
-			// expected response:
-			// (ver)05 (auth)00 (ver)05 (reply=success)00 (reserved)00 (atyp)01 (ip)00 00 00 00 (port)00 00
-			uint8_t buf[258];
-			int n = inner->recv(arrayvieww<uint8_t>(buf, phase_bytes));
-			if (n < 0) { phase = 4; return -1; }
-			
-			if (phase == 0)
-			{
-				int end = n - (n == phase_bytes);
-				for (int i=0;i<end;i++)
-				{
-					static const uint8_t buf_exp[] = {
-						/*ver*/05, /*auth*/00,
-						/*ver*/05, /*reply=success*/00, /*reserved*/00, /*addrtype (not checked here)*/
-					};
-					if (buf[i] != buf_exp[6-phase_bytes+i])
-					{
-						phase = 4;
-						return -1;
-					}
-				}
-			}
-			phase_bytes -= n;
-			if (phase_bytes) return 0;
-			
-			uint8_t last = buf[n-1];
-			if (phase == 0)
-			{
-				phase = 2;
-				if (last == 1) phase_bytes = 4+2;
-				else if (last == 4) phase_bytes = 16+2;
-				else if (last == 3) phase = 1;
-				else { phase = 4; return -1; }
-			}
-			else if (phase == 1)
-			{
-				phase = 2;
-				phase_bytes = last+2;
-			}
-			else
-			{
-				phase = 3;
-			}
-			return 0;
-		}
-		
-		return -1;
-	}
-	int send(arrayview<uint8_t> data)
-	{
-		return inner->send(data);
-	}
-	void callback(function<void()> cb_read, function<void()> cb_write) { inner->callback(cb_read, cb_write); }
-	
-	~socket_socks5() { delete inner; }
-};
-}
-
-socket* wrap_socks5(const socks5_par& param)
+async<autoptr<socket2>> socks5::create_inner(cstring host, uint16_t port)
 {
-	socket_socks5* ret = new socket_socks5();
-	if (ret->create(param)) return ret;
-	else { delete ret; return NULL; }
-}
-
-socket* socks5::connect(
-#ifdef ARLIB_SSL
-                        bool ssl,
-#endif
-                        cstring domain, int port, runloop* loop)
-{
-	socks5_par par = { loop, socket::create(m_host, m_port, loop), domain, (uint16_t)port };
-	socket* sock = wrap_socks5(par);
-#ifdef ARLIB_SSL
-	if (ssl) sock = socket::wrap_ssl(sock, domain, loop);
-#endif
-	return sock;
+	autoptr<socket2> sock = co_await socket2::create(m_host, m_port);
+	if (!sock)
+		co_return nullptr;
+	
+	uint8_t buf[3 + 4+253+2];
+	bytestreamw send = buf;
+	
+	send.u8s(/*version*/ 5, /*nmethods*/ 1, /*anonymous*/ 0); // spec claims GSSAPI support is mandatory, but anon only works in practice
+	
+	send.u8s(/*version*/ 5, /*cmd=connect*/ 1, /*reserved*/ 0); // spec also says wait between auth and connect, but, again, not necessary
+	uint8_t ip_buf[16];
+	
+	if (cstring domain = socket2::address::parse_domain(host, &port))
+	{
+		send.u8s(3, domain.length()); // domain
+		send.text(domain);
+	}
+	else if (socket2::address::parse_ipv4(host, ip_buf, &port))
+	{
+		send.u8(1); // ipv4
+		send.bytes(bytesr(ip_buf, 4));
+	}
+	else if (socket2::address::parse_ipv6(host, ip_buf, &port))
+	{
+		send.u8(6); // ipv6
+		send.bytes(bytesr(ip_buf, 16));
+	}
+	else co_return nullptr;
+	send.u16b(port);
+	
+	bytesr remaining = send.finish();
+	while (remaining) {
+		co_await sock->can_send();
+		ssize_t n = sock->send_sync(remaining);
+		if (n < 0)
+			co_return nullptr;
+		remaining = remaining.skip(n);
+	}
+	
+	size_t n_needed = 6;
+	size_t n_recv = 0;
+again:
+	while (n_recv < n_needed)
+	{
+		co_await sock->can_recv();
+		ssize_t n_this = sock->recv_sync(bytesw(buf, n_needed).skip(n_recv));
+		if (n_this < 0)
+			co_return nullptr;
+		n_recv += n_this;
+	}
+	
+	static const uint8_t buf_exp[] = {
+		/*ver*/5, /*auth*/0,
+		/*ver*/5, /*reply=success*/0, /*reserved*/0, /*addrtype (not checked here)*/
+	};
+	if (!memeq(buf, buf_exp, sizeof(buf_exp)))
+		co_return nullptr;
+	
+	if (buf[5] == 1) // ipv4
+	{
+		n_needed = 6+4+2;
+		if (n_recv < n_needed)
+			goto again;
+	}
+	else if (buf[5] == 4) // ipv6
+	{
+		n_needed = 6+16+2;
+		if (n_recv < n_needed)
+			goto again;
+	}
+	else // spec says server is allowed to claim to bind to a domain name, but I've never seen it and the operation doesn't make sense
+		co_return nullptr;
+	
+	co_return sock;
 }
 
 #include "test.h"
 
-#ifdef ARLIB_TEST
-static void clienttest(cstring target)
+co_test("SOCKS5", "tcp", "socks5")
 {
 	test_skip("too slow");
-	test_skip_force("ssh -D is offline");
+	test_skip_force("only works on my computer");
 	
-	autoptr<runloop> loop = runloop::create();
-	struct socks5_par param = { loop, socket::create("localhost", 1080, loop), target, 80 };
-	socket* sock = wrap_socks5(param);
+	socks5 proxy;
+	proxy.configure("localhost");
+	socketbuf sock;
 	
-	socket_test_http(sock, loop);
+	sock = co_await proxy.create("1.1.1.1", 80);
+	assert(sock);
+	sock.send("GET / HTTP/1.1\r\nHost: wrong-host.com\r\nConnection: close\r\n\r\n");
+	assert_eq(cstring(co_await sock.bytes(8)), "HTTP/1.1");
+	
+	sock = co_await proxy.create("google.com", 80);
+	assert(sock);
+	sock.send("GET / HTTP/1.1\r\nHost: wrong-host.com\r\nConnection: close\r\n\r\n");
+	assert_eq(cstring(co_await sock.bytes(8)), "HTTP/1.1");
 }
-
-test("SOCKS5 with IP", "tcp", "socks5") { clienttest("1.1.1.1"); }
-test("SOCKS5 with domain", "tcp", "socks5") { clienttest("google.com"); }
-#endif
 #endif
