@@ -1,3 +1,5 @@
+<h1>Moved to https://git.disroot.org/Sir_Walrus/bridges</h1>
+
 # Lord of Bridges
 
 Enhanced remake of http://www.notdoppler.com/kingofbridges.php
